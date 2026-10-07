@@ -76,3 +76,46 @@ class CommandRunner:
                 current_state="Command not found",
                 possible_recovery=f"Ensure the package providing '{cmd[0]}' is installed in the live environment.",
             ) from fnf
+
+
+def read_blkid_uuid(runner: CommandRunner, dev: str, phase: EventPhase = EventPhase.CONFIGURE) -> str:
+    """Returns the filesystem UUID of `dev` as reported by blkid.
+
+    Raises instead of returning an empty string: callers write the UUID into
+    boot-critical files (fstab, bootloader configs), and silently falling back
+    to a kernel device name would produce a non-durable target.
+    """
+    proc = runner.run(["blkid", "-s", "UUID", "-o", "value", dev], phase=phase, check=True)
+    uuid = proc.stdout.strip()
+    if not uuid:
+        raise ExecutionError(
+            message=f"No filesystem UUID found on {dev}.",
+            cause="blkid returned an empty UUID for the device.",
+            failed_operation=f"Read filesystem UUID of {dev}",
+            command=f"blkid -s UUID -o value {dev}",
+            current_state=f"{dev} has no detectable filesystem UUID",
+            possible_recovery="Check that the partition was formatted successfully.",
+        )
+    return uuid
+
+
+def require_pe_binary(path: Path, what: str) -> None:
+    """Verifies that `path` is a PE/COFF executable (EFI binaries start with 'MZ')."""
+    if not path.is_file():
+        raise VerificationError(
+            message=f"{what} missing at {path}",
+            cause="The EFI binary was not written to the target.",
+            failed_operation=f"Verify {what}",
+            current_state=f"{path} not found",
+            possible_recovery="Check the ESP mount and the bootloader package in the live image.",
+        )
+    with open(path, "rb") as f:
+        magic = f.read(2)
+    if magic != b"MZ":
+        raise VerificationError(
+            message=f"{what} at {path} is not a valid EFI executable.",
+            cause="The file does not start with the PE/COFF 'MZ' signature.",
+            failed_operation=f"Verify {what}",
+            current_state=f"First bytes: {magic!r}",
+            possible_recovery="Reinstall the bootloader from a valid package binary.",
+        )

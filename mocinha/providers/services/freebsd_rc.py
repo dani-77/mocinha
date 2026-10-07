@@ -48,7 +48,7 @@ class FreeBSDServiceProvider(ProviderContract):
                 self.runner.run(
                     ["sysrc", "-R", target_root, f"{var_name}=NO"],
                     phase=EventPhase.CONFIGURE,
-                    check=False,
+                    check=True,
                 )
 
         # 2. Enable requested persistent services
@@ -59,7 +59,7 @@ class FreeBSDServiceProvider(ProviderContract):
                 self.runner.run(
                     ["sysrc", "-R", target_root, f"{var_name}=YES"],
                     phase=EventPhase.CONFIGURE,
-                    check=False,
+                    check=True,
                 )
             # Direct ensure in /etc/rc.conf
             rc_conf = Path(target_root) / "etc" / "rc.conf"

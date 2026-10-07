@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 import shutil
 
+from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
 from mocinha.providers.base import CommandRunner
@@ -24,7 +25,13 @@ class MkinitcpioProvider(ProviderContract):
         return ["initramfs", "mkinitcpio"]
 
     def validate(self, context: ExecutionContext) -> None:
-        pass
+        if not (shutil.which("arch-chroot") or shutil.which("chroot")):
+            raise ExecutionError(
+                message="No chroot tool found to run mkinitcpio on the target.",
+                cause="Neither arch-chroot nor chroot is in PATH.",
+                failed_operation="Validate chroot availability",
+                possible_recovery="Install arch-install-scripts (arch-chroot) in the live image.",
+            )
 
     def apply(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -42,6 +49,14 @@ class MkinitcpioProvider(ProviderContract):
                         self.events.action(EventPhase.CONFIGURE, f"Copying kernel {kimg} -> {target_kernel}")
                         shutil.copy2(kimg, target_kernel)
                         break
+        if not target_kernel.is_file():
+            raise ExecutionError(
+                message="No kernel image found for the target.",
+                cause=f"{target_kernel} is missing and no usr/lib/modules/*/vmlinuz exists on the target.",
+                failed_operation="Install kernel image into /boot",
+                current_state="Target has no bootable kernel",
+                possible_recovery="Check that the deployed live system contains a kernel package.",
+            )
 
         # 2. Remove live-only mkinitcpio drop-ins (archiso.conf) so target builds standard initramfs
         archiso_conf = target_root / "etc" / "mkinitcpio.conf.d" / "archiso.conf"
@@ -51,18 +66,12 @@ class MkinitcpioProvider(ProviderContract):
 
         # 3. Run mkinitcpio on target
         self.events.action(EventPhase.CONFIGURE, "Generating target initramfs via mkinitcpio")
-        if shutil.which("arch-chroot"):
-            self.runner.run(
-                ["arch-chroot", str(target_root), "mkinitcpio", "-P"],
-                phase=EventPhase.CONFIGURE,
-                check=False,
-            )
-        elif shutil.which("chroot"):
-            self.runner.run(
-                ["chroot", str(target_root), "mkinitcpio", "-P"],
-                phase=EventPhase.CONFIGURE,
-                check=False,
-            )
+        chroot_tool = "arch-chroot" if shutil.which("arch-chroot") else "chroot"
+        self.runner.run(
+            [chroot_tool, str(target_root), "mkinitcpio", "-P"],
+            phase=EventPhase.CONFIGURE,
+            check=True,
+        )
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -70,9 +79,13 @@ class MkinitcpioProvider(ProviderContract):
         initrd = boot_dir / "initramfs-linux.img"
         kimg = boot_dir / "vmlinuz-linux"
 
-        if kimg.is_file() and initrd.is_file():
-            self.events.info(EventPhase.VERIFY, f"Kernel ({kimg}) and initramfs ({initrd}) verified on target.")
-        elif kimg.is_file():
-            self.events.info(EventPhase.VERIFY, f"Kernel verified ({kimg}); initramfs may be generated dynamically or built-in.")
-        else:
-            self.events.info(EventPhase.VERIFY, "mkinitcpio step completed.")
+        for path, what in ((kimg, "Kernel image"), (initrd, "Initramfs image")):
+            if not path.is_file() or path.stat().st_size == 0:
+                raise VerificationError(
+                    message=f"{what} missing or empty at {path}",
+                    cause="The kernel/initramfs step did not produce a bootable image.",
+                    failed_operation=f"Verify {what.lower()}",
+                    current_state=f"{path} {'is empty' if path.is_file() else 'not found'}",
+                    possible_recovery="Inspect the mkinitcpio output in the event log.",
+                )
+        self.events.info(EventPhase.VERIFY, f"Kernel ({kimg}) and initramfs ({initrd}) verified on target.")

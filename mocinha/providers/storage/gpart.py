@@ -97,7 +97,7 @@ class FreeBSDStorageProvider(ProviderContract):
             self.runner.run(
                 ["gpart", "bootcode", "-b", "/boot/pmbr", "-p", "/boot/gptboot", "-i", "1", disk_name],
                 phase=EventPhase.PREPARE,
-                check=False,
+                check=True,
             )
             # Root partition
             self.runner.run(

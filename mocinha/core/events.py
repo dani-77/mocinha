@@ -85,6 +85,9 @@ class EventStream:
     def action(self, phase: EventPhase, message: str, command: Optional[str] = None) -> None:
         self.emit(Event(phase=phase, level=EventLevel.ACTION, message=message, command=command))
 
+    def warning(self, phase: EventPhase, message: str) -> None:
+        self.emit(Event(phase=phase, level=EventLevel.WARNING, message=message))
+
     def command_result(
         self,
         phase: EventPhase,

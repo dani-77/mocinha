@@ -59,7 +59,7 @@ class ShadowUsersProvider(ProviderContract):
             self.runner.run(
                 ["usermod", "-R", target_root, "-aG", "wheel", username],
                 phase=EventPhase.CONFIGURE,
-                check=False,
+                check=True,
             )
 
         # 2. Set user password

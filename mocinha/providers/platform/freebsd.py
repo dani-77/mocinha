@@ -1,6 +1,7 @@
 """FreeBSD platform provider (mounts, fstab, hostname, unmount)."""
 
 from pathlib import Path
+import os
 from typing import List, Optional
 
 from mocinha.core.errors import ExecutionError, VerificationError
@@ -96,13 +97,65 @@ class FreeBSDPlatformProvider(ProviderContract):
         )
         hosts_file.write_text(hosts_content)
 
-    def unmount_target(self, context: ExecutionContext) -> None:
+    def verify_mounted(self, context: ExecutionContext) -> None:
+        mounts = {"root": Path(context.target_mount)}
+        if "esp" in context.target_partitions:
+            mounts["esp"] = Path(context.target_mount) / "boot" / "efi"
+        for role, path in mounts.items():
+            if not os.path.ismount(path):
+                raise VerificationError(
+                    message=f"FreeBSD target {role} filesystem is not mounted at {path}.",
+                    cause="The mount command did not leave an active mount point.",
+                    failed_operation=f"Verify FreeBSD {role} mount",
+                    current_state=f"{path} is not a mount point",
+                    possible_recovery="Check the mount output in the event log.",
+                )
+        self.events.info(EventPhase.VERIFY, f"FreeBSD target mounts verified: {[str(p) for p in mounts.values()]}")
+
+    def verify_fstab(self, context: ExecutionContext) -> None:
+        fstab_file = Path(context.target_mount) / "etc" / "fstab"
+        if not fstab_file.is_file():
+            raise VerificationError(
+                message=f"FreeBSD fstab file missing at {fstab_file}.",
+                cause="fstab generation did not write the file.",
+                failed_operation="Verify FreeBSD target fstab",
+                current_state="Missing /etc/fstab",
+                possible_recovery="Re-run fstab generation step.",
+            )
+        entries = [line.split() for line in fstab_file.read_text().splitlines() if line.strip() and not line.startswith("#")]
+        if not any(len(e) >= 2 and e[1] == "/" for e in entries):
+            raise VerificationError(
+                message="FreeBSD fstab has no root (/) entry.",
+                cause="The generated fstab does not mount the root filesystem.",
+                failed_operation="Verify FreeBSD fstab root entry",
+                current_state=fstab_file.read_text().strip(),
+                possible_recovery="Re-run fstab generation step.",
+            )
+        self.events.info(EventPhase.VERIFY, f"FreeBSD fstab verified ({len(entries)} entries).")
+
+    def _unmount(self, context: ExecutionContext, strict: bool) -> None:
         target_root = Path(context.target_mount)
         self.events.action(EventPhase.CLEANUP, f"Unmounting FreeBSD target hierarchy at {target_root}")
-        self.runner.run(["sync"], phase=EventPhase.CLEANUP, check=False)
-        if (target_root / "boot" / "efi").is_dir():
-            self.runner.run(["umount", "-f", str(target_root / "boot" / "efi")], phase=EventPhase.CLEANUP, check=False)
-        self.runner.run(["umount", "-f", str(target_root)], phase=EventPhase.CLEANUP, check=False)
+        self.runner.run(["sync"], phase=EventPhase.CLEANUP, check=strict)
+        esp_mount = target_root / "boot" / "efi"
+        if os.path.ismount(esp_mount):
+            self.runner.run(["umount", str(esp_mount)], phase=EventPhase.CLEANUP, check=strict)
+        if os.path.ismount(target_root):
+            self.runner.run(["umount", str(target_root)], phase=EventPhase.CLEANUP, check=strict)
+
+    def unmount_target(self, context: ExecutionContext) -> None:
+        self._unmount(context, strict=True)
+
+    def verify_unmounted(self, context: ExecutionContext) -> None:
+        if os.path.ismount(context.target_mount):
+            raise VerificationError(
+                message=f"FreeBSD target is still mounted at {context.target_mount}.",
+                cause="umount did not release the target filesystem.",
+                failed_operation="Verify FreeBSD target unmount",
+                current_state=f"{context.target_mount} is still a mount point",
+                possible_recovery="Check for processes holding files on the target (fstat).",
+            )
+        self.events.info(EventPhase.VERIFY, f"FreeBSD target unmounted from {context.target_mount}.")
 
     def apply(self, context: ExecutionContext) -> None:
         pass
@@ -121,5 +174,6 @@ class FreeBSDPlatformProvider(ProviderContract):
         self.events.info(EventPhase.VERIFY, "FreeBSD platform configuration verified (/etc/fstab).")
 
     def cleanup(self, context: ExecutionContext) -> None:
-        self.unmount_target(context)
+        # Best-effort on the failure path; the unmount step itself is strict.
+        self._unmount(context, strict=False)
 

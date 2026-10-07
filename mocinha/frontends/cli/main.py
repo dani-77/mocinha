@@ -11,8 +11,8 @@ import sys
 from mocinha.core.events import Event, EventStream
 from mocinha.core.manifest import Manifest
 from mocinha.core.probe import SystemProbe
-from mocinha.core.provider import ProviderRegistry
 from mocinha.core.resolver import InstallationResolver, UserChoices
+from mocinha.providers import create_default_registry, wire_plan_providers
 
 
 def print_event(e: Event) -> None:
@@ -80,7 +80,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     probe = SystemProbe(stream)
     facts = probe.probe_facts()
 
-    registry = ProviderRegistry()
+    registry = create_default_registry(stream)
     resolver = InstallationResolver(facts, manifest, registry, stream)
 
     choices = UserChoices(
@@ -94,6 +94,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
     try:
         plan = resolver.resolve(choices)
+        wire_plan_providers(plan, registry, manifest)
         print("\n" + plan.to_human_readable() + "\n")
         return 0
     except Exception as e:
@@ -104,7 +105,6 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_install(args: argparse.Namespace) -> int:
     from mocinha.core.executor import InstallationExecutor
     from mocinha.core.provider import ExecutionContext
-    from mocinha.providers import create_default_registry
 
     manifest_path = Path(args.manifest)
     try:
@@ -133,6 +133,7 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     try:
         plan = resolver.resolve(choices)
+        wire_plan_providers(plan, registry, manifest)
         print("\n" + plan.to_human_readable() + "\n")
     except Exception as e:
         print(f"Resolution failed:\n{e}", file=sys.stderr)
@@ -155,9 +156,6 @@ def cmd_install(args: argparse.Namespace) -> int:
             "install_source": manifest.install.source,
         },
     )
-
-    from mocinha.providers import wire_plan_providers
-    wire_plan_providers(plan, registry, manifest)
 
     executor = InstallationExecutor(stream)
     try:

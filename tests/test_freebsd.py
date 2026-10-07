@@ -100,7 +100,16 @@ class TestFreeBSDProviders(unittest.TestCase):
         with self.assertRaises(VerificationError):
             provider.verify(self.context)
 
-        # Apply
+        # Apply without loader.efi on the target -> fails, no placeholder written
+        from mocinha.core.errors import ExecutionError
+        with self.assertRaises(ExecutionError):
+            provider.apply(self.context)
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # Apply with a real PE loader.efi
+        (self.target / "boot").mkdir(parents=True, exist_ok=True)
+        (self.target / "boot" / "loader.efi").write_bytes(b"MZ\x90\x00loader")
         provider.apply(self.context)
 
         # Verify bootx64.efi

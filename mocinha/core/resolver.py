@@ -190,13 +190,6 @@ class InstallationResolver:
                 provider_name=self.manifest.providers.deployment or "deployment",
             ),
             PlanStep(
-                step_id="cleanup_live_only",
-                title="Remove live-only components",
-                description=f"Remove live artifacts and disable live-only services: {service_res.live_only_to_clean}",
-                is_destructive=True,
-                provider_name="platform",
-            ),
-            PlanStep(
                 step_id="configure_fstab",
                 title="Generate filesystem table (/etc/fstab)",
                 description="Write persistent partition mounts using durable UUIDs/labels",
@@ -227,7 +220,10 @@ class InstallationResolver:
             PlanStep(
                 step_id="configure_services",
                 title="Configure persistent services",
-                description=f"Enable services on target: {service_res.enabled_services}",
+                description=(
+                    f"Enable services on target: {service_res.enabled_services}; "
+                    f"disable live-only services: {service_res.live_only_to_clean}"
+                ),
                 is_destructive=False,
                 provider_name=self.manifest.providers.services,
             ),
@@ -244,6 +240,7 @@ class InstallationResolver:
                 description="Inspect target filesystem, kernel, boot files, and service configs",
                 is_destructive=False,
                 provider_name="validation",
+                verify_only=True,
             ),
             PlanStep(
                 step_id="target_unmount",

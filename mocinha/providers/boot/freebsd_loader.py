@@ -10,7 +10,7 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import CommandRunner, require_pe_binary
 
 
 class FreeBSDBootProvider(ProviderContract):
@@ -36,10 +36,15 @@ class FreeBSDBootProvider(ProviderContract):
         src_loader = target_root / "boot" / "loader.efi"
         dest_efi = esp_dir / "bootx64.efi"
 
-        if src_loader.is_file():
-            shutil.copy2(src_loader, dest_efi)
-        else:
-            dest_efi.write_bytes(b"FREEBSD_LOADER_BOOTX64_PLACEHOLDER")
+        if not src_loader.is_file():
+            raise ExecutionError(
+                message=f"FreeBSD loader.efi not found at {src_loader}",
+                cause="The deployed base system does not contain /boot/loader.efi.",
+                failed_operation="Install FreeBSD EFI loader",
+                current_state="No EFI binary was written to the ESP",
+                possible_recovery="Check that the deployment extracted a complete base system.",
+            )
+        shutil.copy2(src_loader, dest_efi)
 
         self.events.info(EventPhase.BOOTLOADER, f"FreeBSD bootloader installed to {dest_efi}")
 
@@ -47,11 +52,5 @@ class FreeBSDBootProvider(ProviderContract):
         target_root = Path(context.target_mount)
         dest_efi = target_root / "boot" / "efi" / "efi" / "boot" / "bootx64.efi"
 
-        if not dest_efi.is_file():
-            raise VerificationError(
-                message=f"FreeBSD EFI bootloader binary missing at {dest_efi}",
-                cause="Installation did not write bootx64.efi into FreeBSD ESP directory.",
-                failed_operation="Verify FreeBSD loader.efi",
-                possible_recovery="Check ESP mount and /boot/loader.efi source on target.",
-            )
+        require_pe_binary(dest_efi, "FreeBSD EFI loader")
         self.events.info(EventPhase.VERIFY, "FreeBSD loader.efi successfully verified on target.")

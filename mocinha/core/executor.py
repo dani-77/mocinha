@@ -44,18 +44,16 @@ class InstallationExecutor:
             f"Execution requested for target disk {plan.summary.disk} ({total_steps} steps planned)."
         )
 
+        # 0. Fail closed: every step must be explicitly wired before anything runs.
+        self._check_plan_wired(plan)
+
         # 1. Identify distinct active providers participating in the plan
         active_providers = []
         seen_names = set()
-        for prov in getattr(plan, "providers", []):
-            if prov and getattr(prov, "name", None) not in seen_names:
+        for prov in list(plan.providers) + [step.provider for step in plan.steps]:
+            if prov is not None and prov.name not in seen_names:
                 active_providers.append(prov)
                 seen_names.add(prov.name)
-        for step in plan.steps:
-            p = getattr(step, "provider", None)
-            if p and getattr(p, "name", None) not in seen_names:
-                active_providers.append(p)
-                seen_names.add(p.name)
 
         # 2. LIFECYCLE PHASE: VALIDATE (Pre-flight checks before ANY disk action)
         self.events.info(EventPhase.PREPARE, f"Running pre-flight validation across {len(active_providers)} active provider(s)...")
@@ -87,19 +85,13 @@ class InstallationExecutor:
 
                 start_t = time.time()
                 try:
-                    # Apply
+                    # Apply (verification-only steps have no action)
                     if step.execute_fn:
                         step.execute_fn(context)
-                    elif getattr(step, "provider", None):
-                        step.provider.apply(context)
 
                     # Verify
-                    if step.verify_fn:
-                        self.events.info(phase, f"Verifying target state for step: {step.title}")
-                        step.verify_fn(context)
-                    elif getattr(step, "provider", None) and hasattr(step.provider, "verify"):
-                        self.events.info(phase, f"Verifying target state for step: {step.title}")
-                        step.provider.verify(context)
+                    self.events.info(phase, f"Verifying target state for step: {step.title}")
+                    step.verify_fn(context)
 
                     duration = round(time.time() - start_t, 2)
                     self.events.info(
@@ -144,3 +136,24 @@ class InstallationExecutor:
                     prov.cleanup(context)
                 except Exception as ce:
                     self.events.warning(EventPhase.CLEANUP, f"Cleanup warning in provider '{prov.name}': {ce}")
+
+    def _check_plan_wired(self, plan: InstallationPlan) -> None:
+        """Rejects plans with steps that have no action or no verification.
+
+        An unwired step must never be reported as completed: that is how a
+        missing bootloader provider used to produce an unbootable disk.
+        """
+        problems = []
+        for idx, step in enumerate(plan.steps, start=1):
+            if step.verify_fn is None:
+                problems.append(f"step {idx} '{step.step_id}' has no verification")
+            if step.execute_fn is None and not step.verify_only:
+                problems.append(f"step {idx} '{step.step_id}' has no action")
+        if problems:
+            raise ExecutionError(
+                message="Installation plan contains unwired steps; refusing to execute.",
+                cause="; ".join(problems),
+                failed_operation="Check plan wiring before execution",
+                current_state="No disk has been modified.",
+                possible_recovery="Ensure every step is bound to a registered provider (see wire_plan_providers).",
+            )

@@ -1,7 +1,8 @@
-"""Limine bootloader provider (UEFI/BIOS).
+"""Limine bootloader provider (UEFI only for now).
 
-Installs the modern Limine bootloader on EFI System Partition
+Installs the Limine EFI binary on the EFI System Partition
 and writes limine.conf with durable UUID kernel command line.
+BIOS installation (limine bios-install) is not implemented yet.
 """
 
 from pathlib import Path
@@ -11,7 +12,14 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import CommandRunner, read_blkid_uuid, require_pe_binary
+
+
+# Locations of BOOTX64.EFI inside the live image (and therefore the deployed target).
+LIVE_EFI_CANDIDATES = [
+    Path("/usr/share/limine/BOOTX64.EFI"),
+    Path("/usr/lib/limine/BOOTX64.EFI"),
+]
 
 
 class LimineBootProvider(ProviderContract):
@@ -25,7 +33,23 @@ class LimineBootProvider(ProviderContract):
         return ["bootloader", "limine"]
 
     def validate(self, context: ExecutionContext) -> None:
-        pass
+        firmware = context.metadata.get("firmware", "UEFI").upper()
+        if firmware != "UEFI":
+            raise ExecutionError(
+                message="The Limine provider currently supports UEFI installs only.",
+                cause=f"Firmware is {firmware}; BIOS installation (limine bios-install) is not implemented.",
+                failed_operation="Validate Limine firmware support",
+                current_state=f"Firmware: {firmware}",
+                possible_recovery="Choose another bootloader for BIOS systems, or boot the live in UEFI mode.",
+            )
+        if not any(p.is_file() for p in LIVE_EFI_CANDIDATES):
+            raise ExecutionError(
+                message="Limine EFI binary (BOOTX64.EFI) not found in the live system.",
+                cause=f"None of these files exist: {[str(p) for p in LIVE_EFI_CANDIDATES]}",
+                failed_operation="Locate Limine EFI binary",
+                current_state="limine package missing from the live image",
+                possible_recovery="Install the limine package in the live image or choose another bootloader.",
+            )
 
     def apply(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -35,31 +59,20 @@ class LimineBootProvider(ProviderContract):
 
         self.events.action(EventPhase.BOOTLOADER, f"Installing Limine EFI binary to {esp_dir}")
 
-        # Look for BOOTX64.EFI in system locations
-        candidate_efi = [
-            Path("/usr/share/limine/BOOTX64.EFI"),
-            boot_dir / "limine" / "BOOTX64.EFI",
-            Path("/usr/lib/limine/BOOTX64.EFI"),
-        ]
-        efi_src = next((p for p in candidate_efi if p.is_file()), None)
+        candidates = LIVE_EFI_CANDIDATES + [target_root / "usr" / "share" / "limine" / "BOOTX64.EFI"]
+        efi_src = next((p for p in candidates if p.is_file()), None)
+        if efi_src is None:
+            raise ExecutionError(
+                message="Limine EFI binary (BOOTX64.EFI) not found.",
+                cause=f"None of these files exist: {[str(p) for p in candidates]}",
+                failed_operation="Install Limine EFI binary",
+                current_state="No EFI binary was written to the ESP",
+                possible_recovery="Install the limine package in the live image.",
+            )
+        shutil.copy2(efi_src, esp_dir / "BOOTX64.EFI")
 
-        dest_efi = esp_dir / "BOOTX64.EFI"
-        if efi_src:
-            shutil.copy2(efi_src, dest_efi)
-        else:
-            # If not in live image package, create placeholder or install via limine CLI
-            dest_efi.write_bytes(b"MOCINHA_LIMINE_BOOTX64_PLACEHOLDER")
+        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.BOOTLOADER)
 
-        # Determine Root partition UUID
-        root_dev = context.target_partitions.get("root", "")
-        root_uuid = ""
-        if root_dev and shutil.which("blkid"):
-            proc = self.runner.run(["blkid", "-s", "UUID", "-o", "value", root_dev], check=False)
-            root_uuid = proc.stdout.strip()
-
-        root_param = f"root=UUID={root_uuid}" if root_uuid else f"root={root_dev}"
-
-        # Write limine.conf
         limine_conf = boot_dir / "limine.conf"
         conf_content = (
             "timeout: 5\n"
@@ -67,7 +80,7 @@ class LimineBootProvider(ProviderContract):
             "/btw-d77 Arch Linux\n"
             "    protocol: linux\n"
             "    kernel_path: boot():/vmlinuz-linux\n"
-            f"    cmdline: {root_param} rw quiet\n"
+            f"    cmdline: root=UUID={root_uuid} rw quiet\n"
             "    module_path: boot():/initramfs-linux.img\n"
         )
         limine_conf.write_text(conf_content)
@@ -75,22 +88,24 @@ class LimineBootProvider(ProviderContract):
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
-        esp_binary = target_root / "boot" / "EFI" / "BOOT" / "BOOTX64.EFI"
+        require_pe_binary(target_root / "boot" / "EFI" / "BOOT" / "BOOTX64.EFI", "Limine EFI binary")
+
         limine_conf = target_root / "boot" / "limine.conf"
-
-        if not esp_binary.is_file():
-            raise VerificationError(
-                message=f"Limine EFI binary missing at {esp_binary}",
-                cause="Installation did not copy BOOTX64.EFI to EFI System Partition.",
-                failed_operation="Verify Limine boot binary",
-                possible_recovery="Check ESP directory and Limine package.",
-            )
-
         if not limine_conf.is_file():
             raise VerificationError(
                 message=f"Limine configuration missing at {limine_conf}",
                 cause="limine.conf was not written to /boot.",
                 failed_operation="Verify limine.conf",
+                possible_recovery="Re-run bootloader configuration.",
+            )
+
+        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.VERIFY)
+        if f"root=UUID={root_uuid}" not in limine_conf.read_text():
+            raise VerificationError(
+                message="limine.conf does not reference the target root filesystem.",
+                cause=f"Expected 'root=UUID={root_uuid}' in the kernel command line.",
+                failed_operation="Verify limine.conf root parameter",
+                current_state=limine_conf.read_text().strip(),
                 possible_recovery="Re-run bootloader configuration.",
             )
 

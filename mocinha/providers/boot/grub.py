@@ -8,10 +8,17 @@ from pathlib import Path
 from typing import List, Optional
 import shutil
 
-from mocinha.core.errors import VerificationError
+from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import CommandRunner, read_blkid_uuid, require_pe_binary
+
+
+GRUB_EFI_ID = "Arch"
+
+
+def _grub_install_tool() -> Optional[str]:
+    return next((t for t in ("grub-install", "grub2-install") if shutil.which(t)), None)
 
 
 class GrubBootProvider(ProviderContract):
@@ -25,7 +32,13 @@ class GrubBootProvider(ProviderContract):
         return ["bootloader", "grub"]
 
     def validate(self, context: ExecutionContext) -> None:
-        pass
+        if _grub_install_tool() is None:
+            raise ExecutionError(
+                message="grub-install not found in the live system.",
+                cause="Neither grub-install nor grub2-install is in PATH.",
+                failed_operation="Validate GRUB installer presence",
+                possible_recovery="Install the grub package in the live image or choose another bootloader.",
+            )
 
     def apply(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -40,34 +53,28 @@ class GrubBootProvider(ProviderContract):
             f"Installing GRUB on {target_disk} (Mode: {'UEFI' if is_uefi else 'BIOS'})",
         )
 
-        grub_tool = "grub-install" if shutil.which("grub-install") else "grub2-install"
-        if shutil.which(grub_tool):
-            if is_uefi:
-                cmd = [
-                    grub_tool,
-                    "--target=x86_64-efi",
-                    f"--efi-directory={boot_dir}",
-                    f"--boot-directory={boot_dir}",
-                    "--bootloader-id=Arch",
-                    "--recheck",
-                ]
-            else:
-                cmd = [
-                    grub_tool,
-                    "--target=i386-pc",
-                    f"--boot-directory={boot_dir}",
-                    target_disk,
-                ]
-            self.runner.run(cmd, phase=EventPhase.BOOTLOADER, check=False)
+        grub_tool = _grub_install_tool()
+        if is_uefi:
+            cmd = [
+                grub_tool,
+                "--target=x86_64-efi",
+                f"--efi-directory={boot_dir}",
+                f"--boot-directory={boot_dir}",
+                f"--bootloader-id={GRUB_EFI_ID}",
+                "--recheck",
+            ]
+        else:
+            cmd = [
+                grub_tool,
+                "--target=i386-pc",
+                f"--boot-directory={boot_dir}",
+                target_disk,
+            ]
+        self.runner.run(cmd, phase=EventPhase.BOOTLOADER, check=True)
 
         # Generate grub.cfg with durable UUID
-        root_dev = context.target_partitions.get("root", "")
-        root_uuid = ""
-        if root_dev and shutil.which("blkid"):
-            proc = self.runner.run(["blkid", "-s", "UUID", "-o", "value", root_dev], check=False)
-            root_uuid = proc.stdout.strip()
-
-        root_param = f"root=UUID={root_uuid}" if root_uuid else f"root={root_dev}"
+        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.BOOTLOADER)
+        root_param = f"root=UUID={root_uuid}"
 
         grub_cfg = grub_dir / "grub.cfg"
         cfg_content = (
@@ -91,13 +98,46 @@ class GrubBootProvider(ProviderContract):
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
-        grub_cfg = target_root / "boot" / "grub" / "grub.cfg"
+        boot_dir = target_root / "boot"
+        is_uefi = context.metadata.get("firmware", "UEFI").upper() == "UEFI"
 
+        if is_uefi:
+            require_pe_binary(boot_dir / "EFI" / GRUB_EFI_ID / "grubx64.efi", "GRUB EFI binary")
+        else:
+            core_img = boot_dir / "grub" / "i386-pc" / "core.img"
+            if not core_img.is_file():
+                raise VerificationError(
+                    message=f"GRUB core image missing at {core_img}",
+                    cause="grub-install did not write the i386-pc core image.",
+                    failed_operation="Verify GRUB core.img",
+                    possible_recovery="Inspect the grub-install output in the event log.",
+                )
+            with open(context.target_disk, "rb") as disk:
+                mbr = disk.read(512)
+            if b"GRUB" not in mbr:
+                raise VerificationError(
+                    message=f"GRUB boot code not found in the MBR of {context.target_disk}.",
+                    cause="The first sector of the target disk does not contain the GRUB boot image.",
+                    failed_operation="Verify GRUB MBR boot code",
+                    current_state=f"MBR signature bytes: {mbr[510:512]!r}",
+                    possible_recovery="Inspect the grub-install output in the event log.",
+                )
+
+        grub_cfg = boot_dir / "grub" / "grub.cfg"
         if not grub_cfg.is_file():
             raise VerificationError(
                 message=f"GRUB configuration missing at {grub_cfg}",
                 cause="grub.cfg was not written to /boot/grub.",
                 failed_operation="Verify grub.cfg",
+                possible_recovery="Re-run GRUB configuration.",
+            )
+        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.VERIFY)
+        if f"root=UUID={root_uuid}" not in grub_cfg.read_text():
+            raise VerificationError(
+                message="grub.cfg does not reference the target root filesystem.",
+                cause=f"Expected 'root=UUID={root_uuid}' in the kernel command line.",
+                failed_operation="Verify grub.cfg root parameter",
+                current_state=grub_cfg.read_text().strip(),
                 possible_recovery="Re-run GRUB configuration.",
             )
 

@@ -454,7 +454,12 @@ class MocinhaGTKApp(Gtk.Window):
             selected_services=selected_srvs,
         )
 
-        self.resolved_plan = self.resolver.resolve(choices)
+        from mocinha.providers import wire_plan_providers
+
+        plan = self.resolver.resolve(choices)
+        # Wire before showing the summary so a missing provider is reported before confirmation
+        wire_plan_providers(plan, self.registry, self.manifest)
+        self.resolved_plan = plan
         buf = self.summary_text_view.get_buffer()
         buf.set_text(self.resolved_plan.to_human_readable())
 
@@ -494,9 +499,6 @@ class MocinhaGTKApp(Gtk.Window):
                 "install_source": self.manifest.install.source,
             },
         )
-
-        from mocinha.providers import wire_plan_providers
-        wire_plan_providers(self.resolved_plan, self.registry, self.manifest)
 
         def worker() -> None:
             def progress_cb(current: int, total: int, step: PlanStep) -> None:

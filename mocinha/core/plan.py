@@ -22,6 +22,8 @@ class PlanStep:
     provider: Optional[Any] = None
     execute_fn: Optional[Callable[[ExecutionContext], None]] = None
     verify_fn: Optional[Callable[[ExecutionContext], None]] = None
+    # A verification-only step has no action of its own; it still needs verify_fn.
+    verify_only: bool = False
 
 
 @dataclass
