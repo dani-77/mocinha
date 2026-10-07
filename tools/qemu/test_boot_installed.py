@@ -1,124 +1,182 @@
 #!/usr/bin/env python3
-"""Automated proof of installed system boot under QEMU.
+"""Boot proof for a disk installed by run_automated_test.sh.
 
-Boots tools/qemu/test-disk.qcow2 directly via pure MBR/GRUB without live media,
-logs in via serial console as dani, verifies user credentials, mountpoints,
-fstab, and systemd services, and shuts down cleanly.
+Boots the target disk on its own (no ISO, no external kernel) in BIOS or UEFI
+mode, with -snapshot so the disk stays as installed. If a serial login prompt
+appears, logs in and runs diagnostics. A screenshot of the VGA console is
+always saved at the end, because the generated boot configuration does not
+necessarily enable a serial console (e.g. limine.conf).
+
+    tools/qemu/test_boot_installed.py --firmware bios --disk tools/qemu/work/target-bios-grub.qcow2
 """
 
+from pathlib import Path
+import argparse
 import os
+import shutil
+import socket
+import struct
 import subprocess
 import sys
 import time
+import zlib
+
+QEMU_DIR = Path(__file__).resolve().parent
+OVMF_CODE = Path("/usr/share/qemu/edk2-x86_64-code.fd")
+OVMF_VARS_TEMPLATE = Path("/usr/share/qemu/edk2-i386-vars.fd")
+
+# Markers are split with "" so the terminal's echo of the typed command never
+# contains them; only the command's real output does.
+DIAGNOSTICS = (
+    "export SYSTEMD_PAGER=cat PAGER=cat; "
+    "echo ===MOCINHA_\"\"BOOT_PROOF_START===; "
+    "id; cat /etc/hostname; cat /etc/machine-id; "
+    "findmnt -no SOURCE,TARGET,FSTYPE /; cat /etc/fstab; cat /proc/cmdline; "
+    "systemctl is-system-running; "
+    "systemctl list-unit-files --state=enabled --no-legend; "
+    "systemctl --failed --no-legend; "
+    "getent passwd | awk -F: '$3 >= 1000 && $3 < 60000'; "
+    "echo ===MOCINHA_\"\"BOOT_PROOF_END==="
+)
 
 
-def test_boot() -> bool:
-    disk_path = "tools/qemu/test-disk.qcow2"
-    if not os.path.exists(disk_path):
-        print(f"Error: {disk_path} does not exist", file=sys.stderr)
-        return False
+def ppm_to_png(ppm: bytes) -> bytes:
+    """Converts a binary P6 PPM (QEMU screendump) to PNG with the stdlib only."""
+    parts = ppm.split(maxsplit=4)
+    if parts[0] != b"P6":
+        raise ValueError("not a P6 PPM")
+    width, height, data = int(parts[1]), int(parts[2]), parts[4]
+    stride = width * 3
+    raw = b"".join(b"\x00" + data[y * stride:(y + 1) * stride] for y in range(height))
+
+    def chunk(tag: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body))
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+
+
+def monitor_command(sock_path: Path, command: str) -> None:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(str(sock_path))
+        s.settimeout(2)
+        try:
+            s.recv(4096)  # banner
+        except socket.timeout:
+            pass
+        s.sendall(command.encode() + b"\n")
+        time.sleep(1)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--disk", required=True)
+    ap.add_argument("--firmware", choices=["bios", "uefi"], required=True)
+    ap.add_argument("--user", default="dani")
+    ap.add_argument("--password", default="mocinha-test")
+    ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--fresh-nvram", action="store_true", help="UEFI: boot with empty NVRAM instead of the install VM's")
+    ap.add_argument("--logdir", help="default: tools/qemu/logs/<disk name>")
+    args = ap.parse_args()
+
+    disk = Path(args.disk)
+    if not disk.is_file():
+        print(f"Error: {disk} does not exist", file=sys.stderr)
+        return 1
+    run = disk.stem.removeprefix("target-")
+    logdir = Path(args.logdir) if args.logdir else QEMU_DIR / "logs" / run
+    logdir.mkdir(parents=True, exist_ok=True)
+    work = QEMU_DIR / "work"
+    work.mkdir(exist_ok=True)
+    mon_sock = work / f"monitor-{run}.sock"
+    mon_sock.unlink(missing_ok=True)
 
     cmd = [
-        "qemu-system-x86_64",
-        "-m", "2048",
-        "-enable-kvm",
-        "-drive", f"file={disk_path},format=qcow2,if=virtio",
+        "qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-m", "2048",
+        "-drive", f"file={disk},format=qcow2,if=virtio",
         "-snapshot",
-        "-nographic",
-        "-monitor", "none",
+        "-display", "none", "-vga", "std",
+        "-monitor", f"unix:{mon_sock},server,nowait",
         "-serial", "stdio",
     ]
+    if args.firmware == "uefi":
+        # Reuse the NVRAM written during installation (as on a real machine);
+        # pass --fresh-nvram to test the removable-media fallback path instead.
+        install_vars = work / f"ovmf-vars-{run}.fd"
+        source_vars = OVMF_VARS_TEMPLATE if args.fresh_nvram or not install_vars.is_file() else install_vars
+        print(f"NVRAM: {source_vars}")
+        vars_copy = work / f"ovmf-vars-boot-{run}.fd"
+        shutil.copy(source_vars, vars_copy)
+        cmd += [
+            "-machine", "q35",
+            "-drive", f"if=pflash,format=raw,readonly=on,file={OVMF_CODE}",
+            "-drive", f"if=pflash,format=raw,file={vars_copy}",
+        ]
 
-    print("=== Launching QEMU to test booted target disk ===")
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
+    print(f"=== Booting installed disk {disk} ({args.firmware}) ===")
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     os.set_blocking(proc.stdout.fileno(), False)
 
-    buffer = ""
-    start = time.time()
+    def send(text: str) -> None:
+        proc.stdin.write(text.encode() + b"\n")
+        proc.stdin.flush()
+
+    output, buffer = [], ""
     state = "WAIT_LOGIN"
-    output_log = []
-
-    success = False
-
-    while time.time() - start < 35:
+    proof = False
+    start = time.time()
+    while time.time() - start < args.timeout and proc.poll() is None:
         try:
-            chunk = os.read(proc.stdout.fileno(), 2048).decode("utf-8", errors="replace")
+            chunk = os.read(proc.stdout.fileno(), 4096).decode("utf-8", errors="replace")
         except (BlockingIOError, InterruptedError):
             chunk = ""
-
         if chunk:
-            print(chunk, end="", flush=True)
+            output.append(chunk)
             buffer += chunk
-            output_log.append(chunk)
-
             if state == "WAIT_LOGIN" and "login:" in buffer:
-                print("\n[TEST] Detected serial login prompt. Sending user 'dani'...")
-                proc.stdin.write(b"dani\n")
-                proc.stdin.flush()
-                buffer = ""
-                state = "WAIT_PASSWORD"
-
+                send(args.user)
+                buffer, state = "", "WAIT_PASSWORD"
             elif state == "WAIT_PASSWORD" and "Password:" in buffer:
-                print("\n[TEST] Detected password prompt. Sending password...")
-                proc.stdin.write(b"secret\n")
-                proc.stdin.flush()
-                buffer = ""
-                state = "LOGGED_IN"
-
-            elif state == "LOGGED_IN" and ("$" in buffer or "~" in buffer or "#" in buffer):
-                print("\n[TEST] Logged in successfully! Running target diagnostics...")
-                diagnostic_cmd = (
-                    b"echo '===MOCINHA_BOOT_PROOF_START===' && "
-                    b"id && "
-                    b"df -h / && "
-                    b"cat /etc/fstab && "
-                    b"systemctl is-active dbus && "
-                    b"echo '===MOCINHA_BOOT_PROOF_END===' && "
-                    b"sudo poweroff\n"
-                )
-                proc.stdin.write(diagnostic_cmd)
-                proc.stdin.flush()
-                time.sleep(0.5)
-                proc.stdin.write(b"secret\n")
-                proc.stdin.flush()
-                buffer = ""
-                state = "WAIT_OUTPUT"
-
+                send(args.password)
+                buffer, state = "", "LOGGED_IN"
+            elif state == "LOGGED_IN" and ("$ " in buffer or "Login incorrect" in buffer):
+                if "Login incorrect" in buffer:
+                    print("[TEST] Serial login rejected.")
+                    break
+                send(DIAGNOSTICS)
+                buffer, state = "", "WAIT_OUTPUT"
             elif state == "WAIT_OUTPUT" and "===MOCINHA_BOOT_PROOF_END===" in buffer:
-                print("\n[TEST] Diagnostic verification output received!")
-                success = True
+                proof = True
+                time.sleep(1)
                 break
-
         time.sleep(0.1)
-        if proc.poll() is not None:
-            break
 
-    try:
-        proc.wait(timeout=5)
-    except Exception:
+    if not proof and state == "WAIT_LOGIN":
+        print("[TEST] No serial login prompt (serial console not enabled on the target?).")
+
+    screenshot = logdir / "boot-screen.png"
+    if proc.poll() is None:
+        ppm = work / f"screen-{run}.ppm"
+        try:
+            monitor_command(mon_sock, f"screendump {ppm}")
+            screenshot.write_bytes(ppm_to_png(ppm.read_bytes()))
+            print(f"[TEST] Screenshot: {screenshot}")
+        except Exception as e:
+            print(f"[TEST] Screenshot failed: {e}")
         proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
-    full_output = "".join(output_log)
-    with open("tools/qemu/vm-boot-proof.log", "w") as f:
-        f.write(full_output)
-
-    if success:
-        print("\n\n==================================================")
-        print("BOOT PROOF PASSED: Installed system booted to login, authenticated, and executed diagnostics cleanly.")
-        print("Log written to tools/qemu/vm-boot-proof.log")
-        print("==================================================")
-        return True
-    else:
-        print("\n\nBOOT PROOF FAILED or timed out.")
-        return False
+    (logdir / "serial-boot.log").write_text("".join(output))
+    print(f"Serial log: {logdir / 'serial-boot.log'}")
+    if proof:
+        print("BOOT PROOF PASSED: logged in over serial and ran diagnostics.")
+        return 0
+    print("BOOT PROOF INCOMPLETE: no serial diagnostics; inspect the screenshot.")
+    return 1
 
 
 if __name__ == "__main__":
-    if not test_boot():
-        sys.exit(1)
+    sys.exit(main())

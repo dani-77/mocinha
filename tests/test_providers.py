@@ -221,8 +221,21 @@ class TestProviders(unittest.TestCase):
         with self.assertRaises(VerificationError):
             provider.verify(self.context)
 
-        # Create grub.cfg referencing the root UUID -> succeeds
-        (grub_dir / "grub.cfg").write_text("linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n")
+        (self.target / "boot" / "vmlinuz-linux").write_bytes(b"kernel")
+
+        # Regression (btw-d77 UEFI): kernel searched on root under /boot, but it lives on the ESP
+        (grub_dir / "grub.cfg").write_text(
+            "search --no-floppy --fs-uuid --set=root 1234-ROOT\n"
+            "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n"
+        )
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # ESP UUID searched, kernel at the top of the ESP -> succeeds
+        (grub_dir / "grub.cfg").write_text(
+            "search --no-floppy --fs-uuid --set=root 1234-ROOT\n"
+            "linux /vmlinuz-linux root=UUID=1234-ROOT rw\n"
+        )
         provider.verify(self.context)
 
     @mock.patch("mocinha.providers.boot.grub.read_blkid_uuid", return_value="1234-ROOT")
@@ -238,7 +251,13 @@ class TestProviders(unittest.TestCase):
         grub_dir = self.target / "boot" / "grub"
         (grub_dir / "i386-pc").mkdir(parents=True, exist_ok=True)
         (grub_dir / "i386-pc" / "core.img").write_bytes(b"core")
-        (grub_dir / "grub.cfg").write_text("linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n")
+        (grub_dir / "grub.cfg").write_text(
+            "search --no-floppy --fs-uuid --set=root 1234-ROOT\n"
+            "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n"
+        )
+        (self.target / "boot" / "vmlinuz-linux").write_bytes(b"kernel")
+        bios_partitions = {"root": "/dev/mock0p1"}
+        self.context.target_partitions = bios_partitions
 
         # Empty MBR -> fails
         with self.assertRaises(VerificationError):
@@ -270,6 +289,32 @@ class TestProviders(unittest.TestCase):
         (boot_dir / "vmlinuz-linux").write_bytes(b"kernel")
         (boot_dir / "initramfs-linux.img").write_bytes(b"initrd")
         provider.verify(self.context)
+    def test_mkinitcpio_restores_stock_preset(self) -> None:
+        """Regression (btw-d77 live): the archiso preset made 'mkinitcpio -P' fail on the target."""
+        from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
+        provider = MkinitcpioProvider("mkinitcpio", self.stream)
+
+        preset_dir = self.target / "etc" / "mkinitcpio.d"
+        preset_dir.mkdir(parents=True)
+        (preset_dir / "linux.preset").write_text(
+            "PRESETS=('archiso')\narchiso_config='/etc/mkinitcpio.conf.d/archiso.conf'\n"
+        )
+
+        # Without the stock template -> explicit failure
+        with self.assertRaises(ExecutionError):
+            provider._restore_stock_presets(self.target)
+
+        template_dir = self.target / "usr" / "share" / "mkinitcpio"
+        template_dir.mkdir(parents=True)
+        (template_dir / "hook.preset").write_text(
+            "PRESETS=('default')\nALL_kver=\"/boot/vmlinuz-%PKGBASE%\"\n"
+            "default_image=\"/boot/initramfs-%PKGBASE%.img\"\n"
+        )
+        provider._restore_stock_presets(self.target)
+        content = (preset_dir / "linux.preset").read_text()
+        self.assertNotIn("archiso", content)
+        self.assertIn("/boot/initramfs-linux.img", content)
+
 
 if __name__ == "__main__":
     unittest.main()

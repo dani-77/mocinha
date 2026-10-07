@@ -64,6 +64,11 @@ class MkinitcpioProvider(ProviderContract):
             self.events.info(EventPhase.CONFIGURE, "Removing live-only archiso.conf drop-in from target mkinitcpio config")
             archiso_conf.unlink(missing_ok=True)
 
+        # 2b. archiso replaces the kernel preset with an 'archiso' preset pointing at
+        # archiso.conf. Restore the stock preset the way the mkinitcpio pacman hook
+        # creates it: from /usr/share/mkinitcpio/hook.preset with %PKGBASE% substituted.
+        self._restore_stock_presets(target_root)
+
         # 3. Run mkinitcpio on target
         self.events.action(EventPhase.CONFIGURE, "Generating target initramfs via mkinitcpio")
         chroot_tool = "arch-chroot" if shutil.which("arch-chroot") else "chroot"
@@ -72,6 +77,28 @@ class MkinitcpioProvider(ProviderContract):
             phase=EventPhase.CONFIGURE,
             check=True,
         )
+
+    def _restore_stock_presets(self, target_root: Path) -> None:
+        preset_dir = target_root / "etc" / "mkinitcpio.d"
+        live_presets = [
+            p for p in sorted(preset_dir.glob("*.preset"))
+            if "archiso" in p.read_text()
+        ] if preset_dir.is_dir() else []
+        if not live_presets:
+            return
+        template = target_root / "usr" / "share" / "mkinitcpio" / "hook.preset"
+        if not template.is_file():
+            raise ExecutionError(
+                message="Cannot restore the stock mkinitcpio preset on the target.",
+                cause=f"Live-only presets found ({[p.name for p in live_presets]}) but {template} is missing.",
+                failed_operation="Restore stock mkinitcpio presets",
+                current_state="Target presets still reference the archiso configuration",
+                possible_recovery="Check that the mkinitcpio package is installed in the live image.",
+            )
+        for preset in live_presets:
+            pkgbase = preset.stem
+            self.events.action(EventPhase.CONFIGURE, f"Replacing live-only preset {preset.name} with the stock {pkgbase} preset")
+            preset.write_text(template.read_text().replace("%PKGBASE%", pkgbase))
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)

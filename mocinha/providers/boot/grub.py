@@ -72,9 +72,11 @@ class GrubBootProvider(ProviderContract):
             ]
         self.runner.run(cmd, phase=EventPhase.BOOTLOADER, check=True)
 
-        # Generate grub.cfg with durable UUID
+        # Generate grub.cfg with durable UUIDs. GRUB must search the filesystem
+        # that actually holds the kernel: the ESP when it is mounted at /boot.
         root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.BOOTLOADER)
         root_param = f"root=UUID={root_uuid}"
+        boot_uuid, kernel_dir = self._kernel_location(context, root_uuid)
 
         grub_cfg = grub_dir / "grub.cfg"
         cfg_content = (
@@ -88,13 +90,25 @@ class GrubBootProvider(ProviderContract):
             "    insmod part_msdos\n"
             "    insmod part_gpt\n"
             "    insmod ext2\n"
-            f"    search --no-floppy --fs-uuid --set=root {root_uuid}\n"
-            f"    linux /boot/vmlinuz-linux {root_param} rw console=tty1 console=ttyS0,115200\n"
-            "    initrd /boot/initramfs-linux.img\n"
+            "    insmod fat\n"
+            f"    search --no-floppy --fs-uuid --set=root {boot_uuid}\n"
+            f"    linux {kernel_dir}/vmlinuz-linux {root_param} rw console=tty1 console=ttyS0,115200\n"
+            f"    initrd {kernel_dir}/initramfs-linux.img\n"
             "}\n"
         )
         grub_cfg.write_text(cfg_content)
         self.events.info(EventPhase.BOOTLOADER, f"Generated {grub_cfg}")
+
+    def _kernel_location(self, context: ExecutionContext, root_uuid: str):
+        """Returns (filesystem UUID, directory inside it) where the kernel lives.
+
+        The Linux platform provider mounts the ESP at /boot, so on UEFI the
+        kernel and initramfs are at the top of the ESP, not under /boot on root.
+        """
+        if "esp" in context.target_partitions:
+            esp_uuid = read_blkid_uuid(self.runner, context.target_partitions["esp"], EventPhase.BOOTLOADER)
+            return esp_uuid, ""
+        return root_uuid, "/boot"
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -132,7 +146,25 @@ class GrubBootProvider(ProviderContract):
                 possible_recovery="Re-run GRUB configuration.",
             )
         root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.VERIFY)
-        if f"root=UUID={root_uuid}" not in grub_cfg.read_text():
+        cfg = grub_cfg.read_text()
+        boot_uuid, kernel_dir = self._kernel_location(context, root_uuid)
+        kernel_on_target = boot_dir / "vmlinuz-linux"
+        if f"--set=root {boot_uuid}" not in cfg or f"linux {kernel_dir}/vmlinuz-linux " not in cfg:
+            raise VerificationError(
+                message="grub.cfg does not load the kernel from the filesystem that holds it.",
+                cause=f"Expected 'search ... --set=root {boot_uuid}' and 'linux {kernel_dir}/vmlinuz-linux'.",
+                failed_operation="Verify grub.cfg kernel location",
+                current_state=cfg.strip(),
+                possible_recovery="Re-run GRUB configuration.",
+            )
+        if not kernel_on_target.is_file():
+            raise VerificationError(
+                message=f"Kernel referenced by grub.cfg is missing at {kernel_on_target}",
+                cause="The boot filesystem does not contain vmlinuz-linux.",
+                failed_operation="Verify kernel presence for GRUB",
+                possible_recovery="Re-run the initramfs/kernel step.",
+            )
+        if f"root=UUID={root_uuid}" not in cfg:
             raise VerificationError(
                 message="grub.cfg does not reference the target root filesystem.",
                 cause=f"Expected 'root=UUID={root_uuid}' in the kernel command line.",

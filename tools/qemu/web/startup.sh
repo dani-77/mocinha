@@ -1,37 +1,53 @@
 #!/bin/bash
+# startup.sh --- runs inside the booted btw-d77 live, as root over the serial console.
+# Parameters come from the kernel command line:
+#   mocinha.bootloader=<name>  bootloader to request
+#   mocinha.logdir=<path>      log directory, relative to the repository root
 set -x
 
-echo "=== AUTOMATED ARCHISO STARTUP SCRIPT ===" > /dev/kmsg
-echo "=== AUTOMATED ARCHISO STARTUP SCRIPT ==="
-echo "root:mocinha" | chpasswd
+cmdline_param() {
+    local p
+    for p in $(</proc/cmdline); do
+        case "$p" in "$1"=*) echo "${p#*=}"; return 0 ;; esac
+    done
+    return 1
+}
 
-# Mount mocinha 9p share
+BOOTLOADER="$(cmdline_param mocinha.bootloader || echo grub)"
+LOGREL="$(cmdline_param mocinha.logdir || echo tools/qemu/logs/default)"
+
+echo "=== MOCINHA AUTOMATED TEST (bootloader=$BOOTLOADER) ==="
+
 mkdir -p /mnt/mocinha
 mount -t 9p -o trans=virtio,version=9p2000.L mocinha /mnt/mocinha
-
 cd /mnt/mocinha
+LOGDIR="/mnt/mocinha/$LOGREL"
+mkdir -p "$LOGDIR"
 
-echo "=== 1. RUNNING MOCINHA PROBE ==="
-./bin/mocinha probe > /mnt/mocinha/tools/qemu/vm-probe.log 2>&1 || true
-cat /mnt/mocinha/tools/qemu/vm-probe.log
+MANIFEST=examples/manifests/btw-d77.toml
+COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
+        --user dani --password mocinha-test --hostname btw-test)
 
-echo "=== 2. RUNNING MOCINHA PLAN ==="
-./bin/mocinha plan --manifest examples/manifests/btw-d77.toml --disk /dev/vda --bootloader grub --user dani > /mnt/mocinha/tools/qemu/vm-plan.log 2>&1 || true
-cat /mnt/mocinha/tools/qemu/vm-plan.log
+# Live facts useful for reconciling the manifest with the real remaster
+{
+    echo "### os-release"; cat /etc/os-release
+    echo "### enabled units (live)"; systemctl list-unit-files --state=enabled --no-legend
+    echo "### running services (live)"; systemctl list-units --type=service --state=running --no-legend
+    echo "### users (live)"; getent passwd | awk -F: '$3 >= 1000 && $3 < 60000'
+} > "$LOGDIR/live-facts.log" 2>&1
 
-echo "=== 3. RUNNING MOCINHA INSTALL ==="
-./bin/mocinha install --manifest examples/manifests/btw-d77.toml --disk /dev/vda --bootloader grub --user dani --confirm 2>&1 | tee /mnt/mocinha/tools/qemu/vm-install.log
+./bin/mocinha probe > "$LOGDIR/probe.log" 2>&1 || true
+./bin/mocinha plan "${COMMON[@]}" > "$LOGDIR/plan.log" 2>&1 || true
+
+./bin/mocinha install "${COMMON[@]}" --confirm 2>&1 | tee "$LOGDIR/install.log"
 INSTALL_RES=${PIPESTATUS[0]}
 
-if [ $INSTALL_RES -eq 0 ]; then
-    echo "SUCCESS" > /mnt/mocinha/tools/qemu/result.status
-    echo "=== INSTALLATION FINISHED SUCCESSFULLY ==="
+if [ "$INSTALL_RES" -eq 0 ]; then
+    echo "SUCCESS" > "$LOGDIR/result.status"
 else
-    echo "FAILED" > /mnt/mocinha/tools/qemu/result.status
-    echo "=== INSTALLATION FAILED WITH EXIT CODE $INSTALL_RES ==="
+    echo "FAILED" > "$LOGDIR/result.status"
 fi
 
 sync
-curl -s http://10.0.2.2:8000/done || true
-sleep 3
+sleep 2
 poweroff

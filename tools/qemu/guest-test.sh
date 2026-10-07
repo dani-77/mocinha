@@ -1,30 +1,24 @@
 #!/usr/bin/env bash
-# guest-test.sh --- Helper script executed inside the booted Arch Linux live guest
+# guest-test.sh --- Run inside a booted btw-d77 live: probe and plan, or install with --install.
+#   tools/qemu/guest-test.sh [--install] [--bootloader NAME]
 set -euo pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$DIR"
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-echo "=== MOCINHA GUEST VERIFICATION SCRIPT ==="
-echo "Working directory: $PWD"
-echo ""
+INSTALL=0
+if [ -d /sys/firmware/efi ]; then BOOTLOADER=limine; else BOOTLOADER=grub; fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --install) INSTALL=1; shift ;;
+        --bootloader) BOOTLOADER="$2"; shift 2 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
 
-echo ">>> 1. Probing Live Environment and Hardware facts:"
+ARGS=(--manifest examples/manifests/btw-d77.toml --disk /dev/vda --bootloader "$BOOTLOADER" --user dani)
+
 ./bin/mocinha probe
-
-echo ""
-echo ">>> 2. Resolving Staged Non-Destructive Plan for /dev/vda:"
-./bin/mocinha plan --manifest examples/manifests/btw-d77.toml --disk /dev/vda --bootloader limine --user dani
-
-if [ "${1:-}" = "--install" ]; then
-    echo ""
-    echo ">>> 3. Executing Offline Installation to /dev/vda..."
-    ./bin/mocinha install --manifest examples/manifests/btw-d77.toml --disk /dev/vda --bootloader limine --user dani --confirm
-    echo ""
-    echo "✓ Installation completed successfully!"
-    echo "You can now reboot and remove the CD-ROM to boot into your installed system."
-else
-    echo ""
-    echo "To perform the actual installation, re-run with: $0 --install"
-    echo "Or start the GTK3 graphical installer with: ./bin/mocinha"
+./bin/mocinha plan "${ARGS[@]}"
+if [ "$INSTALL" = 1 ]; then
+    ./bin/mocinha install "${ARGS[@]}" --confirm
 fi
