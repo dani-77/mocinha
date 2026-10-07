@@ -1,5 +1,5 @@
 {
-  "_comment": "Installed-system state au-d77-install produces (autologin answered 'no'); hostname, user and passwords are the test's choices.",
+  "_comment": "Expected state derived by reading au-d77-install (autologin answered 'no'); hostname, user and passwords are the test's choices.",
   "contains": {
     "/etc/fstab": ["/dev/ufs/AU_D77_ROOT", "tmpfs", "swap", "/boot/efi"],
     "/boot/loader.conf": ["vfs.root.mountfrom=\"ufs:/dev/ufs/AU_D77_ROOT\""],

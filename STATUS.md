@@ -1,72 +1,100 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-07
+**Date:** 2026-10-07 (last validated code: commit `01864ca`)
 **Branch:** `main` (private GitHub repository `dani-77/mocinha`)
+
+This file records what has actually been done and validated, and how. If
+something is not listed as validated here, assume it is not.
 
 ---
 
 ## Summary
 
-Mocinha installs **btw-d77** from its real live ISO, and the installed system
-matches what btw-d77's own installer (`d77-install`) produces on the checked
-points: enabled services, accounts, root account, greetd, hostname, DNS. This
-is verified automatically in QEMU for BIOS/GRUB and UEFI/GRUB
-(`tools/qemu/expect/btw-d77.json`). Remaining differences are listed below.
-au-d77 installs and boots from its real live image, equivalent to its own
-installer (`au-d77-install`). sysvd77 is still a skeleton.
-
 | Target | State |
 |---|---|
-| btw-d77 (Arch + systemd) | Install + boot + equivalence check pass from btw-d77 2026.10.07 ISO, BIOS/GRUB and UEFI/GRUB. |
-| au-d77 (FreeBSD + rc.d) | Install + boot + equivalence check pass from the au-d77 14.5 image (built from `da8e27b`), BIOS; UEFI: see validation log. |
-| sysvd77 (CRUX + sysvinit) | Skeleton only. No working BIOS bootloader path (no LILO provider); Linux platform writes `/etc/hostname`, CRUX uses `HOSTNAME` in `/etc/rc.conf`. Never run on CRUX. |
+| btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO, BIOS/GRUB and UEFI/GRUB. Never run on real hardware. GUI never run on the live. |
+| au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
+| sysvd77 (CRUX + sysvinit) | **Not started.** CRUX providers are unit-tested only; `examples/manifests/sysvd77.toml` is a draft not derived from the remaster. Never run on CRUX. |
 
----|---|
-| btw-d77 (Arch + systemd) | Install + boot verified from btw-d77 2026.10.07 ISO: BIOS/GRUB and UEFI/GRUB. UEFI/Limine correctly rejected (live has no limine). Target still carries live state (see open issues). |
-| au-d77 (FreeBSD + rc.d) | Skeleton only. Cannot work yet (probe reports every disk as 0 bytes). Never run on FreeBSD. |
-| sysvd77 (CRUX + sysvinit) | Skeleton only. No working BIOS bootloader path (Limine is UEFI-only, no LILO provider). Never run on CRUX. |
+**About "equivalence":** the automated equivalence checks compare the
+installed system with an expected state that was **derived by reading** each
+remaster's own installer (`d77-install` + `d77-archinstall.json`,
+`au-d77-install`). Those installers were **not run** to produce a reference
+system. Known points where the checked state differs from what those
+installers produce are listed below.
+
+**0.0.1 milestone (`AGENTS.md`):** met through the **CLI** for btw-d77 in a VM
+(boot live, plan, explicit confirmation, offline install, services,
+bootloader, verification, boot of the installed system). Not met through the
+GUI: the GTK3 frontend has never driven an installation.
 
 ---
 
 ## What exists
 
-### Documentation
-- [`plano.md`](plano.md), [`AGENTS.md`](AGENTS.md): architecture and rules.
-- [`docs/variability-map.md`](docs/variability-map.md), [`docs/language-spike.md`](docs/language-spike.md),
-  [`docs/manifest-schema.md`](docs/manifest-schema.md).
-- [`examples/manifests/`](examples/manifests/): `btw-d77.toml`, `au-d77.toml`, `sysvd77.toml`.
-
 ### Engine (`mocinha/core/`, no GTK dependency)
-- Diagnostic errors (`errors.py`), event stream for logs/Details view (`events.py`).
-- Manifest loader (`manifest.py`) --- **not strict yet** (see open issues).
-- Probe (`probe.py`) --- Linux via sysfs/`/proc/mounts`; FreeBSD partial.
-- Service graph (`services.py`): requires, conflicts, cycles, live-only isolation.
-- Resolver/plan (`resolver.py`, `plan.py`): rejects live medium, disks with
-  critical host mounts, read-only/undersized disks, platform mismatch.
-- Executor (`executor.py`): explicit confirmation; refuses plans with steps
-  lacking an action or a verification; validate -> prepare -> apply -> verify
-  -> cleanup, cleanup guaranteed.
+- Diagnostic errors and an event stream (Details view / logs).
+- Strict manifest (`manifest.py`): required keys, type checks, unknown keys and
+  sections rejected, no invented defaults. Specification: `docs/manifest-schema.md`.
+- Probe (`probe.py`): Linux via sysfs and `/proc/mounts`; FreeBSD via
+  `kern.disks`, `diskinfo`, `mount -p` and `glabel` (labels resolved to disks).
+- Service graph (`services.py`): `requires`, `conflicts`, `after`, cycles,
+  live-only, not-selected services disabled. `wants` and `before` are parsed
+  but **not used**.
+- Resolver/plan: rejects the live medium (disk holding `[install].source` or
+  `/`), disks with critical host mounts, read-only/undersized disks, platform
+  mismatch, invalid hostname/locale shapes.
+- Executor: explicit confirmation; refuses plans with steps lacking an action
+  or a verification; validate -> prepare -> apply -> verify -> cleanup.
 
 ### Providers (`mocinha/providers/`)
-- Plan wiring (`wire_plan_providers`) fails on unregistered providers or
-  unknown steps; frontends wire at plan time, before confirmation.
-- Linux: `sfdisk`, `mkfs` (ext4/vfat), `squashfs` / `rsync` deployment,
-  `mkinitcpio`, `systemd`, `shadow`, platform (mount, UUID fstab, unmount).
-- Boot: GRUB (BIOS verified via MBR signature + `core.img`; UEFI via EFI
-  binary), Limine (UEFI only), FreeBSD `loader.efi`. No placeholder binaries.
-- FreeBSD / CRUX: `gpart`, `newfs`, `tar`, `freebsd-rc`, `pw`, `crux-sysvinit`
-  --- unit-tested only.
+
+| Provider | Validated in VM against a real remaster | Notes |
+|---|---|---|
+| `linux-sfdisk` | yes (btw-d77) | DOS on BIOS, GPT + ESP on UEFI; refuses other layouts and swap. |
+| `linux-mkfs` | yes (btw-d77) | ext4 + FAT32 ESP only. |
+| `squashfs-extract` | yes (btw-d77) | |
+| `mkinitcpio` | yes (btw-d77) | Kernels/images discovered from presets. |
+| `arch-systemd` | yes (btw-d77) | Initializes `/etc/machine-id`. |
+| `shadow` | yes (btw-d77) | |
+| `linux` platform | yes (btw-d77) | Writes systemd-style files (`/etc/hostname`, `/etc/locale.conf`, `/etc/vconsole.conf`). |
+| `grub` | yes (btw-d77, BIOS and UEFI) | `grub-install` + target's `grub-mkconfig`. |
+| `freebsd-gpart`, `freebsd-newfs`, `tree-copy`, `pw`, `freebsd-rc`, `freebsd-loader`, `freebsd` platform | yes (au-d77) | Hybrid GPT only (no MBR). FreeBSD locale/keymap/timezone changes refused. |
+| `limine` | **no** --- unit tests only | UEFI only; never booted in a VM (the btw-d77 live does not ship Limine). |
+| `rsync-copy` | **no** --- unit tests only | Only referenced by the draft sysvd77 manifest. |
+| `tar-extract` | **no** --- unit tests only | Not referenced by any manifest. |
+| `crux-sysvinit` | **no** --- unit tests only | |
+
+Plan wiring fails on unregistered providers or unknown steps before
+confirmation. No placeholder binaries are written anywhere.
 
 ### Frontends
-- CLI (`probe`, `check-manifest`, `plan`, `install`) and GTK3 wizard; launcher `bin/mocinha`.
+- **CLI** (`probe`, `check-manifest`, `plan`, `install`): used for every VM validation.
+  User, password and hostname are required; passwords are given on the
+  command line (visible in `ps`).
+- **GTK3 wizard**: only **rendered offscreen** on the development host with
+  simulated machine facts (screenshots of the pages). Never run inside a live,
+  never ran an installation, never run on FreeBSD. It has root password and
+  password confirmation fields; no locale, keymap, timezone or kernel-argument
+  fields (the live's settings are kept). The hostname is pre-filled with
+  `[system].id`.
+- `bin/mocinha` uses `python3`; FreeBSD only ships `python3.12` by default, so
+  the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 56 unit tests (`python3 -m unittest discover -s tests`), including regression
-  tests for every failure mode fixed in commit `58cc421`.
+- 80 unit tests (`python3 -m unittest discover -s tests`), including regression
+  tests for the failures found in the VM runs.
+- QEMU harnesses in `tools/qemu/` (below).
+
+### Packaging
+- **None.** Mocinha is not packaged for any live; the VM tests deliver it over
+  9p (btw-d77) or HTTP (au-d77). It does not remove itself from the target.
 
 ---
 
 ## VM validation log
+
+### btw-d77 --- ISO 2026.10.07 built from `~/Remaster/btw-d77` (repository untouched)
 
 Harness:
 
@@ -77,134 +105,112 @@ tools/qemu/test_boot_installed.py --firmware bios|uefi --disk tools/qemu/work/ta
 ```
 
 The live is booted from the ISO's own kernel/initramfs (the ISO's boot menu is
-not exercised); Mocinha runs as root over the serial console because btw-d77's
-greetd takes tty1 and the archiso `script=` hook never fires. The boot proof
-logs in over serial, collects diagnostics and compares them with the expected
-state of a `d77-install` system.
+not exercised). Mocinha runs as root over the serial console because btw-d77's
+greetd takes tty1 and the archiso `script=` hook never fires. The test asks for
+`console=ttyS0` through `--kernel-args` so the installed system can be checked
+over serial.
 
-**2026-10-07 --- btw-d77 2026.10.07 ISO (built from `~/Remaster/btw-d77`, untouched)**
-
-| Run | Install | Boot | Equivalence with d77-install |
+| Run (code `01864ca`) | Install | Boot | Equivalence check |
 |---|---|---|---|
 | BIOS + GRUB | pass | pass | pass |
 | UEFI + GRUB | pass | pass | pass |
-| UEFI + Limine | refused at provider validation, before any disk write (no Limine in the live) | --- | --- |
+| UEFI + Limine (earlier code, `e8bd6ee`) | refused at validation, before any disk write (no Limine in the live) | --- | --- |
 
-Checked on the installed system: hostname `btw-test`; only user `dani` (uid
-1000, groups wheel + storage); root locked; `greetd`, `NetworkManager`,
-`systemd-timesyncd` enabled; live units (choose-mirror, pacman-init, livecd-*,
-reflector, networkd, resolved, time-wait-sync, pcscd) and not-selected
-`sshd`/`iwd` disabled; greetd greeter-only (no `[initial_session]`, no `live`);
-`/etc/resolv.conf` written by NetworkManager; locale `pt_PT.UTF-8` generated
-and set, keymap `pt-latin1`, timezone `Europe/Lisbon`; default target
-`graphical.target`; `systemctl is-system-running` = running, no failed units.
+Checked on the installed system: hostname; only user `dani` (uid 1000, groups
+wheel + storage); root locked; `greetd`, `NetworkManager`, `systemd-timesyncd`
+enabled; live units and not-selected `sshd`/`iwd` disabled; greetd
+greeter-only; `/etc/resolv.conf` written by NetworkManager; locale
+`pt_PT.UTF-8` generated, keymap `pt-latin1`, timezone `Europe/Lisbon`;
+default target `graphical.target`; `systemctl is-system-running` = running.
 
-Problems the btw-d77 runs exposed and that are now fixed:
-- archiso's `linux.preset` broke `mkinitcpio -P` on the target -> stock preset restored.
-- GRUB on UEFI loaded the kernel from the wrong filesystem.
-- The live user `live` and greetd `[initial_session]` were copied: the target
-  auto-logged into Qtile with no password -> `[live_only].users` + `[[target_files]]`.
-- Root kept the live's empty password -> root locked unless a root password is chosen.
-- `/etc/sudoers` kept `live ALL=(ALL:ALL) ALL` -> target file.
-- Live-only units stayed enabled; units of uninstalled packages left dangling links.
-- Not-selected services stayed enabled because the live had them enabled -> now disabled.
-- `/etc/machine-id` was `uninitialized`: the first boot ran `systemctl preset-all`
-  and re-enabled networkd/resolved -> machine-id initialized at install.
-- `/etc/resolv.conf` pointed at the disabled resolved stub (no DNS) -> regular file.
-- Hostname was never written (live value `d77 archiso`) -> hostname step + validation.
+Differences from what `d77-install` produces (not covered by the check, or
+checked differently):
+1. **Root account:** d77-install always sets a root password; the test
+   exercised Mocinha's "root locked" choice (`--root-password` exists but was
+   not used for btw-d77).
+2. **Partition layout:** d77-install always uses GPT with a BIOS boot
+   partition, a 1 GiB ESP and the root partition; Mocinha uses DOS on BIOS and
+   GPT (ESP + root) on UEFI.
+3. **Packages:** the target keeps the live package set (e.g. archinstall,
+   dialog, reflector, iwd, openssh); only their services are disabled.
+4. **GRUB theme:** `d77-grub-theme` is not in the live (d77-install installs it
+   online). No removable-media fallback (`\EFI\BOOT\BOOTX64.EFI`) for GRUB, so
+   UEFI boot relies on the NVRAM entry.
+5. No LUKS, btrfs or swapfile options.
 
----
+Problems found by the btw-d77 runs and fixed: archiso's mkinitcpio preset;
+GRUB kernel path on UEFI; live user and greetd autologin copied to the target;
+empty root password copied; `live` sudoers rule; live-only units and dangling
+links; not-selected services left enabled; `uninitialized` machine-id
+re-enabling units on first boot; dangling `/etc/resolv.conf`; hostname never
+written.
 
-**2026-10-07 --- au-d77 14.5-RELEASE image (built from `~/Remaster/au-d77` at `da8e27b`, untouched)**
+### au-d77 --- 14.5-RELEASE image built from `~/Remaster/au-d77` at `da8e27b` (repository untouched)
 
-Harness: `tools/qemu/run_au_d77_test.sh --firmware bios|uefi` (expectations in
-`tools/qemu/expect/au-d77.json`). FreeBSD 14 has no 9p, so Mocinha is fetched
-over HTTP and logs are uploaded with HTTP PUT. The live has no serial login, so
-the driver boots it single-user from the loader, switches `ttyu0` to an
-autologin getty on a throwaway qcow2 overlay of the image, continues to
-multi-user and restores `/etc/ttys` before Mocinha runs. Boot proof: multi-user
-boot to the getty banner, then a single-user boot that must ask for the root
-password chosen at install time, and diagnostics.
+Harness: `tools/qemu/run_au_d77_test.sh --firmware bios|uefi`
+(`SKIP_INSTALL=1` re-runs only the boot checks), expectations in
+`tools/qemu/expect/au-d77.json`. FreeBSD 14 has no 9p: Mocinha is fetched over
+HTTP and logs uploaded with HTTP PUT. The live has no serial login, so the
+driver boots it single-user from the loader, switches `ttyu0` to an autologin
+getty on a throwaway qcow2 overlay of the image, continues to multi-user and
+restores `/etc/ttys` before Mocinha runs. Boot proof: multi-user boot to the
+getty banner, then a single-user boot that must ask for the root password
+chosen at install time, and diagnostics read in single-user mode.
 
-| Run | Install | Boot | Equivalence with au-d77-install |
+| Run (code `01864ca`) | Install | Boot | Equivalence check |
 |---|---|---|---|
-| BIOS | pass (14/14 steps verified) | pass (login prompt, hostname `au-test`) | pass |
-| UEFI (installed disk) | --- | pass (empty NVRAM: removable path `EFI/BOOT/BOOTX64.EFI`) | pass |
+| BIOS live -> install | pass (14 steps verified) | --- | --- |
+| Installed disk, BIOS | --- | pass | pass |
+| Installed disk, UEFI (empty NVRAM, removable path) | --- | pass (run 3 times) | pass |
 
-The au-d77 **live image does not boot under OVMF (UEFI)**: its 32 MiB ESP is
-formatted FAT32 with 1-sector clusters, i.e. ~64 496 clusters, below the 65 525
-the FAT specification requires for FAT32; EDK2 refuses it
-(`assemble-image.sh` hides mkfs.fat's warning with `>/dev/null`). Real firmware
-may be lenient. The UEFI path of the *installed* system was therefore tested by
-booting the disk installed from the BIOS-booted live. Mocinha's own ESP
-(200 MB) is valid FAT32.
+The **au-d77 live image does not boot under OVMF**: its 32 MiB ESP is
+formatted FAT32 with ~64 496 clusters, below the 65 525 FAT32 requires, and
+EDK2 refuses it (`assemble-image.sh` hides mkfs.fat's warning). Real firmware
+may be lenient. Installing from a UEFI-booted au-d77 live has therefore not
+been tested.
 
-Checked: fstab by labels (`ufs/AU_D77_ROOT`, `gpt/au-d77-swap`, `gpt/au-d77-efi`,
-tmpfs `/tmp`); `loader.conf` mounts `AU_D77_ROOT`; `rc.conf` hostname `au-test`,
-`tmpmfs="NO"`, `dumpdev="AUTO"`; console `insecure` (single-user asks for the root
-password), no `al.d77` autologin; only user `dani` (wheel, operator, video), live
-user `d77` and its home removed; root password set; `sudoers.d/10-live` removed,
-`10-wheel` present; `doas.conf` `permit persist :wheel`.
+Checked: fstab by labels (`ufs/AU_D77_ROOT`, `gpt/au-d77-swap`,
+`gpt/au-d77-efi`, tmpfs `/tmp`); `loader.conf` mounts `AU_D77_ROOT`;
+`rc.conf` hostname, `tmpmfs="NO"`, `dumpdev="AUTO"`; console `insecure`; no
+`al.d77` autologin; only user `dani` (wheel, operator, video), `d77` and its
+home removed; root password set (`$6$`); `sudoers.d/10-live` removed,
+`10-wheel` present; `doas.conf`.
 
-Problems the au-d77 runs exposed and that are now fixed:
-- The FreeBSD probe reported every disk as 0 bytes and did not recognize the live
-  root mounted by label (`ufs/AU_D77_LIVE`).
-- The agy manifest extracted `base.txz` instead of copying the live: new
-  `tree-copy` deployment (tar pipe, `--one-file-system`, both ends checked),
-  which must not copy over target mount points (ESP at `/boot/efi`).
-- `pw` provider fell back to writing `/etc/passwd` by hand and hard-coded `doas.conf`.
-- GPT labels must not collide with the live's (`efiboot`); labels are verified on
-  the partition table and UFS superblock because GEOM withers label providers of
-  mounted partitions.
+Differences from what `au-d77-install` produces:
+1. No autologin option (au-d77-install asks, default yes).
+2. Swap size fixed by the manifest (`2g`); au-d77-install scales it with disk size.
+3. No MBR layout (au-d77-install offers it for BIOS).
+4. GPT labels `au-d77-*` instead of `bootcode/efiboot/swap0/rootfs`, on purpose
+   (the live already uses `efiboot`).
+5. Keymap/timezone not offered on FreeBSD (au-d77-install asks interactively).
+
+Problems found by the au-d77 runs and fixed: FreeBSD probe (0-byte disks, live
+root by label not recognised); agy's manifest extracted `base.txz` instead of
+copying the live; `pw` provider hand-writing `/etc/passwd`; tar copy over the
+mounted ESP; GPT label collisions with the live; label verification on mounted
+partitions.
+
+The Wasp desktop could not be shown in QEMU: FreeBSD's drm-kmod has no KMS
+driver for QEMU's virtual GPUs, so the live session falls back to a shell.
 
 ---
 
-## Open issues found so far
+## Open issues and debt
 
-Remaining differences from a `d77-install` system:
-1. Packages: the target keeps the live package set (e.g. archinstall, dialog,
-   reflector, iwd, openssh), only their services are disabled. Mocinha is not a
-   package manager; removing them would be an explicit, separate decision.
-2. GRUB theme: GRUB is configured with the target's own `grub-mkconfig` and
-   `/etc/default/grub`, but `d77-grub-theme` is not in the live image
-   (d77-install installs it online). No removable-media fallback
-   (`\EFI\BOOT\BOOTX64.EFI`) for GRUB, so UEFI boot relies on the NVRAM entry.
-3. No LUKS, btrfs or swapfile options (d77-install offers them).
-4. GUI has no locale, keymap, timezone or kernel-argument fields (the live's
-   settings are kept from the GUI; the CLI has the options).
-5. Firmware/bootloader incompatibilities are only detected at provider validation (after confirmation).
-
-Remaining differences from an `au-d77-install` system:
-1. No autologin option (au-d77-install asks, default yes); Mocinha installs without autologin.
-2. Swap size is fixed by the manifest (`2g`); au-d77-install scales it with disk size.
-3. No MBR layout for BIOS (au-d77-install offers it; Mocinha uses the hybrid GPT layout).
-4. GPT labels differ (`au-d77-*` instead of `bootcode/efiboot/swap0/rootfs`), on purpose.
-5. Keymap/timezone are not offered (au-d77-install asks interactively; both keep the live values otherwise).
-
-Other platforms:
-- Locale/keymap/timezone and `[services].default_target` are refused by the
-  FreeBSD/CRUX providers until implemented; the Linux platform provider writes
-  systemd-style files (`/etc/locale.conf`, `/etc/vconsole.conf`, `/etc/hostname`),
-  which CRUX does not use (it uses `/etc/rc.conf`).
-
-Architectural debt:
+- GUI: never exercised in a live; no locale/keymap/timezone/kernel-argument fields.
+- Packaging for the lives, `python3` vs `python3.12` on FreeBSD, and removing
+  Mocinha from the installed target: not done.
+- Limine, `rsync-copy`, `tar-extract`, `crux-sysvinit`: never validated in a VM.
+- `[install].method` is only a label in the plan; the deployment provider is
+  chosen by `[providers].deployment`.
 - Bootloader/firmware compatibility (lilo/syslinux vs UEFI, systemd-boot vs
-  BIOS) lives in the resolver instead of provider capabilities.
+  BIOS) lives in the resolver instead of provider capabilities; Limine on BIOS
+  is refused at provider validation (after confirmation, before any disk write).
 - `wants` / `before` service metadata parsed but unused.
-- The CLI takes passwords on the command line (visible in `ps`); fine for
-  automated tests, not for interactive use.
+- CLI passwords on the command line.
 - `plano.md` §5 describes the administrator as an intention resolved by a
-  provider (`capabilities = administrator`); today the remaster declares the
-  administrator group in `[users].groups` and the sudo/doas rules as
-  `[[target_files]]`. Decide whether that is enough or a provider is needed.
-
-Removed hard-coded policy (2026-10-07): the manifest is strict (required keys,
-no invented defaults, unknown keys rejected); kernels/initramfs are discovered
-from the target (mkinitcpio presets) instead of `vmlinuz-linux`; GRUB uses
-`grub-mkconfig` instead of a hand-written `grub.cfg` with a forced serial
-console; Limine timeout/cmdline come from the manifest/user; root filesystem,
-ESP size/label/mount point, mount options, user groups and shell come from the
-manifest; the live medium is found from the mounts holding `[install].source`
-or `/` instead of archiso path names; no squashfs path guessing; no default
-user, password or hostname in the CLI/GUI; the GUI no longer loads an example
-manifest by default.
+  provider; today the remaster declares the administrator group in
+  `[users].groups` and sudo/doas rules as `[[target_files]]`. To be decided.
+- Linux platform provider is systemd-style (`/etc/hostname`, `locale.conf`,
+  `vconsole.conf`); CRUX uses `/etc/rc.conf`. Expected to surface with sysvd77.
+- Future idea, not planned: optional online components (`plano.md` §22.1).

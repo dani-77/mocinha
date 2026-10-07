@@ -497,6 +497,9 @@ Each project must be able to provide a declarative manifest.
     [services]
     enable = ["NetworkManager", "dbus"]
 
+(Conceptual example from the kick-off; the implemented schema is in
+`docs/manifest-schema.md`.)
+
 The manifest does not replace the probe:
 
 **Manifest = the remaster's intention/knowledge.**\
@@ -1014,10 +1017,10 @@ sense.
 
 ------------------------------------------------------------------------
 
-**Status:** architecture defined / implementation kick-off ---
-2026-10-07.
+**Status at kick-off:** architecture defined / implementation kick-off ---
+2026-10-07. (Historical; the current, validated state is in `STATUS.md`.)
 
-**Immediate next steps:**
+**Immediate next steps at kick-off:**
 
 1.  create the repository and keep `plano.md` + `AGENTS.md` at the root;
 2.  create `docs/variability-map.md`;

@@ -1,5 +1,5 @@
 {
-  "_comment": "Installed-system state btw-d77's own installer (d77-install + d77-archinstall.json) produces; hostname/user are the test's choices.",
+  "_comment": "Expected state derived by reading btw-d77's installer (d77-install + d77-archinstall.json); hostname, user and locale are the test's choices. Differs from d77-install on purpose in root_locked (d77-install always sets a root password; this test exercises Mocinha's locked-root choice).",
   "hostname": "btw-test",
   "users": {"dani": "1000"},
   "groups_of_primary_user": ["wheel", "storage"],

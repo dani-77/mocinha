@@ -31,7 +31,7 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 
 | Key | Required | Meaning |
 |---|---|---|
-| `method` | yes | Deployment family, e.g. `squashfs`, `tree-copy`, `rsync`. |
+| `method` | yes | Name shown in the plan for the deployment step. The deployment provider itself is chosen by `[providers].deployment`. |
 | `source` | yes | What is deployed: the live root image file or tree. Never guessed. The disk holding it (or the running `/`) is treated as the live medium and cannot be selected as target. |
 | `min_disk_size_bytes` | yes | Minimum target disk size. |
 | `root_filesystem` | yes | e.g. `ext4`, `ufs`. Filesystem providers refuse types they do not implement. |
@@ -74,7 +74,7 @@ initramfs provider discovers.
 | `default_enabled` | Pre-selected; the user may deselect them. |
 | `optional` | Shown unselected; the user may select them. |
 | `live_only` | Enabled in the live only; disabled on the target. |
-| `metadata.<id>` | Relations: `requires`, `wants`, `conflicts`, `before`, `after`. |
+| `metadata.<id>` | Relations: `requires`, `conflicts`, `after` are used; `wants` and `before` are accepted but not used yet. |
 | `default_target` | Boot target for systemd (e.g. `graphical.target`); other service providers refuse it. |
 
 Services in `default_enabled` or `optional` that the user does not select
@@ -137,10 +137,10 @@ user = "greeter"
 
 ## 3. User choices (not in the manifest)
 
-Chosen in the GUI or on the CLI and shown in the plan: target disk,
-bootloader (from `[boot].available`), user name and password, root
-password (empty: locked), hostname, optional services, extra kernel
-arguments, and locale/keymap/timezone (unset: keep the live's settings;
+Shown in the plan. In the GUI and on the CLI: target disk, bootloader
+(from `[boot].available`), user name and password, root password (empty:
+locked), hostname, optional services. On the CLI only: extra kernel
+arguments and locale/keymap/timezone (unset: keep the live's settings;
 providers that cannot apply a requested change refuse it during
 validation, before any disk is modified).
 
