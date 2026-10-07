@@ -1,0 +1,15 @@
+{
+  "_comment": "Installed-system state btw-d77's own installer (d77-install + d77-archinstall.json) produces; hostname/user are the test's choices.",
+  "hostname": "btw-test",
+  "users": {"dani": "1000"},
+  "groups_of_primary_user": ["wheel"],
+  "root_locked": true,
+  "enabled_units_present": ["greetd.service", "NetworkManager.service", "systemd-timesyncd.service"],
+  "enabled_units_absent": [
+    "choose-mirror.service", "pacman-init.service", "livecd-talk.service", "livecd-alsa-unmuter.service",
+    "reflector.service", "systemd-networkd.service", "systemd-networkd-wait-online.service",
+    "systemd-resolved.service", "systemd-time-wait-sync.service", "pcscd.socket", "sshd.service", "iwd.service"
+  ],
+  "greetd_config_absent": ["initial_session", "user = \"live\""],
+  "system_state": "running"
+}

@@ -93,3 +93,52 @@ Define a taxonomia de serviços para evitar atolamento em checkboxes ingénuas:
 - `optional`: Mostrados desmarcados; utilizador pode selecionar.
 - `live_only`: Se o probe detetar estes serviços a correr na live, o executor garante que são limpos e desativados no target persistente.
 - `metadata.<id>`: Declarativo de relações (`requires`, `conflicts`, `wants`).
+
+---
+
+## 3. Live-only artifacts and installed-system files
+
+Mocinha installs by copying the booted live system. Anything that exists only
+to run the live session is copied too, unless the manifest declares it. An
+installer that builds the target from packages (pacstrap, debootstrap) never
+sees these artifacts; a copying installer must remove them explicitly.
+
+```toml
+[live_only]
+# Accounts that exist only for the live session. Removed from the target
+# (with their home) before the primary user is created, so the primary user
+# gets the first free UID. "root" is not allowed here.
+users = ["live"]
+
+# Files, symlinks or directories removed from the target after deployment.
+# Absolute paths inside the system; top-level directories (/etc, /usr, ...)
+# and '..' are rejected. Removal never follows symlinks out of the target.
+files = [
+    "/etc/systemd/system/getty@tty1.service.d/autologin.conf",
+    "/root/.automated_script.sh",
+]
+
+# Files whose installed content differs from the live copy. Written after the
+# live-only files are removed; content and mode are verified afterwards.
+# Use TOML literal strings (''' ... ''') for content that contains backslashes.
+[[target_files]]
+path = "/etc/greetd/config.toml"
+mode = "0644"
+content = '''
+[default_session]
+command = "agreety --cmd /usr/local/bin/qtile-session"
+user = "greeter"
+'''
+```
+
+Unknown keys in `[live_only]` and `[[target_files]]` are rejected, not ignored.
+
+Related behavior:
+
+- `[services].live_only` units are disabled on the target; enablement links
+  left by units whose package is not installed are removed.
+- Services listed in `default_enabled` or `optional` that the user does not
+  select are **disabled** on the target, because the live copy may have them
+  enabled.
+- The root account is locked unless a root password is chosen; the plan shows
+  which one applies.

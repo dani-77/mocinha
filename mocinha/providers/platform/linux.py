@@ -8,7 +8,14 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner, read_blkid_uuid
+from mocinha.providers.base import (
+    CommandRunner,
+    read_blkid_uuid,
+    remove_target_paths,
+    verify_target_files,
+    verify_target_paths_absent,
+    write_target_files,
+)
 
 
 class LinuxPlatformProvider(ProviderContract):
@@ -172,6 +179,32 @@ class LinuxPlatformProvider(ProviderContract):
                 possible_recovery="Check for processes holding files on the target (fuser -m).",
             )
         self.events.info(EventPhase.VERIFY, f"Target unmounted from {context.target_mount}.")
+
+    def remove_live_only_files(self, context: ExecutionContext) -> None:
+        remove_target_paths(context.target_mount, context.metadata["live_only_files"], self.events)
+
+    def verify_live_only_files_removed(self, context: ExecutionContext) -> None:
+        verify_target_paths_absent(context.target_mount, context.metadata["live_only_files"], self.events)
+
+    def write_target_files(self, context: ExecutionContext) -> None:
+        write_target_files(context.target_mount, context.metadata["target_files"], self.events)
+
+    def verify_target_files(self, context: ExecutionContext) -> None:
+        verify_target_files(context.target_mount, context.metadata["target_files"], self.events)
+
+    def verify_hostname(self, context: ExecutionContext) -> None:
+        expected = context.metadata["hostname"]
+        hostname_file = Path(context.target_mount) / "etc" / "hostname"
+        actual = hostname_file.read_text().strip() if hostname_file.is_file() else None
+        if actual != expected:
+            raise VerificationError(
+                message=f"Target hostname is {actual!r}, expected {expected!r}.",
+                cause="/etc/hostname on the target does not contain the chosen hostname.",
+                failed_operation="Verify target hostname",
+                current_state=f"/etc/hostname: {actual!r}",
+                possible_recovery="Re-run the hostname step.",
+            )
+        self.events.info(EventPhase.VERIFY, f"Target hostname verified: {expected}")
 
     def apply(self, context: ExecutionContext) -> None:
         pass

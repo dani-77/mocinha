@@ -45,6 +45,9 @@ class ServiceResolutionResult:
     live_only_to_clean: List[str]
     auto_included_dependencies: Dict[str, str]  # service -> required_by
     explanations: List[str]
+    # Known, persistable services the user did not select: disabled on the target,
+    # because the live copy may have them enabled
+    deselected: List[str] = field(default_factory=list)
 
 
 class ServiceGraph:
@@ -158,11 +161,19 @@ class ServiceGraph:
             if s_item.category == ServiceCategory.LIVE_ONLY
         ]
 
+        deselected = sorted(
+            s_id for s_id, s_item in self.services.items()
+            if s_item.category != ServiceCategory.LIVE_ONLY and s_id not in target_set
+        )
+        for s_id in deselected:
+            explanations.append(f"Service '{s_id}' not selected: it will be disabled on the target.")
+
         return ServiceResolutionResult(
             enabled_services=ordered_services,
             live_only_to_clean=live_only_services,
             auto_included_dependencies=auto_included,
             explanations=explanations,
+            deselected=deselected,
         )
 
     def _topological_sort(self, service_ids: Set[str]) -> List[str]:

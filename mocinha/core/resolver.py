@@ -6,6 +6,7 @@ Produces a validated, staged, non-destructive InstallationPlan.
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Set
+import re
 
 from mocinha.core.errors import ResolutionError
 from mocinha.core.events import EventPhase, EventStream
@@ -25,9 +26,14 @@ class UserChoices:
     username: str
     password: str
     hostname: str = "mocinha"
+    # None: lock the root account on the target (administration through the primary user)
+    root_password: Optional[str] = None
     locale: str = "en_US.UTF-8"
     timezone: str = "UTC"
     selected_services: Set[str] = field(default_factory=set)
+
+
+HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
 
 
 class InstallationResolver:
@@ -159,6 +165,19 @@ class InstallationResolver:
                 possible_recovery="Provide a valid username (e.g. 'user', 'admin').",
             )
 
+        if not HOSTNAME_RE.match(choices.hostname or ""):
+            raise ResolutionError(
+                message=f"Invalid hostname: {choices.hostname!r}",
+                cause="A hostname must be 1-63 letters, digits or hyphens, not starting or ending with a hyphen.",
+                failed_operation="Validate hostname",
+                current_state=f"hostname={choices.hostname!r}",
+                possible_recovery="Choose a hostname such as 'btw-d77'.",
+            )
+        root_account = "password set" if choices.root_password else "locked"
+
+        live_only = self.manifest.live_only
+        target_files = self.manifest.target_files
+
         # 5. Build Staged Steps
         steps: List[PlanStep] = [
             PlanStep(
@@ -190,6 +209,27 @@ class InstallationResolver:
                 provider_name=self.manifest.providers.deployment or "deployment",
             ),
             PlanStep(
+                step_id="remove_live_only_files",
+                title="Remove live-only files from target",
+                description=f"Delete {len(live_only.files)} live-session file(s) declared in the manifest: {live_only.files}",
+                is_destructive=False,
+                provider_name="platform",
+            ),
+            PlanStep(
+                step_id="write_target_files",
+                title="Write installed-system configuration files",
+                description=f"Write {len(target_files)} file(s) whose installed content differs from the live: {[f.path for f in target_files]}",
+                is_destructive=False,
+                provider_name="platform",
+            ),
+            PlanStep(
+                step_id="configure_hostname",
+                title=f"Set hostname '{choices.hostname}'",
+                description="Write the target hostname configuration",
+                is_destructive=False,
+                provider_name="platform",
+            ),
+            PlanStep(
                 step_id="configure_fstab",
                 title="Generate filesystem table (/etc/fstab)",
                 description="Write persistent partition mounts using durable UUIDs/labels",
@@ -199,7 +239,10 @@ class InstallationResolver:
             PlanStep(
                 step_id="configure_user",
                 title=f"Create primary user '{choices.username}' and grant admin capability",
-                description=f"Create user account, configure shell, assign admin privilege via {self.manifest.providers.administrator}",
+                description=(
+                    f"Remove live-only users {live_only.users}; create user account, assign admin privilege via "
+                    f"{self.manifest.providers.administrator}; root account: {root_account}"
+                ),
                 is_destructive=False,
                 provider_name=self.manifest.providers.users,
             ),
@@ -222,7 +265,8 @@ class InstallationResolver:
                 title="Configure persistent services",
                 description=(
                     f"Enable services on target: {service_res.enabled_services}; "
-                    f"disable live-only services: {service_res.live_only_to_clean}"
+                    f"disable live-only services: {service_res.live_only_to_clean}; "
+                    f"disable not-selected services: {service_res.deselected}"
                 ),
                 is_destructive=False,
                 provider_name=self.manifest.providers.services,
@@ -262,9 +306,26 @@ class InstallationResolver:
             live_only_removed=service_res.live_only_to_clean,
             username=choices.username,
             hostname=choices.hostname,
+            root_account=root_account,
+            live_only_users=list(live_only.users),
         )
 
-        plan = InstallationPlan(summary=summary, steps=steps)
+        # Everything providers need at execution time, except secrets
+        metadata = {
+            "username": choices.username,
+            "hostname": choices.hostname,
+            "firmware": self.facts.firmware.value,
+            "enabled_services": service_res.enabled_services,
+            "live_only_to_clean": service_res.live_only_to_clean,
+            "deselected_services": service_res.deselected,
+            "install_source": self.manifest.install.source,
+            "live_only_users": list(live_only.users),
+            "live_only_files": list(live_only.files),
+            "target_files": list(target_files),
+            "lock_root": not choices.root_password,
+        }
+
+        plan = InstallationPlan(summary=summary, steps=steps, metadata=metadata)
         self.events.info(EventPhase.RESOLVE, "Installation plan resolved successfully.")
         return plan
 

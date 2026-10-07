@@ -40,6 +40,8 @@ class TargetSummary:
     live_only_removed: List[str] = field(default_factory=list)
     username: Optional[str] = None
     hostname: Optional[str] = None
+    root_account: Optional[str] = None
+    live_only_users: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -68,6 +70,10 @@ class InstallationPlan:
             lines.append(f"Primary User:     {self.summary.username}")
         if self.summary.hostname:
             lines.append(f"Hostname:         {self.summary.hostname}")
+        if self.summary.root_account:
+            lines.append(f"Root Account:     {self.summary.root_account}")
+        if self.summary.live_only_users:
+            lines.append(f"Live-only Users:  {', '.join(self.summary.live_only_users)} (removed)")
         if self.summary.live_only_removed:
             lines.append(f"Live-only Clean:  {', '.join(self.summary.live_only_removed)}")
 

@@ -91,6 +91,18 @@ class TestServices(unittest.TestCase):
         self.assertIn("sshd", res.enabled_services)
         self.assertIn("live-setup", res.live_only_to_clean)
 
+    def test_unselected_services_are_disabled_on_target(self) -> None:
+        """Regression (btw-d77): services enabled in the live but not chosen stayed enabled."""
+        result = self.graph.resolve_service_graph(set())
+        selected = set(result.enabled_services)
+        live_only = set(result.live_only_to_clean)
+        self.assertTrue(result.deselected)
+        for s_id in result.deselected:
+            self.assertNotIn(s_id, selected)
+            self.assertNotIn(s_id, live_only)
+        known = set(self.graph.services)
+        self.assertEqual(selected | live_only | set(result.deselected), known)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,16 +7,20 @@
 
 ## Summary
 
-The architecture (frontend / engine / providers, manifest -> probe -> resolver
--> plan -> executor -> verify) is in place and the engine fails closed.
-Mocinha installs from a real **btw-d77** live ISO and the result boots (BIOS
-and UEFI, GRUB). The 0.0.1 milestone in `AGENTS.md` is **not yet met**: the
-installed system is still largely the live system (live user autologin,
-live-only services, live hostname) because the manifest/live-only model does
-not cover those artifacts yet.
+Mocinha installs **btw-d77** from its real live ISO, and the installed system
+matches what btw-d77's own installer (`d77-install`) produces on the checked
+points: enabled services, accounts, root account, greetd, hostname, DNS. This
+is verified automatically in QEMU for BIOS/GRUB and UEFI/GRUB
+(`tools/qemu/expect/btw-d77.json`). Remaining differences are listed below.
+au-d77 and sysvd77 are still skeletons.
 
 | Target | State |
 |---|---|
+| btw-d77 (Arch + systemd) | Install + boot + equivalence check pass from btw-d77 2026.10.07 ISO, BIOS/GRUB and UEFI/GRUB. |
+| au-d77 (FreeBSD + rc.d) | Skeleton only. Cannot work yet (probe reports every disk as 0 bytes; `pw` provider refuses live-only users/root policy). Never run on FreeBSD. |
+| sysvd77 (CRUX + sysvinit) | Skeleton only. No working BIOS bootloader path (no LILO provider); Linux platform writes `/etc/hostname`, CRUX uses `HOSTNAME` in `/etc/rc.conf`. Never run on CRUX. |
+
+---|---|
 | btw-d77 (Arch + systemd) | Install + boot verified from btw-d77 2026.10.07 ISO: BIOS/GRUB and UEFI/GRUB. UEFI/Limine correctly rejected (live has no limine). Target still carries live state (see open issues). |
 | au-d77 (FreeBSD + rc.d) | Skeleton only. Cannot work yet (probe reports every disk as 0 bytes). Never run on FreeBSD. |
 | sysvd77 (CRUX + sysvinit) | Skeleton only. No working BIOS bootloader path (Limine is UEFI-only, no LILO provider). Never run on CRUX. |
@@ -63,53 +67,69 @@ not cover those artifacts yet.
 
 ## VM validation log
 
-Harness: `tools/qemu/run_automated_test.sh --firmware bios|uefi [--bootloader NAME]`
-then `tools/qemu/test_boot_installed.py --firmware ... --disk tools/qemu/work/target-<run>.qcow2`.
+Harness:
+
+```
+tools/qemu/run_automated_test.sh --firmware bios|uefi [--bootloader NAME] [--iso PATH]
+tools/qemu/test_boot_installed.py --firmware bios|uefi --disk tools/qemu/work/target-<run>.qcow2 \
+    --expect tools/qemu/expect/btw-d77.json
+```
+
 The live is booted from the ISO's own kernel/initramfs (the ISO's boot menu is
 not exercised); Mocinha runs as root over the serial console because btw-d77's
-greetd takes tty1 and the archiso `script=` hook never fires.
+greetd takes tty1 and the archiso `script=` hook never fires. The boot proof
+logs in over serial, collects diagnostics and compares them with the expected
+state of a `d77-install` system.
 
-**2026-10-07 --- btw-d77 2026.10.07 ISO (built from `~/Remaster/btw-d77`)**
+**2026-10-07 --- btw-d77 2026.10.07 ISO (built from `~/Remaster/btw-d77`, untouched)**
 
-| Run | Install | Boot proof |
-|---|---|---|
-| BIOS + GRUB | pass (11/11 steps verified) | pass: serial login as `dani`, root via fstab UUID, `systemctl is-system-running` = running |
-| UEFI + GRUB | pass | pass (after fixing the kernel path in `grub.cfg`, see below) |
-| UEFI + Limine | refused at provider validation, before any disk write: no `BOOTX64.EFI` in the live | --- |
+| Run | Install | Boot | Equivalence with d77-install |
+|---|---|---|---|
+| BIOS + GRUB | pass | pass | pass |
+| UEFI + GRUB | pass | pass | pass |
+| UEFI + Limine | refused at provider validation, before any disk write (no Limine in the live) | --- | --- |
 
-Bugs found by the btw-d77 runs and fixed:
-- btw-d77 ships archiso's `linux.preset`; `mkinitcpio -P` failed on the target
-  once `archiso.conf` was removed. The mkinitcpio provider now restores the stock
-  preset from `/usr/share/mkinitcpio/hook.preset`.
-- GRUB on UEFI searched `/boot/vmlinuz-linux` on the root filesystem while the
-  kernel lives on the ESP mounted at `/boot`.
-- The old boot-proof script matched its own echoed command and could report
-  success without running diagnostics.
+Checked on the installed system: hostname `btw-test`; only user `dani` (uid
+1000, wheel); root locked; `greetd`, `NetworkManager`, `systemd-timesyncd`
+enabled; live units (choose-mirror, pacman-init, livecd-*, reflector,
+networkd, resolved, time-wait-sync, pcscd) and not-selected `sshd`/`iwd`
+disabled; greetd greeter-only (no `[initial_session]`, no `live`);
+`/etc/resolv.conf` written by NetworkManager; `systemctl is-system-running` =
+running, no failed units.
 
-Earlier runs (commits `891281d`, `58cc421`) used the generic upstream archiso
-and are superseded.
+Problems the btw-d77 runs exposed and that are now fixed:
+- archiso's `linux.preset` broke `mkinitcpio -P` on the target -> stock preset restored.
+- GRUB on UEFI loaded the kernel from the wrong filesystem.
+- The live user `live` and greetd `[initial_session]` were copied: the target
+  auto-logged into Qtile with no password -> `[live_only].users` + `[[target_files]]`.
+- Root kept the live's empty password -> root locked unless a root password is chosen.
+- `/etc/sudoers` kept `live ALL=(ALL:ALL) ALL` -> target file.
+- Live-only units stayed enabled; units of uninstalled packages left dangling links.
+- Not-selected services stayed enabled because the live had them enabled -> now disabled.
+- `/etc/machine-id` was `uninitialized`: the first boot ran `systemctl preset-all`
+  and re-enabled networkd/resolved -> machine-id initialized at install.
+- `/etc/resolv.conf` pointed at the disabled resolved stub (no DNS) -> regular file.
+- Hostname was never written (live value `d77 archiso`) -> hostname step + validation.
 
 ---
 
 ## Open issues found so far
 
-Blocking for btw-d77 0.0.1 (observed on the installed btw-d77 system):
-1. **The installed system auto-logs in as `live` into Qtile with no password.**
-   The live user (`live`, uid 1000) and greetd's `[initial_session]` are copied
-   to the target. The manifest has no way to declare live-only users/files.
-2. **Live-only services stay enabled**: `choose-mirror`, `pacman-init`,
-   `livecd-talk`, `livecd-alsa-unmuter`, `sshd`, `iwd`, plus both
-   `NetworkManager` and `systemd-networkd`/`resolved`. `btw-d77.toml` lists
-   only `archiso-autologin` and `reflector` as live-only, and its `required`/
-   `default_enabled` do not match btw-d77's own install template
-   (`d77-archinstall.json`: `greetd`, `NetworkManager`).
-3. Hostname is never written (`/etc/hostname` stays `d77 archiso`); locale and timezone ignored.
-4. Live motd/banner persists on the target.
-5. CLI ignores `default_enabled` services (only `--services` is used).
-6. `btw-d77.toml` declares `limine` (default) and `systemd-boot`, which the btw-d77 live cannot install.
-7. No removable-media fallback (`\EFI\BOOT\BOOTX64.EFI`) for GRUB on UEFI: the
-   disk boots only through the NVRAM entry written during installation.
-8. Every Limine/firmware incompatibility is only detected at provider validation (after confirmation).
+Remaining differences from a `d77-install` system:
+1. Packages: the target keeps the live package set (e.g. archinstall, dialog,
+   reflector, iwd, openssh), only their services are disabled. Mocinha is not a
+   package manager; removing them would be an explicit, separate decision.
+2. Locale, console keymap and timezone keep the live values (`C.UTF-8`, `UTC`);
+   the choices exist in `UserChoices` but are not applied yet.
+3. Default target is not set to `graphical.target` (greetd starts through the
+   live's `multi-user.target.wants` link).
+4. GRUB: Mocinha writes its own `grub.cfg` (serial console hard-coded) instead of
+   `grub-mkconfig` with btw-d77's GRUB theme; no removable-media fallback
+   (`\EFI\BOOT\BOOTX64.EFI`), so UEFI boot relies on the NVRAM entry.
+5. The primary user is not added to group `storage` (d77-install does).
+6. No LUKS, btrfs or swapfile options (d77-install offers them).
+7. GUI has no root password field (root is always locked from the GUI).
+8. Firmware/bootloader incompatibilities are only detected at provider validation (after confirmation).
 
 Architectural debt (from the 2026-10-07 audit):
 - Manifest parsing silently fills defaults (`services="systemd"`, `platform="linux"`, ...) and accepts unknown keys.

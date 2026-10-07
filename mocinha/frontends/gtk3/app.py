@@ -490,13 +490,10 @@ class MocinhaGTKApp(Gtk.Window):
             target_disk=self.resolved_plan.summary.disk,
             target_mount="/mnt",
             metadata={
-                "username": self.resolved_plan.summary.username,
+                **self.resolved_plan.metadata,
                 "password": self.entry_pass.get_text(),
-                "hostname": self.resolved_plan.summary.hostname,
-                "firmware": self.resolved_plan.summary.firmware,
-                "enabled_services": self.resolved_plan.summary.services,
-                "live_only_to_clean": self.resolved_plan.summary.live_only_removed,
-                "install_source": self.manifest.install.source,
+                # No root password field yet: the plan shows the root account as locked
+                "root_password": None,
             },
         )
 

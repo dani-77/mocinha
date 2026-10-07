@@ -21,6 +21,15 @@ class FreeBSDUsersProvider(ProviderContract):
         return ["users", "user-management", "administrator"]
 
     def validate(self, context: ExecutionContext) -> None:
+        # Not implemented for pw yet: fail instead of silently keeping live accounts/root state
+        if context.metadata.get("live_only_users") or "lock_root" in context.metadata:
+            raise ExecutionError(
+                message="Live-only user removal and root account policy are not implemented for the pw provider.",
+                cause="The plan asks for live-only users to be removed and/or the root account to be locked or set.",
+                failed_operation="Validate pw users provider",
+                current_state="pw provider supports only primary user creation",
+                possible_recovery="Implement 'pw userdel' / root policy in the pw provider before installing au-d77.",
+            )
         if not shutil.which("pw"):
             # On Linux development host, pw might not exist, but on FreeBSD it is part of base
             pass

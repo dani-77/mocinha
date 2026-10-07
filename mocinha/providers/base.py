@@ -119,3 +119,86 @@ def require_pe_binary(path: Path, what: str) -> None:
             current_state=f"First bytes: {magic!r}",
             possible_recovery="Reinstall the bootloader from a valid package binary.",
         )
+
+
+def target_path(target_root: str, path: str) -> Path:
+    """Maps an absolute in-system path onto the mounted target, refusing escapes.
+
+    The parent directory is resolved (symlinks followed) and must stay inside
+    the target, so a live symlink such as /etc/x -> /real/host/path can never
+    make Mocinha touch the running live system.
+    """
+    root = Path(target_root).resolve()
+    candidate = root / path.lstrip("/")
+    parent = candidate.parent.resolve()
+    if parent != root and root not in parent.parents:
+        raise ExecutionError(
+            message=f"Refusing to touch {path}: it resolves outside the target.",
+            cause=f"Parent directory resolves to {parent}, which is not under {root}.",
+            failed_operation=f"Map {path} onto the target",
+            current_state=f"target root {root}",
+            possible_recovery="Check the path declared in the manifest and the symlinks on the target.",
+        )
+    return parent / candidate.name
+
+
+def remove_target_paths(target_root: str, paths: List[str], events: EventStream) -> None:
+    """Deletes live-only files, symlinks or directories from the target."""
+    import shutil
+
+    for path in paths:
+        p = target_path(target_root, path)
+        if not os.path.lexists(p):
+            events.info(EventPhase.CONFIGURE, f"Live-only path {path} is not present on target")
+            continue
+        events.action(EventPhase.CONFIGURE, f"Removing live-only path {path}")
+        if p.is_dir() and not p.is_symlink():
+            shutil.rmtree(p)
+        else:
+            p.unlink()
+
+
+def verify_target_paths_absent(target_root: str, paths: List[str], events: EventStream) -> None:
+    remaining = [path for path in paths if os.path.lexists(target_path(target_root, path))]
+    if remaining:
+        raise VerificationError(
+            message=f"Live-only paths still present on target: {remaining}",
+            cause="Removal did not take effect.",
+            failed_operation="Verify live-only files were removed",
+            current_state=f"Remaining: {remaining}",
+            possible_recovery="Inspect permissions/immutable attributes on the target.",
+        )
+    events.info(EventPhase.VERIFY, f"Verified {len(paths)} live-only path(s) absent from target.")
+
+
+def write_target_files(target_root: str, files: list, events: EventStream) -> None:
+    """Writes manifest-declared files (content + mode), replacing any live copy or symlink."""
+    for tf in files:
+        p = target_path(target_root, tf.path)
+        events.action(EventPhase.CONFIGURE, f"Writing {tf.path} (mode {tf.mode:04o})")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.is_symlink():
+            p.unlink()
+        p.write_text(tf.content)
+        p.chmod(tf.mode)
+
+
+def verify_target_files(target_root: str, files: list, events: EventStream) -> None:
+    mismatched = []
+    for tf in files:
+        p = target_path(target_root, tf.path)
+        if p.is_symlink() or not p.is_file():
+            mismatched.append(f"{tf.path}: not a regular file")
+        elif p.read_text() != tf.content:
+            mismatched.append(f"{tf.path}: content differs")
+        elif (p.stat().st_mode & 0o7777) != tf.mode:
+            mismatched.append(f"{tf.path}: mode {p.stat().st_mode & 0o7777:04o} != {tf.mode:04o}")
+    if mismatched:
+        raise VerificationError(
+            message="Installed-system files do not match the manifest.",
+            cause="; ".join(mismatched),
+            failed_operation="Verify target files",
+            current_state=f"{len(mismatched)} mismatch(es)",
+            possible_recovery="Re-run the write step and check the target filesystem.",
+        )
+    events.info(EventPhase.VERIFY, f"Verified {len(files)} installed-system file(s).")

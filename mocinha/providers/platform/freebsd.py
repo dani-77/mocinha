@@ -7,7 +7,13 @@ from typing import List, Optional
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import (
+    CommandRunner,
+    remove_target_paths,
+    verify_target_files,
+    verify_target_paths_absent,
+    write_target_files,
+)
 
 
 class FreeBSDPlatformProvider(ProviderContract):
@@ -84,10 +90,10 @@ class FreeBSDPlatformProvider(ProviderContract):
         rc_conf = target_root / "etc" / "rc.conf"
         rc_conf.parent.mkdir(parents=True, exist_ok=True)
 
-        existing = rc_conf.read_text() if rc_conf.is_file() else ""
-        if 'hostname="' not in existing:
-            with open(rc_conf, "a") as f:
-                f.write(f'hostname="{hostname}"\n')
+        lines = rc_conf.read_text().splitlines() if rc_conf.is_file() else []
+        lines = [line for line in lines if not line.startswith("hostname=")]
+        lines.append(f'hostname="{hostname}"')
+        rc_conf.write_text("\n".join(lines) + "\n")
 
         hosts_file = target_root / "etc" / "hosts"
         hosts_content = (
@@ -156,6 +162,33 @@ class FreeBSDPlatformProvider(ProviderContract):
                 possible_recovery="Check for processes holding files on the target (fstat).",
             )
         self.events.info(EventPhase.VERIFY, f"FreeBSD target unmounted from {context.target_mount}.")
+
+    def remove_live_only_files(self, context: ExecutionContext) -> None:
+        remove_target_paths(context.target_mount, context.metadata["live_only_files"], self.events)
+
+    def verify_live_only_files_removed(self, context: ExecutionContext) -> None:
+        verify_target_paths_absent(context.target_mount, context.metadata["live_only_files"], self.events)
+
+    def write_target_files(self, context: ExecutionContext) -> None:
+        write_target_files(context.target_mount, context.metadata["target_files"], self.events)
+
+    def verify_target_files(self, context: ExecutionContext) -> None:
+        verify_target_files(context.target_mount, context.metadata["target_files"], self.events)
+
+    def verify_hostname(self, context: ExecutionContext) -> None:
+        expected = context.metadata["hostname"]
+        rc_conf = Path(context.target_mount) / "etc" / "rc.conf"
+        lines = rc_conf.read_text().splitlines() if rc_conf.is_file() else []
+        values = [line.split("=", 1)[1].strip('"') for line in lines if line.startswith("hostname=")]
+        if values != [expected]:
+            raise VerificationError(
+                message=f"FreeBSD target hostname entries are {values}, expected [{expected!r}].",
+                cause="/etc/rc.conf on the target does not set exactly the chosen hostname.",
+                failed_operation="Verify FreeBSD target hostname",
+                current_state=f"hostname= entries: {values}",
+                possible_recovery="Re-run the hostname step.",
+            )
+        self.events.info(EventPhase.VERIFY, f"FreeBSD target hostname verified: {expected}")
 
     def apply(self, context: ExecutionContext) -> None:
         pass

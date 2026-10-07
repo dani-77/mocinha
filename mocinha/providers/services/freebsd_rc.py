@@ -36,11 +36,11 @@ class FreeBSDServiceProvider(ProviderContract):
     def apply(self, context: ExecutionContext) -> None:
         target_root = context.target_mount
         enabled_services: List[str] = context.metadata.get("enabled_services", [])
-        live_only: List[str] = context.metadata.get("live_only_to_clean", [])
+        live_only: List[str] = context.metadata.get("live_only_to_clean", []) + context.metadata.get("deselected_services", [])
 
         import shutil
 
-        # 1. Clean live-only services from target /etc/rc.conf
+        # 1. Disable live-only and not-selected services in target /etc/rc.conf
         for srv in live_only:
             var_name = f"{srv}_enable"
             self.events.info(EventPhase.CONFIGURE, f"Disabling live-only service on target: {srv}")

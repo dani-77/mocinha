@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from unittest import mock
+import os
 import tempfile
 import unittest
 
@@ -45,6 +46,11 @@ class TestProviders(unittest.TestCase):
         # Create systemd dir but without services -> fails
         sys_dir = self.target / "etc" / "systemd" / "system"
         sys_dir.mkdir(parents=True, exist_ok=True)
+        (self.target / "etc" / "machine-id").write_text("uninitialized\n")
+        with self.assertRaises(VerificationError) as ctx:
+            provider.verify(self.context)
+        self.assertIn("machine-id", str(ctx.exception))  # regression (btw-d77): first-boot presets
+        (self.target / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n")
         with self.assertRaises(VerificationError):
             provider.verify(self.context)
 
@@ -70,9 +76,35 @@ class TestProviders(unittest.TestCase):
         with self.assertRaises(VerificationError):
             provider.verify(self.context)
 
-        # With testuser added -> succeeds
+        # With testuser added, in wheel, root locked -> succeeds
         (etc / "passwd").write_text("root:x:0:0:root:/root:/bin/bash\ntestuser:x:1000:1000::/home/testuser:/bin/bash\n")
+        (etc / "group").write_text("root:x:0:root\nwheel:x:998:testuser\ntestuser:x:1000:\n")
+        (etc / "shadow").write_text("root:!*:14871::::::\ntestuser:$6$x:20000::::::\n")
         provider.verify(self.context)
+
+        # Regression (btw-d77): root inherited the live's empty password
+        (etc / "shadow").write_text("root::14871::::::\ntestuser:$6$x:20000::::::\n")
+        with self.assertRaises(VerificationError) as ctx:
+            provider.verify(self.context)
+        self.assertIn("empty password", str(ctx.exception))
+        (etc / "shadow").write_text("root:!*:14871::::::\ntestuser:$6$x:20000::::::\n")
+
+        # Regression (btw-d77): the live user was copied to the target
+        self.context.metadata["live_only_users"] = ["live"]
+        (etc / "passwd").write_text(
+            "root:x:0:0:root:/root:/bin/bash\nlive:x:1000:1000::/home/live:/bin/bash\n"
+            "testuser:x:1001:1001::/home/testuser:/bin/bash\n"
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            provider.verify(self.context)
+        self.assertIn("live", str(ctx.exception))
+
+    def test_shadow_rejects_live_only_primary_user(self) -> None:
+        provider = ShadowUsersProvider("shadow", self.stream)
+        self.context.metadata["live_only_users"] = ["testuser"]
+        with mock.patch("mocinha.providers.users.shadow.shutil.which", return_value="/usr/bin/x"):
+            with self.assertRaises(ExecutionError):
+                provider.validate(self.context)
 
     @mock.patch("mocinha.providers.boot.limine.read_blkid_uuid", return_value="1234-ROOT")
     def test_limine_provider_verification(self, _uuid) -> None:
@@ -162,6 +194,8 @@ class TestProviders(unittest.TestCase):
         """Regression: verify used rglob('*dbus*'), so any similarly named file passed."""
         provider = SystemdServiceProvider("arch-systemd", self.stream)
         sys_dir = self.target / "etc" / "systemd" / "system"
+        (self.target / "etc").mkdir(parents=True, exist_ok=True)
+        (self.target / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n")
         (sys_dir / "multi-user.target.wants").mkdir(parents=True, exist_ok=True)
         (sys_dir / "dbus-org.freedesktop.nm-dispatcher.service").touch()
         (sys_dir / "NetworkManager-wait-online.service").touch()
@@ -172,6 +206,8 @@ class TestProviders(unittest.TestCase):
     def test_systemd_verification_rejects_enabled_live_only(self) -> None:
         provider = SystemdServiceProvider("arch-systemd", self.stream)
         sys_dir = self.target / "etc" / "systemd" / "system"
+        (self.target / "etc").mkdir(parents=True, exist_ok=True)
+        (self.target / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n")
         wants = sys_dir / "multi-user.target.wants"
         wants.mkdir(parents=True, exist_ok=True)
         (sys_dir / "dbus.service").touch()
@@ -314,6 +350,58 @@ class TestProviders(unittest.TestCase):
         content = (preset_dir / "linux.preset").read_text()
         self.assertNotIn("archiso", content)
         self.assertIn("/boot/initramfs-linux.img", content)
+
+    def test_live_only_paths_and_target_files(self) -> None:
+        from mocinha.core.manifest import TargetFile
+        from mocinha.providers import base
+
+        etc = self.target / "etc"
+        (etc / "systemd" / "system" / "getty@tty1.service.d").mkdir(parents=True)
+        (etc / "systemd" / "system" / "getty@tty1.service.d" / "autologin.conf").write_text("[Service]\n")
+        (etc / "resolv.conf").symlink_to("/run/systemd/resolve/stub-resolv.conf")
+        (etc / "motd").write_text("btw-d77 live\n")
+
+        paths = ["/etc/systemd/system/getty@tty1.service.d/autologin.conf", "/etc/resolv.conf", "/etc/absent"]
+        with self.assertRaises(VerificationError):
+            base.verify_target_paths_absent(str(self.target), paths, self.stream)
+        base.remove_target_paths(str(self.target), paths, self.stream)
+        base.verify_target_paths_absent(str(self.target), paths, self.stream)
+
+        files = [TargetFile("/etc/motd", ""), TargetFile("/etc/sudoers", "root ALL=(ALL:ALL) ALL\n", 0o440)]
+        with self.assertRaises(VerificationError):
+            base.verify_target_files(str(self.target), files, self.stream)
+        base.write_target_files(str(self.target), files, self.stream)
+        base.verify_target_files(str(self.target), files, self.stream)
+        self.assertEqual((etc / "sudoers").stat().st_mode & 0o777, 0o440)
+
+    def test_target_path_refuses_escape_through_symlink(self) -> None:
+        from mocinha.providers import base
+
+        (self.target / "etc").mkdir()
+        (self.target / "etc" / "evil").symlink_to("/etc")
+        with self.assertRaises(ExecutionError):
+            base.target_path(str(self.target), "/etc/evil/passwd")
+
+    def test_linux_hostname_verification(self) -> None:
+        provider = LinuxPlatformProvider("linux", self.stream)
+        (self.target / "etc").mkdir()
+        (self.target / "etc" / "hostname").write_text("d77 archiso\n")
+        with self.assertRaises(VerificationError):
+            provider.verify_hostname(self.context)
+        provider.configure_hostname(self.context)
+        provider.verify_hostname(self.context)
+
+    def test_systemd_removes_dangling_live_only_links(self) -> None:
+        """Regression (btw-d77): live overlay links to units whose packages are not installed."""
+        provider = SystemdServiceProvider("arch-systemd", self.stream)
+        wants = self.target / "etc" / "systemd" / "system" / "multi-user.target.wants"
+        wants.mkdir(parents=True)
+        (wants / "vboxservice.service").symlink_to("/usr/lib/systemd/system/vboxservice.service")
+        self.context.metadata["enabled_services"] = []
+        self.context.metadata["live_only_to_clean"] = ["vboxservice"]
+        (self.target / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n")
+        provider.apply(self.context)
+        self.assertFalse(os.path.lexists(wants / "vboxservice.service"))
 
 
 if __name__ == "__main__":

@@ -65,12 +65,128 @@ class ServicesConfig:
 
 
 @dataclass
+class LiveOnlyConfig:
+    """Live-session artifacts that must not persist on the target.
+
+    A live system is copied to the target, so anything that exists only to run
+    the live session (live user, autologin drop-ins, live helper units) has to
+    be declared here to be removed. Services use [services].live_only.
+    """
+
+    users: List[str] = field(default_factory=list)
+    files: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TargetFile:
+    """A file whose installed content differs from the live copy."""
+
+    path: str
+    content: str
+    mode: int = 0o644
+
+
+# Paths too broad to remove or overwrite as a single live-only entry
+PROTECTED_PATHS = {
+    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/mnt", "/opt",
+    "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/usr/bin",
+    "/usr/lib", "/usr/local", "/usr/local/bin", "/usr/share", "/var",
+}
+
+
+def _validate_target_path(path: Any, where: str) -> str:
+    normalized = path.rstrip("/") or "/" if isinstance(path, str) else ""
+    if (
+        not normalized.startswith("/")
+        or any(part in ("..", ".") for part in normalized.split("/"))
+        or normalized in PROTECTED_PATHS
+    ):
+        raise ManifestError(
+            message=f"Invalid path in {where}: {path!r}",
+            cause="Paths must be absolute, must not contain '..', and must not be a top-level system directory.",
+            failed_operation=f"Validate {where}",
+            current_state=f"path={path!r}",
+            possible_recovery="Use the exact absolute path of the file inside the live system.",
+        )
+    return normalized
+
+
+def _reject_unknown_keys(table: Dict[str, Any], allowed: set, where: str) -> None:
+    unknown = sorted(set(table) - allowed)
+    if unknown:
+        raise ManifestError(
+            message=f"Unknown keys in {where}: {unknown}",
+            cause=f"{where} only accepts {sorted(allowed)}.",
+            failed_operation=f"Validate {where}",
+            current_state=f"keys={sorted(table)}",
+            possible_recovery="Fix the key names (typos are rejected rather than ignored).",
+        )
+
+
+def _parse_live_only(data: Dict[str, Any]) -> LiveOnlyConfig:
+    _reject_unknown_keys(data, {"users", "files"}, "[live_only]")
+    users = data.get("users", [])
+    if not isinstance(users, list) or not all(isinstance(u, str) and u and u != "root" for u in users):
+        raise ManifestError(
+            message="Invalid [live_only].users",
+            cause="users must be a list of non-empty account names other than 'root'.",
+            failed_operation="Validate [live_only].users",
+            current_state=f"users={users!r}",
+            possible_recovery="List only accounts that exist solely for the live session.",
+        )
+    files = data.get("files", [])
+    if not isinstance(files, list):
+        raise ManifestError(
+            message="Invalid [live_only].files",
+            cause="files must be a list of absolute paths.",
+            failed_operation="Validate [live_only].files",
+            current_state=f"files={files!r}",
+        )
+    return LiveOnlyConfig(users=users, files=[_validate_target_path(f, "[live_only].files") for f in files])
+
+
+def _parse_target_files(entries: Any) -> List["TargetFile"]:
+    if not isinstance(entries, list):
+        raise ManifestError(
+            message="Invalid [[target_files]]",
+            cause="target_files must be an array of tables.",
+            failed_operation="Validate [[target_files]]",
+            current_state=f"target_files={entries!r}",
+        )
+    result = []
+    for entry in entries:
+        _reject_unknown_keys(entry, {"path", "content", "mode"}, "[[target_files]]")
+        if not isinstance(entry.get("content"), str):
+            raise ManifestError(
+                message=f"[[target_files]] entry {entry.get('path')!r} has no string 'content'.",
+                cause="Each target file needs its full content (an empty string is allowed).",
+                failed_operation="Validate [[target_files]]",
+            )
+        mode_raw = entry.get("mode", "0644")
+        try:
+            mode = int(mode_raw, 8) if isinstance(mode_raw, str) else -1
+        except ValueError:
+            mode = -1
+        if not 0 <= mode <= 0o7777:
+            raise ManifestError(
+                message=f"[[target_files]] entry {entry.get('path')!r} has an invalid mode {mode_raw!r}.",
+                cause="mode must be an octal string such as \"0644\" or \"0440\".",
+                failed_operation="Validate [[target_files]]",
+            )
+        result.append(TargetFile(path=_validate_target_path(entry.get("path"), "[[target_files]]"),
+                                 content=entry["content"], mode=mode))
+    return result
+
+
+@dataclass
 class Manifest:
     system: SystemConfig
     install: InstallConfig
     providers: ProvidersConfig
     boot: BootConfig
     services: ServicesConfig
+    live_only: LiveOnlyConfig = field(default_factory=LiveOnlyConfig)
+    target_files: List[TargetFile] = field(default_factory=list)
     raw_path: Optional[Path] = None
 
     @classmethod
@@ -167,5 +283,7 @@ class Manifest:
             providers=providers,
             boot=boot,
             services=services,
+            live_only=_parse_live_only(data.get("live_only", {})),
+            target_files=_parse_target_files(data.get("target_files", [])),
             raw_path=raw_path,
         )

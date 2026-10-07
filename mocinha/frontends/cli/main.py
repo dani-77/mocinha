@@ -19,6 +19,12 @@ def print_event(e: Event) -> None:
     print(e.format_log_line())
 
 
+def selected_services(manifest: Manifest, args: argparse.Namespace) -> set:
+    """Manifest default_enabled services plus any requested with --services (as the GUI pre-selects them)."""
+    requested = set(args.services.split(",")) if args.services else set()
+    return set(manifest.services.default_enabled) | requested
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     stream = EventStream()
     if args.verbose:
@@ -89,7 +95,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
         username=args.user,
         password=args.password or "secret",
         hostname=args.hostname,
-        selected_services=set(args.services.split(",")) if args.services else set(),
+        root_password=args.root_password or None,
+        selected_services=selected_services(manifest, args),
     )
 
     try:
@@ -128,7 +135,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         username=args.user,
         password=args.password or "secret",
         hostname=args.hostname,
-        selected_services=set(args.services.split(",")) if args.services else set(),
+        root_password=args.root_password or None,
+        selected_services=selected_services(manifest, args),
     )
 
     try:
@@ -147,13 +155,9 @@ def cmd_install(args: argparse.Namespace) -> int:
         target_disk=plan.summary.disk,
         target_mount=args.mount,
         metadata={
-            "username": plan.summary.username,
+            **plan.metadata,
             "password": args.password or "secret",
-            "hostname": plan.summary.hostname,
-            "firmware": plan.summary.firmware,
-            "enabled_services": plan.summary.services,
-            "live_only_to_clean": plan.summary.live_only_removed,
-            "install_source": manifest.install.source,
+            "root_password": args.root_password or None,
         },
     )
 
@@ -192,6 +196,7 @@ def main() -> None:
     p_plan.add_argument("--user", default="user", help="Primary user account name")
     p_plan.add_argument("--password", default="", help="Password for user")
     p_plan.add_argument("--hostname", default="mocinha", help="Target hostname")
+    p_plan.add_argument("--root-password", default="", help="Root password (default: root account locked)")
     p_plan.add_argument("--services", help="Comma-separated requested services")
     p_plan.set_defaults(func=cmd_plan)
 
@@ -203,6 +208,7 @@ def main() -> None:
     p_inst.add_argument("--user", default="user", help="Primary user account name")
     p_inst.add_argument("--password", default="secret", help="Password for user")
     p_inst.add_argument("--hostname", default="mocinha", help="Target hostname")
+    p_inst.add_argument("--root-password", default="", help="Root password (default: root account locked)")
     p_inst.add_argument("--services", help="Comma-separated requested services")
     p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
     p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")

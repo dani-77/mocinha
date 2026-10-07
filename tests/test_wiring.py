@@ -12,8 +12,9 @@ from mocinha.providers import create_default_registry, wire_plan_providers
 MANIFESTS = Path(__file__).resolve().parent.parent / "examples" / "manifests"
 
 
-def resolve(manifest_name: str, bootloader: str, firmware: FirmwareType, platform: str = "linux"):
+def resolve(manifest_name: str, bootloader: str, firmware: FirmwareType, platform: str = "linux", extra_boot=()):
     manifest = Manifest.load_from_file(MANIFESTS / f"{manifest_name}.toml")
+    manifest.boot.available.extend(extra_boot)
     facts = SystemFacts(platform, "x86_64", firmware, [DiskDevice("/dev/vda", 20 * 1024**3)], [])
     registry = create_default_registry()
     plan = InstallationResolver(facts, manifest, registry).resolve(
@@ -46,8 +47,8 @@ class TestWiring(unittest.TestCase):
         self.assertNotIn("cleanup_live_only", [s.step_id for s in plan.steps])
 
     def test_bootloader_without_provider_rejected(self) -> None:
-        """Regression: systemd-boot is in the btw-d77 manifest but has no provider."""
-        plan, registry, manifest = resolve("btw-d77", "systemd-boot", FirmwareType.UEFI)
+        """Regression: the old btw-d77 manifest declared systemd-boot, which has no provider."""
+        plan, registry, manifest = resolve("btw-d77", "systemd-boot", FirmwareType.UEFI, extra_boot=["systemd-boot"])
         with self.assertRaises(ResolutionError) as ctx:
             wire_plan_providers(plan, registry, manifest)
         self.assertIn("systemd-boot", str(ctx.exception))

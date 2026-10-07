@@ -12,7 +12,9 @@ necessarily enable a serial console (e.g. limine.conf).
 
 from pathlib import Path
 import argparse
+import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -30,14 +32,72 @@ OVMF_VARS_TEMPLATE = Path("/usr/share/qemu/edk2-i386-vars.fd")
 DIAGNOSTICS = (
     "export SYSTEMD_PAGER=cat PAGER=cat; "
     "echo ===MOCINHA_\"\"BOOT_PROOF_START===; "
-    "id; cat /etc/hostname; cat /etc/machine-id; "
-    "findmnt -no SOURCE,TARGET,FSTYPE /; cat /etc/fstab; cat /proc/cmdline; "
-    "systemctl is-system-running; "
-    "systemctl list-unit-files --state=enabled --no-legend; "
-    "systemctl --failed --no-legend; "
-    "getent passwd | awk -F: '$3 >= 1000 && $3 < 60000'; "
+    "echo '### id'; id; "
+    "echo '### hostname'; cat /etc/hostname; "
+    "echo '### root'; findmnt -no SOURCE,TARGET,FSTYPE /; cat /proc/cmdline; "
+    "echo '### fstab'; cat /etc/fstab; "
+    "echo '### system_state'; systemctl is-system-running; "
+    "echo '### enabled_units'; systemctl list-unit-files --state=enabled --no-legend; "
+    "echo '### failed_units'; systemctl --failed --no-legend; "
+    "echo '### users'; getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 {print $1\":\"$3}'; "
+    "echo '### root_status'; echo \"$MOCINHA_PW\" | sudo -S -p '' passwd -S root; "
+    "echo '### greetd_config'; cat /etc/greetd/config.toml; "
+    "echo '### resolv_conf'; readlink /etc/resolv.conf; head -n 3 /etc/resolv.conf; "
     "echo ===MOCINHA_\"\"BOOT_PROOF_END==="
 )
+
+
+def parse_sections(text: str) -> dict:
+    """Splits diagnostics output into {section: [lines]} using the '### name' headers."""
+    sections, current = {}, None
+    for line in text.splitlines():
+        line = line.rstrip()
+        if line.startswith("### "):
+            current = line[4:]
+            sections[current] = []
+        elif current is not None:
+            sections[current].append(line)
+    return sections
+
+
+def check_expectations(sections: dict, expect: dict) -> list:
+    """Returns a list of human-readable mismatches (empty list = equivalent)."""
+    problems = []
+    get = lambda key: sections.get(key, [])
+    hostname = " ".join(get("hostname")).strip()
+    if hostname != expect["hostname"]:
+        problems.append(f"hostname is {hostname!r}, expected {expect['hostname']!r}")
+    users = dict(line.split(":", 1) for line in get("users") if ":" in line)
+    if users != expect["users"]:
+        problems.append(f"users (uid >= 1000) are {users}, expected {expect['users']}")
+    id_line = " ".join(get("id"))
+    for g in expect.get("groups_of_primary_user", []):
+        if f"({g})" not in id_line:
+            problems.append(f"primary user not in group {g}: {id_line}")
+    # sudo may print its lecture first; the status line is "root <L|P|NP> ..."
+    root = re.findall(r"\broot (L|P|NP) ", " ".join(get("root_status")) + " ")
+    if expect.get("root_locked") and root[-1:] != ["L"]:
+        problems.append(f"root is not locked: passwd -S status {root}")
+    enabled = {line.split()[0] for line in get("enabled_units") if line.strip()}
+    for unit in expect.get("enabled_units_present", []):
+        if unit not in enabled:
+            problems.append(f"{unit} is not enabled")
+    for unit in expect.get("enabled_units_absent", []):
+        if unit in enabled:
+            problems.append(f"{unit} is enabled but should not be")
+    greetd = "\n".join(get("greetd_config"))
+    for needle in expect.get("greetd_config_absent", []):
+        if needle in greetd:
+            problems.append(f"greetd config contains {needle!r}")
+    resolv = [line for line in get("resolv_conf") if line.strip()]
+    if any(line.strip().endswith("stub-resolv.conf") for line in resolv):
+        problems.append(f"/etc/resolv.conf points at the systemd-resolved stub: {resolv[:2]}")
+    if any("No such file" in line for line in resolv):
+        problems.append("/etc/resolv.conf is missing or a dangling symlink (no DNS)")
+    state = " ".join(get("system_state")).strip()
+    if state != expect.get("system_state", state):
+        problems.append(f"system state is {state!r}; failed units: {get('failed_units')}")
+    return problems
 
 
 def ppm_to_png(ppm: bytes) -> bytes:
@@ -76,6 +136,7 @@ def main() -> int:
     ap.add_argument("--password", default="mocinha-test")
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--fresh-nvram", action="store_true", help="UEFI: boot with empty NVRAM instead of the install VM's")
+    ap.add_argument("--expect", help="JSON file with the expected installed-system state (e.g. tools/qemu/expect/btw-d77.json)")
     ap.add_argument("--logdir", help="default: tools/qemu/logs/<disk name>")
     args = ap.parse_args()
 
@@ -143,7 +204,7 @@ def main() -> int:
                 if "Login incorrect" in buffer:
                     print("[TEST] Serial login rejected.")
                     break
-                send(DIAGNOSTICS)
+                send(f"export MOCINHA_PW='{args.password}'; " + DIAGNOSTICS)
                 buffer, state = "", "WAIT_OUTPUT"
             elif state == "WAIT_OUTPUT" and "===MOCINHA_BOOT_PROOF_END===" in buffer:
                 proof = True
@@ -169,10 +230,23 @@ def main() -> int:
     except subprocess.TimeoutExpired:
         proc.kill()
 
-    (logdir / "serial-boot.log").write_text("".join(output))
+    full = "".join(output)
+    (logdir / "serial-boot.log").write_text(full)
     print(f"Serial log: {logdir / 'serial-boot.log'}")
     if proof:
         print("BOOT PROOF PASSED: logged in over serial and ran diagnostics.")
+        if args.expect:
+            clean = re.sub(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|\x1b.", "", full).replace("\r", "")
+            start = clean.rfind("===MOCINHA_BOOT_PROOF_START===\n")
+            sections = parse_sections(clean[start:clean.rfind("===MOCINHA_BOOT_PROOF_END===")])
+            (logdir / "diagnostics.json").write_text(json.dumps(sections, indent=2))
+            problems = check_expectations(sections, json.loads(Path(args.expect).read_text()))
+            if problems:
+                print(f"EQUIVALENCE FAILED ({len(problems)}):")
+                for p in problems:
+                    print(f"  - {p}")
+                return 1
+            print(f"EQUIVALENCE PASSED: installed system matches {args.expect}")
         return 0
     print("BOOT PROOF INCOMPLETE: no serial diagnostics; inspect the screenshot.")
     return 1

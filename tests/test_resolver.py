@@ -52,7 +52,7 @@ class TestResolver(unittest.TestCase):
     def test_valid_resolution_produces_plan(self) -> None:
         choices = UserChoices(
             target_disk="/dev/nvme0n1",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
             hostname="btw-box",
@@ -61,11 +61,16 @@ class TestResolver(unittest.TestCase):
         plan = self.resolver.resolve(choices)
         self.assertEqual(plan.summary.disk, "/dev/nvme0n1")
         self.assertEqual(plan.summary.firmware, "UEFI")
-        self.assertEqual(plan.summary.bootloader, "limine")
+        self.assertEqual(plan.summary.bootloader, "grub")
         self.assertEqual(plan.summary.username, "dani")
-        self.assertIn("dbus", plan.summary.services)
+        self.assertIn("greetd", plan.summary.services)
         self.assertIn("NetworkManager", plan.summary.services)
         self.assertGreater(len(plan.steps), 5)
+        # Root account locked when no root password is chosen; live user removed
+        self.assertEqual(plan.summary.root_account, "locked")
+        self.assertTrue(plan.metadata["lock_root"])
+        self.assertEqual(plan.metadata["live_only_users"], ["live"])
+        self.assertIn("sshd", plan.metadata["deselected_services"])
         # Check human readable summary formatting
         summary_str = plan.to_human_readable()
         self.assertIn("MOCINHA INSTALLATION PLAN", summary_str)
@@ -75,7 +80,7 @@ class TestResolver(unittest.TestCase):
     def test_reject_nonexistent_disk(self) -> None:
         choices = UserChoices(
             target_disk="/dev/nonexistent",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
         )
@@ -86,7 +91,7 @@ class TestResolver(unittest.TestCase):
     def test_reject_readonly_disk(self) -> None:
         choices = UserChoices(
             target_disk="/dev/ro0",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
         )
@@ -97,7 +102,7 @@ class TestResolver(unittest.TestCase):
     def test_reject_undersized_disk(self) -> None:
         choices = UserChoices(
             target_disk="/dev/sda",  # 4 GiB, manifest requires 10 GiB
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
         )
@@ -128,7 +133,7 @@ class TestResolver(unittest.TestCase):
         resolver = InstallationResolver(foreign_facts, self.manifest, self.registry)
         choices = UserChoices(
             target_disk="/dev/nvme0n1",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
         )
@@ -159,7 +164,7 @@ class TestResolver(unittest.TestCase):
         resolver = InstallationResolver(facts, self.manifest, self.registry)
         choices = UserChoices(
             target_disk="/dev/sdb",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
         )
@@ -188,13 +193,29 @@ class TestResolver(unittest.TestCase):
         resolver = InstallationResolver(facts, self.manifest, self.registry)
         choices = UserChoices(
             target_disk="/dev/sdc",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="secretpassword",
         )
         with self.assertRaises(ResolutionError) as ctx:
             resolver.resolve(choices)
         self.assertIn("critical host mounts", str(ctx.exception))
+
+    def test_reject_invalid_hostname(self) -> None:
+        """Regression (btw-d77): the live hostname 'd77 archiso' (with a space) reached the target."""
+        for bad in ["d77 archiso", "", "-x", "a" * 64]:
+            choices = UserChoices(target_disk="/dev/nvme0n1", bootloader="grub", username="dani",
+                                  password="x", hostname=bad)
+            with self.assertRaises(ResolutionError, msg=bad):
+                self.resolver.resolve(choices)
+
+    def test_root_password_choice_reflected_in_plan(self) -> None:
+        choices = UserChoices(target_disk="/dev/nvme0n1", bootloader="grub", username="dani",
+                              password="x", root_password="r00t")
+        plan = self.resolver.resolve(choices)
+        self.assertEqual(plan.summary.root_account, "password set")
+        self.assertFalse(plan.metadata["lock_root"])
+        self.assertNotIn("r00t", str(plan.metadata))
 
 
 if __name__ == "__main__":

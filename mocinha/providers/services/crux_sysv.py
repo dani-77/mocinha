@@ -40,7 +40,7 @@ class CruxSysvServiceProvider(ProviderContract):
         rc_conf.parent.mkdir(parents=True, exist_ok=True)
 
         enabled_services: List[str] = context.metadata.get("enabled_services", [])
-        live_only: List[str] = context.metadata.get("live_only_to_clean", [])
+        live_only: List[str] = context.metadata.get("live_only_to_clean", []) + context.metadata.get("deselected_services", [])
 
         self.events.action(
             EventPhase.CONFIGURE,
@@ -55,7 +55,7 @@ class CruxSysvServiceProvider(ProviderContract):
         if match:
             current_services = match.group(1).split()
 
-        # Filter out live-only
+        # Filter out live-only and not-selected services
         active_list = [s for s in current_services if s not in live_only]
 
         # Append enabled services preserving topological order and avoiding duplicates
@@ -96,6 +96,15 @@ class CruxSysvServiceProvider(ProviderContract):
 
         registered = match.group(1).split()
         missing = [s for s in enabled_services if s not in registered]
+        disabled = context.metadata.get("live_only_to_clean", []) + context.metadata.get("deselected_services", [])
+        leftover = [s for s in disabled if s in registered]
+        if leftover:
+            raise VerificationError(
+                message=f"Live-only or not-selected services still in SERVICES array: {leftover}",
+                cause="They were not filtered out of /etc/rc.conf.",
+                failed_operation="Verify disabled CRUX services",
+                current_state=f"Found: {registered}",
+            )
         if missing:
             raise VerificationError(
                 message=f"CRUX services missing from SERVICES array: {missing}",
