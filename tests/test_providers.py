@@ -30,6 +30,8 @@ class TestProviders(unittest.TestCase):
                 "hostname": "testbox",
                 "enabled_services": ["dbus", "NetworkManager"],
                 "firmware": "UEFI",
+                "system_id": "testos",
+                "system_name": "Test OS",
             },
         )
 
@@ -241,7 +243,7 @@ class TestProviders(unittest.TestCase):
         with self.assertRaises(VerificationError):
             provider.verify(self.context)
 
-        efi_dir = self.target / "boot" / "EFI" / "Arch"
+        efi_dir = self.target / "boot" / "EFI" / "testos"
         efi_dir.mkdir(parents=True, exist_ok=True)
         (efi_dir / "grubx64.efi").write_bytes(b"MZ\x90\x00GRUB")
 
@@ -402,6 +404,57 @@ class TestProviders(unittest.TestCase):
         (self.target / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n")
         provider.apply(self.context)
         self.assertFalse(os.path.lexists(wants / "vboxservice.service"))
+
+    def test_locale_helpers(self) -> None:
+        from mocinha.providers.platform.linux import _locale_charset, _normalized_locale
+        self.assertEqual(_locale_charset("pt_PT.UTF-8"), "UTF-8")
+        self.assertEqual(_normalized_locale("pt_PT.UTF-8"), "pt_PT.utf8")
+        self.assertEqual(_normalized_locale("sr_RS.UTF-8@latin"), "sr_RS.utf8@latin")
+
+    def test_linux_locale_files_written(self) -> None:
+        provider = LinuxPlatformProvider("linux", self.stream)
+        etc = self.target / "etc"
+        etc.mkdir()
+        (etc / "localtime").symlink_to("/usr/share/zoneinfo/UTC")
+        (etc / "vconsole.conf").write_text("FONT=ter-116n\n")
+        zone = self.target / "usr" / "share" / "zoneinfo" / "Europe"
+        zone.mkdir(parents=True)
+        (zone / "Lisbon").write_text("TZif")
+        # C.UTF-8 needs no locale-gen, so this runs without a chroot
+        self.context.metadata.update(locale="C.UTF-8", keymap="pt-latin1", timezone="Europe/Lisbon")
+        provider.configure_locale(self.context)
+        provider.verify_locale(self.context)
+        self.assertEqual(str((etc / "localtime").readlink()), "../usr/share/zoneinfo/Europe/Lisbon")
+        self.assertIn("FONT=ter-116n", (etc / "vconsole.conf").read_text())
+        self.context.metadata["timezone"] = "Europe/Porto"
+        with self.assertRaises(VerificationError):
+            provider.verify_locale(self.context)
+
+    def test_shadow_requires_existing_extra_groups(self) -> None:
+        provider = ShadowUsersProvider("shadow", self.stream)
+        etc = self.target / "etc"
+        etc.mkdir()
+        (etc / "passwd").write_text("root:x:0:0::/root:/bin/bash\n")
+        (etc / "group").write_text("root:x:0:root\nwheel:x:10:\n")
+        self.context.metadata["extra_groups"] = ["storage"]
+        with self.assertRaises(ExecutionError) as ctx:
+            provider.apply(self.context)
+        self.assertIn("storage", str(ctx.exception))
+
+    def test_systemd_default_target_verification(self) -> None:
+        provider = SystemdServiceProvider("arch-systemd", self.stream)
+        sys_dir = self.target / "etc" / "systemd" / "system"
+        sys_dir.mkdir(parents=True)
+        (self.target / "etc" / "machine-id").write_text("0123456789abcdef0123456789abcdef\n")
+        (sys_dir / "dbus.service").touch()
+        (sys_dir / "NetworkManager.service").touch()
+        self.context.metadata["default_target"] = "graphical.target"
+        (sys_dir / "default.target").symlink_to("/usr/lib/systemd/system/multi-user.target")
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+        (sys_dir / "default.target").unlink()
+        (sys_dir / "default.target").symlink_to("/usr/lib/systemd/system/graphical.target")
+        provider.verify(self.context)
 
 
 if __name__ == "__main__":

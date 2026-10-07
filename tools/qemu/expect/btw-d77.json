@@ -2,7 +2,12 @@
   "_comment": "Installed-system state btw-d77's own installer (d77-install + d77-archinstall.json) produces; hostname/user are the test's choices.",
   "hostname": "btw-test",
   "users": {"dani": "1000"},
-  "groups_of_primary_user": ["wheel"],
+  "groups_of_primary_user": ["wheel", "storage"],
+  "locale_conf": "LANG=pt_PT.UTF-8",
+  "locale_generated": "pt_PT.utf8",
+  "vconsole_keymap": "KEYMAP=pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "default_target": "graphical.target",
   "root_locked": true,
   "enabled_units_present": ["greetd.service", "NetworkManager.service", "systemd-timesyncd.service"],
   "enabled_units_absent": [

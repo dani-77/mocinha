@@ -27,6 +27,13 @@ class FreeBSDPlatformProvider(ProviderContract):
         return ["platform", "freebsd"]
 
     def validate(self, context: ExecutionContext) -> None:
+        raise ExecutionError(
+            message="Locale, keymap and timezone configuration is not implemented for FreeBSD.",
+            cause="Every plan sets them, and the FreeBSD platform provider cannot apply them yet (tzsetup/rc.conf keymap/login.conf).",
+            failed_operation="Validate FreeBSD platform provider",
+            current_state="No disk has been modified.",
+            possible_recovery="Implement the FreeBSD locale step before installing au-d77.",
+        )
         import shutil
         if not shutil.which("mount"):
             raise ExecutionError(
@@ -174,6 +181,17 @@ class FreeBSDPlatformProvider(ProviderContract):
 
     def verify_target_files(self, context: ExecutionContext) -> None:
         verify_target_files(context.target_mount, context.metadata["target_files"], self.events)
+
+    def configure_locale(self, context: ExecutionContext) -> None:
+        # Unreachable: validate() refuses; kept so the plan wiring is explicit
+        raise ExecutionError(
+            message="Locale, keymap and timezone configuration is not implemented for FreeBSD.",
+            cause="The FreeBSD platform provider has no locale step yet.",
+            failed_operation="Configure FreeBSD locale",
+        )
+
+    def verify_locale(self, context: ExecutionContext) -> None:
+        self.configure_locale(context)
 
     def verify_hostname(self, context: ExecutionContext) -> None:
         expected = context.metadata["hostname"]

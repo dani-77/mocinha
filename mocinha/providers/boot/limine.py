@@ -77,7 +77,7 @@ class LimineBootProvider(ProviderContract):
         conf_content = (
             "timeout: 5\n"
             "\n"
-            "/btw-d77 Arch Linux\n"
+            f"/{context.metadata['system_name']}\n"
             "    protocol: linux\n"
             "    kernel_path: boot():/vmlinuz-linux\n"
             f"    cmdline: root=UUID={root_uuid} rw quiet\n"

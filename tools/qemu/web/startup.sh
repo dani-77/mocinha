@@ -26,7 +26,8 @@ mkdir -p "$LOGDIR"
 
 MANIFEST=examples/manifests/btw-d77.toml
 COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
-        --user dani --password mocinha-test --hostname btw-test)
+        --user dani --password mocinha-test --hostname btw-test
+        --locale pt_PT.UTF-8 --keymap pt-latin1 --timezone Europe/Lisbon)
 
 # Live facts useful for reconciling the manifest with the real remaster
 {

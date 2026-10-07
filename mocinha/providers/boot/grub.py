@@ -14,9 +14,6 @@ from mocinha.core.provider import ExecutionContext, ProviderContract
 from mocinha.providers.base import CommandRunner, read_blkid_uuid, require_pe_binary
 
 
-GRUB_EFI_ID = "Arch"
-
-
 def _grub_install_tool() -> Optional[str]:
     return next((t for t in ("grub-install", "grub2-install") if shutil.which(t)), None)
 
@@ -60,7 +57,7 @@ class GrubBootProvider(ProviderContract):
                 "--target=x86_64-efi",
                 f"--efi-directory={boot_dir}",
                 f"--boot-directory={boot_dir}",
-                f"--bootloader-id={GRUB_EFI_ID}",
+                f"--bootloader-id={context.metadata['system_id']}",
                 "--recheck",
             ]
         else:
@@ -79,6 +76,7 @@ class GrubBootProvider(ProviderContract):
         boot_uuid, kernel_dir = self._kernel_location(context, root_uuid)
 
         grub_cfg = grub_dir / "grub.cfg"
+        menu_title = context.metadata["system_name"].replace("'", "")
         cfg_content = (
             "serial --unit=0 --speed=115200\n"
             "terminal_input --append serial\n"
@@ -86,7 +84,7 @@ class GrubBootProvider(ProviderContract):
             "set default=0\n"
             "set timeout=3\n"
             "\n"
-            "menuentry 'btw-d77 Arch Linux' {\n"
+            f"menuentry '{menu_title}' {{\n"
             "    insmod part_msdos\n"
             "    insmod part_gpt\n"
             "    insmod ext2\n"
@@ -116,7 +114,7 @@ class GrubBootProvider(ProviderContract):
         is_uefi = context.metadata.get("firmware", "UEFI").upper() == "UEFI"
 
         if is_uefi:
-            require_pe_binary(boot_dir / "EFI" / GRUB_EFI_ID / "grubx64.efi", "GRUB EFI binary")
+            require_pe_binary(boot_dir / "EFI" / context.metadata["system_id"] / "grubx64.efi", "GRUB EFI binary")
         else:
             core_img = boot_dir / "grub" / "i386-pc" / "core.img"
             if not core_img.is_file():

@@ -96,6 +96,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
         password=args.password or "secret",
         hostname=args.hostname,
         root_password=args.root_password or None,
+        locale=args.locale,
+        keymap=args.keymap,
+        timezone=args.timezone,
         selected_services=selected_services(manifest, args),
     )
 
@@ -136,6 +139,9 @@ def cmd_install(args: argparse.Namespace) -> int:
         password=args.password or "secret",
         hostname=args.hostname,
         root_password=args.root_password or None,
+        locale=args.locale,
+        keymap=args.keymap,
+        timezone=args.timezone,
         selected_services=selected_services(manifest, args),
     )
 
@@ -197,6 +203,9 @@ def main() -> None:
     p_plan.add_argument("--password", default="", help="Password for user")
     p_plan.add_argument("--hostname", default="mocinha", help="Target hostname")
     p_plan.add_argument("--root-password", default="", help="Root password (default: root account locked)")
+    p_plan.add_argument("--locale", default="en_US.UTF-8", help="System locale (LANG)")
+    p_plan.add_argument("--keymap", default="us", help="Console keymap")
+    p_plan.add_argument("--timezone", default="UTC", help="Timezone (e.g. Europe/Lisbon)")
     p_plan.add_argument("--services", help="Comma-separated requested services")
     p_plan.set_defaults(func=cmd_plan)
 
@@ -209,6 +218,9 @@ def main() -> None:
     p_inst.add_argument("--password", default="secret", help="Password for user")
     p_inst.add_argument("--hostname", default="mocinha", help="Target hostname")
     p_inst.add_argument("--root-password", default="", help="Root password (default: root account locked)")
+    p_inst.add_argument("--locale", default="en_US.UTF-8", help="System locale (LANG)")
+    p_inst.add_argument("--keymap", default="us", help="Console keymap")
+    p_inst.add_argument("--timezone", default="UTC", help="Timezone (e.g. Europe/Lisbon)")
     p_inst.add_argument("--services", help="Comma-separated requested services")
     p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
     p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")

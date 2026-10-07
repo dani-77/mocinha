@@ -34,6 +34,8 @@ available = ["grub"]
 default = "grub"
 
 [services]
+# d77-install: systemctl set-default graphical.target
+default_target = "graphical.target"
 # d77-archinstall.json "services" + archinstall ntp=true (systemd-timesyncd)
 required = ["greetd", "NetworkManager", "systemd-timesyncd"]
 default_enabled = []
@@ -49,6 +51,10 @@ live_only = [
     "vboxservice", "vmtoolsd", "vmware-vmblock-fuse",
     "cloud-config", "cloud-final", "cloud-init-local", "cloud-init-main", "cloud-init-network",
 ]
+
+[users]
+# d77-archinstall.json custom-commands: usermod -aG storage
+groups = ["storage"]
 
 [services.metadata.NetworkManager]
 conflicts = ["systemd-networkd", "dhcpcd"]

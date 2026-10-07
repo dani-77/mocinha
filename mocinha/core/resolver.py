@@ -29,11 +29,16 @@ class UserChoices:
     # None: lock the root account on the target (administration through the primary user)
     root_password: Optional[str] = None
     locale: str = "en_US.UTF-8"
+    keymap: str = "us"
     timezone: str = "UTC"
     selected_services: Set[str] = field(default_factory=set)
 
 
 HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
+# Shape checks only; providers check that the values exist on the system
+LOCALE_RE = re.compile(r"^[A-Za-z0-9_.@-]+$")
+KEYMAP_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+TIMEZONE_RE = re.compile(r"^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$")
 
 
 class InstallationResolver:
@@ -171,8 +176,21 @@ class InstallationResolver:
                 cause="A hostname must be 1-63 letters, digits or hyphens, not starting or ending with a hyphen.",
                 failed_operation="Validate hostname",
                 current_state=f"hostname={choices.hostname!r}",
-                possible_recovery="Choose a hostname such as 'btw-d77'.",
+                possible_recovery="Choose a hostname such as 'my-laptop'.",
             )
+        for label, value, pattern in (
+            ("locale", choices.locale, LOCALE_RE),
+            ("keymap", choices.keymap, KEYMAP_RE),
+            ("timezone", choices.timezone, TIMEZONE_RE),
+        ):
+            if not pattern.match(value or ""):
+                raise ResolutionError(
+                    message=f"Invalid {label}: {value!r}",
+                    cause=f"The {label} contains characters that cannot name a {label}.",
+                    failed_operation=f"Validate {label}",
+                    current_state=f"{label}={value!r}",
+                    possible_recovery=f"Use a {label} such as 'pt_PT.UTF-8', 'pt-latin1' or 'Europe/Lisbon'.",
+                )
         root_account = "password set" if choices.root_password else "locked"
 
         live_only = self.manifest.live_only
@@ -230,6 +248,13 @@ class InstallationResolver:
                 provider_name="platform",
             ),
             PlanStep(
+                step_id="configure_locale",
+                title=f"Set locale {choices.locale}, keymap {choices.keymap}, timezone {choices.timezone}",
+                description="Generate the locale and write locale, console keymap and timezone configuration",
+                is_destructive=False,
+                provider_name="platform",
+            ),
+            PlanStep(
                 step_id="configure_fstab",
                 title="Generate filesystem table (/etc/fstab)",
                 description="Write persistent partition mounts using durable UUIDs/labels",
@@ -240,7 +265,8 @@ class InstallationResolver:
                 step_id="configure_user",
                 title=f"Create primary user '{choices.username}' and grant admin capability",
                 description=(
-                    f"Remove live-only users {live_only.users}; create user account, assign admin privilege via "
+                    f"Remove live-only users {live_only.users}; create user account (extra groups: "
+                    f"{self.manifest.users.groups}), assign admin privilege via "
                     f"{self.manifest.providers.administrator}; root account: {root_account}"
                 ),
                 is_destructive=False,
@@ -266,7 +292,8 @@ class InstallationResolver:
                 description=(
                     f"Enable services on target: {service_res.enabled_services}; "
                     f"disable live-only services: {service_res.live_only_to_clean}; "
-                    f"disable not-selected services: {service_res.deselected}"
+                    f"disable not-selected services: {service_res.deselected}; "
+                    f"default boot target: {self.manifest.services.default_target or 'unchanged'}"
                 ),
                 is_destructive=False,
                 provider_name=self.manifest.providers.services,
@@ -308,10 +335,15 @@ class InstallationResolver:
             hostname=choices.hostname,
             root_account=root_account,
             live_only_users=list(live_only.users),
+            locale=choices.locale,
+            keymap=choices.keymap,
+            timezone=choices.timezone,
         )
 
         # Everything providers need at execution time, except secrets
         metadata = {
+            "system_id": self.manifest.system.id,
+            "system_name": self.manifest.system.name,
             "username": choices.username,
             "hostname": choices.hostname,
             "firmware": self.facts.firmware.value,
@@ -323,6 +355,11 @@ class InstallationResolver:
             "live_only_files": list(live_only.files),
             "target_files": list(target_files),
             "lock_root": not choices.root_password,
+            "locale": choices.locale,
+            "keymap": choices.keymap,
+            "timezone": choices.timezone,
+            "extra_groups": list(self.manifest.users.groups),
+            "default_target": self.manifest.services.default_target,
         }
 
         plan = InstallationPlan(summary=summary, steps=steps, metadata=metadata)

@@ -63,6 +63,14 @@ class SystemdServiceProvider(ProviderContract):
                 failed_operation="Validate systemctl presence",
                 possible_recovery="Use a systemd-based live image for this services provider.",
             )
+        default_target = context.metadata.get("default_target")
+        if default_target and not default_target.endswith(".target"):
+            raise ExecutionError(
+                message=f"Invalid systemd default target: {default_target!r}",
+                cause="systemd default targets are .target units (e.g. graphical.target).",
+                failed_operation="Validate default boot target",
+                possible_recovery="Fix [services].default_target in the manifest.",
+            )
         enabled_services: List[str] = context.metadata.get("enabled_services", [])
         for srv in enabled_services:
             if not isinstance(srv, str) or not srv.strip():
@@ -94,6 +102,15 @@ class SystemdServiceProvider(ProviderContract):
             if machine_id.is_file():
                 machine_id.unlink()
             self.runner.run(["systemd-machine-id-setup", f"--root={target_root}"], phase=EventPhase.CONFIGURE, check=True)
+
+        default_target = context.metadata.get("default_target")
+        if default_target:
+            self.events.action(EventPhase.CONFIGURE, f"Setting default boot target: {default_target}")
+            self.runner.run(
+                ["systemctl", f"--root={target_root}", "set-default", default_target],
+                phase=EventPhase.CONFIGURE,
+                check=True,
+            )
 
         enabled_services: List[str] = context.metadata.get("enabled_services", [])
         to_disable: List[str] = context.metadata.get("live_only_to_clean", []) + context.metadata.get("deselected_services", [])
@@ -152,6 +169,19 @@ class SystemdServiceProvider(ProviderContract):
                 current_state=f"/etc/machine-id: {current!r}",
                 possible_recovery="Run systemd-machine-id-setup --root=<target>.",
             )
+
+        default_target = context.metadata.get("default_target")
+        if default_target:
+            link = target_root / "etc" / "systemd" / "system" / "default.target"
+            actual = str(link.readlink()) if link.is_symlink() else None
+            if actual is None or Path(actual).name != default_target:
+                raise VerificationError(
+                    message=f"Default boot target is not {default_target}.",
+                    cause="/etc/systemd/system/default.target does not point at the requested unit.",
+                    failed_operation="Verify default boot target",
+                    current_state=f"default.target -> {actual}",
+                    possible_recovery="Re-run the services step.",
+                )
 
         missing_services = []
         for srv in enabled_services:

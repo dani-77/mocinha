@@ -11,7 +11,7 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import CommandRunner, chroot_command
 
 
 class MkinitcpioProvider(ProviderContract):
@@ -71,9 +71,8 @@ class MkinitcpioProvider(ProviderContract):
 
         # 3. Run mkinitcpio on target
         self.events.action(EventPhase.CONFIGURE, "Generating target initramfs via mkinitcpio")
-        chroot_tool = "arch-chroot" if shutil.which("arch-chroot") else "chroot"
         self.runner.run(
-            [chroot_tool, str(target_root), "mkinitcpio", "-P"],
+            chroot_command(str(target_root)) + ["mkinitcpio", "-P"],
             phase=EventPhase.CONFIGURE,
             check=True,
         )

@@ -89,16 +89,27 @@ class ShadowUsersProvider(ProviderContract):
             except Exception:
                 pass
 
+        groups = ["wheel"] + [g for g in context.metadata.get("extra_groups", []) if g != "wheel"]
+        missing_groups = [g for g in groups if g not in _db_entries(Path(target_root) / "etc" / "group")]
+        if missing_groups:
+            raise ExecutionError(
+                message=f"Groups {missing_groups} do not exist on the target.",
+                cause="The manifest asks for supplementary groups that the deployed system does not define.",
+                failed_operation=f"Create user '{username}'",
+                current_state=f"Missing groups: {missing_groups}",
+                possible_recovery="Fix [users].groups in the manifest or the live image's /etc/group.",
+            )
+
         if not user_exists:
             self.runner.run(
-                ["useradd", "-R", target_root, "-m", "-s", "/bin/bash", "-G", "wheel", username],
+                ["useradd", "-R", target_root, "-m", "-s", "/bin/bash", "-G", ",".join(groups), username],
                 phase=EventPhase.CONFIGURE,
                 check=True,
             )
         else:
-            self.events.info(EventPhase.CONFIGURE, f"User '{username}' already exists on target; ensuring wheel group")
+            self.events.info(EventPhase.CONFIGURE, f"User '{username}' already exists on target; ensuring groups {groups}")
             self.runner.run(
-                ["usermod", "-R", target_root, "-aG", "wheel", username],
+                ["usermod", "-R", target_root, "-aG", ",".join(groups), username],
                 phase=EventPhase.CONFIGURE,
                 check=True,
             )
@@ -159,8 +170,9 @@ class ShadowUsersProvider(ProviderContract):
                 problems.append(f"/home/{u} still exists")
 
         group = _db_entries(etc / "group")
-        if "wheel" not in group or username not in group["wheel"][-1].split(","):
-            problems.append(f"'{username}' is not a member of group wheel")
+        for g in ["wheel"] + context.metadata.get("extra_groups", []):
+            if g not in group or username not in group[g][-1].split(","):
+                problems.append(f"'{username}' is not a member of group {g}")
 
         root_hash = _db_entries(etc / "shadow").get("root", ["root", ""])[1]
         if root_hash == "":

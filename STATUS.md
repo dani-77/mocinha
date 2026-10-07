@@ -90,12 +90,13 @@ state of a `d77-install` system.
 | UEFI + Limine | refused at provider validation, before any disk write (no Limine in the live) | --- | --- |
 
 Checked on the installed system: hostname `btw-test`; only user `dani` (uid
-1000, wheel); root locked; `greetd`, `NetworkManager`, `systemd-timesyncd`
-enabled; live units (choose-mirror, pacman-init, livecd-*, reflector,
-networkd, resolved, time-wait-sync, pcscd) and not-selected `sshd`/`iwd`
-disabled; greetd greeter-only (no `[initial_session]`, no `live`);
-`/etc/resolv.conf` written by NetworkManager; `systemctl is-system-running` =
-running, no failed units.
+1000, groups wheel + storage); root locked; `greetd`, `NetworkManager`,
+`systemd-timesyncd` enabled; live units (choose-mirror, pacman-init, livecd-*,
+reflector, networkd, resolved, time-wait-sync, pcscd) and not-selected
+`sshd`/`iwd` disabled; greetd greeter-only (no `[initial_session]`, no `live`);
+`/etc/resolv.conf` written by NetworkManager; locale `pt_PT.UTF-8` generated
+and set, keymap `pt-latin1`, timezone `Europe/Lisbon`; default target
+`graphical.target`; `systemctl is-system-running` = running, no failed units.
 
 Problems the btw-d77 runs exposed and that are now fixed:
 - archiso's `linux.preset` broke `mkinitcpio -P` on the target -> stock preset restored.
@@ -119,17 +120,19 @@ Remaining differences from a `d77-install` system:
 1. Packages: the target keeps the live package set (e.g. archinstall, dialog,
    reflector, iwd, openssh), only their services are disabled. Mocinha is not a
    package manager; removing them would be an explicit, separate decision.
-2. Locale, console keymap and timezone keep the live values (`C.UTF-8`, `UTC`);
-   the choices exist in `UserChoices` but are not applied yet.
-3. Default target is not set to `graphical.target` (greetd starts through the
-   live's `multi-user.target.wants` link).
-4. GRUB: Mocinha writes its own `grub.cfg` (serial console hard-coded) instead of
+2. GRUB: Mocinha writes its own `grub.cfg` (serial console hard-coded) instead of
    `grub-mkconfig` with btw-d77's GRUB theme; no removable-media fallback
    (`\EFI\BOOT\BOOTX64.EFI`), so UEFI boot relies on the NVRAM entry.
-5. The primary user is not added to group `storage` (d77-install does).
-6. No LUKS, btrfs or swapfile options (d77-install offers them).
-7. GUI has no root password field (root is always locked from the GUI).
-8. Firmware/bootloader incompatibilities are only detected at provider validation (after confirmation).
+3. No LUKS, btrfs or swapfile options (d77-install offers them).
+4. GUI has no root password, locale, keymap or timezone fields (root locked;
+   en_US.UTF-8 / us / UTC from the GUI).
+5. Firmware/bootloader incompatibilities are only detected at provider validation (after confirmation).
+
+Other platforms:
+- Locale/keymap/timezone and `[services].default_target` are refused by the
+  FreeBSD/CRUX providers until implemented; the Linux platform provider writes
+  systemd-style files (`/etc/locale.conf`, `/etc/vconsole.conf`, `/etc/hostname`),
+  which CRUX does not use (it uses `/etc/rc.conf`).
 
 Architectural debt (from the 2026-10-07 audit):
 - Manifest parsing silently fills defaults (`services="systemd"`, `platform="linux"`, ...) and accepts unknown keys.

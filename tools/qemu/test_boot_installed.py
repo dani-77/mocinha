@@ -43,8 +43,18 @@ DIAGNOSTICS = (
     "echo '### root_status'; echo \"$MOCINHA_PW\" | sudo -S -p '' passwd -S root; "
     "echo '### greetd_config'; cat /etc/greetd/config.toml; "
     "echo '### resolv_conf'; readlink /etc/resolv.conf; head -n 3 /etc/resolv.conf; "
+    "echo '### locale_conf'; cat /etc/locale.conf; "
+    "echo '### locales'; locale -a; "
+    "echo '### vconsole'; cat /etc/vconsole.conf; "
+    "echo '### localtime'; readlink /etc/localtime; "
+    "echo '### default_target'; systemctl get-default; "
     "echo ===MOCINHA_\"\"BOOT_PROOF_END==="
 )
+
+
+# The target's locale is chosen at install time (e.g. pt_PT: "Palavra-passe:")
+PASSWORD_PROMPT = re.compile(r"(Password|Palavra-passe|Senha|Passwort|Contraseña|Mot de passe)\s*:")
+LOGIN_FAILED = re.compile(r"Login incorrect|incorret|login: expirou|timed out")
 
 
 def parse_sections(text: str) -> dict:
@@ -94,6 +104,16 @@ def check_expectations(sections: dict, expect: dict) -> list:
         problems.append(f"/etc/resolv.conf points at the systemd-resolved stub: {resolv[:2]}")
     if any("No such file" in line for line in resolv):
         problems.append("/etc/resolv.conf is missing or a dangling symlink (no DNS)")
+    if "locale_conf" in expect and expect["locale_conf"] not in get("locale_conf"):
+        problems.append(f"/etc/locale.conf is {get('locale_conf')}, expected {expect['locale_conf']}")
+    if "locale_generated" in expect and expect["locale_generated"] not in [l.strip() for l in get("locales")]:
+        problems.append(f"locale {expect['locale_generated']} not generated: {get('locales')}")
+    if "vconsole_keymap" in expect and expect["vconsole_keymap"] not in get("vconsole"):
+        problems.append(f"/etc/vconsole.conf is {get('vconsole')}, expected {expect['vconsole_keymap']}")
+    if "localtime_suffix" in expect and not " ".join(get("localtime")).strip().endswith(expect["localtime_suffix"]):
+        problems.append(f"/etc/localtime -> {get('localtime')}, expected ...{expect['localtime_suffix']}")
+    if "default_target" in expect and " ".join(get("default_target")).strip() != expect["default_target"]:
+        problems.append(f"default target is {get('default_target')}, expected {expect['default_target']}")
     state = " ".join(get("system_state")).strip()
     if state != expect.get("system_state", state):
         problems.append(f"system state is {state!r}; failed units: {get('failed_units')}")
@@ -197,11 +217,11 @@ def main() -> int:
             if state == "WAIT_LOGIN" and "login:" in buffer:
                 send(args.user)
                 buffer, state = "", "WAIT_PASSWORD"
-            elif state == "WAIT_PASSWORD" and "Password:" in buffer:
+            elif state == "WAIT_PASSWORD" and PASSWORD_PROMPT.search(buffer):
                 send(args.password)
                 buffer, state = "", "LOGGED_IN"
-            elif state == "LOGGED_IN" and ("$ " in buffer or "Login incorrect" in buffer):
-                if "Login incorrect" in buffer:
+            elif state == "LOGGED_IN" and ("$ " in buffer or LOGIN_FAILED.search(buffer)):
+                if LOGIN_FAILED.search(buffer):
                     print("[TEST] Serial login rejected.")
                     break
                 send(f"export MOCINHA_PW='{args.password}'; " + DIAGNOSTICS)

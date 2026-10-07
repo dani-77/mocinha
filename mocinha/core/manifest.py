@@ -7,6 +7,7 @@ Validates structure, types, and constraints before resolution.
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import re
 import tomllib
 
 from mocinha.core.errors import ManifestError
@@ -62,6 +63,15 @@ class ServicesConfig:
     optional: List[str] = field(default_factory=list)
     live_only: List[str] = field(default_factory=list)
     metadata: Dict[str, ServiceMetadata] = field(default_factory=dict)
+    # Boot target/runlevel for init systems that have one (systemd: "graphical.target").
+    # Providers without the concept reject it instead of ignoring it.
+    default_target: Optional[str] = None
+
+
+@dataclass
+class UsersConfig:
+    # Supplementary groups for the primary user, besides the administrator group
+    groups: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -185,6 +195,7 @@ class Manifest:
     providers: ProvidersConfig
     boot: BootConfig
     services: ServicesConfig
+    users: UsersConfig = field(default_factory=UsersConfig)
     live_only: LiveOnlyConfig = field(default_factory=LiveOnlyConfig)
     target_files: List[TargetFile] = field(default_factory=list)
     raw_path: Optional[Path] = None
@@ -275,7 +286,28 @@ class Manifest:
             optional=srv_data.get("optional", []),
             live_only=srv_data.get("live_only", []),
             metadata=metadata_map,
+            default_target=srv_data.get("default_target"),
         )
+        if services.default_target is not None and (
+            not isinstance(services.default_target, str) or not services.default_target.strip()
+        ):
+            raise ManifestError(
+                message="Invalid [services].default_target",
+                cause="default_target must be a non-empty string.",
+                failed_operation="Validate [services].default_target",
+                current_state=f"default_target={services.default_target!r}",
+            )
+
+        users_data = data.get("users", {})
+        _reject_unknown_keys(users_data, {"groups"}, "[users]")
+        groups = users_data.get("groups", [])
+        if not isinstance(groups, list) or not all(isinstance(g, str) and re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups):
+            raise ManifestError(
+                message="Invalid [users].groups",
+                cause="groups must be a list of valid group names.",
+                failed_operation="Validate [users].groups",
+                current_state=f"groups={groups!r}",
+            )
 
         return cls(
             system=system,
@@ -283,6 +315,7 @@ class Manifest:
             providers=providers,
             boot=boot,
             services=services,
+            users=UsersConfig(groups=groups),
             live_only=_parse_live_only(data.get("live_only", {})),
             target_files=_parse_target_files(data.get("target_files", [])),
             raw_path=raw_path,

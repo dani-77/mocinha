@@ -7,7 +7,7 @@ and verifies persistence directly in the target /etc/rc.conf.
 from pathlib import Path
 from typing import List, Optional
 
-from mocinha.core.errors import VerificationError
+from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
 from mocinha.providers.base import CommandRunner
@@ -24,6 +24,14 @@ class FreeBSDServiceProvider(ProviderContract):
         return ["services", "service-management"]
 
     def validate(self, context: ExecutionContext) -> None:
+        if context.metadata.get("default_target"):
+            raise ExecutionError(
+                message="[services].default_target is not supported by the FreeBSD rc provider.",
+                cause="This init system has no systemd-style default target; refusing instead of ignoring it.",
+                failed_operation="Validate FreeBSD rc services",
+                current_state=f"default_target={context.metadata['default_target']!r}",
+                possible_recovery="Remove default_target from the manifest (or model the runlevel for this provider).",
+            )
         enabled_services: List[str] = context.metadata.get("enabled_services", [])
         for srv in enabled_services:
             if not isinstance(srv, str) or not srv.strip():

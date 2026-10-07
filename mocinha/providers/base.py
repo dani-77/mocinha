@@ -202,3 +202,11 @@ def verify_target_files(target_root: str, files: list, events: EventStream) -> N
             possible_recovery="Re-run the write step and check the target filesystem.",
         )
     events.info(EventPhase.VERIFY, f"Verified {len(files)} installed-system file(s).")
+
+
+def chroot_command(target_root: str) -> List[str]:
+    """Prefix for running a command inside the target (arch-chroot sets up /proc, /dev, ...)."""
+    import shutil
+
+    tool = "arch-chroot" if shutil.which("arch-chroot") else "chroot"
+    return [tool, str(target_root)]

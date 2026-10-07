@@ -109,6 +109,7 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
         "remove_live_only_files": (plat_prov, plat_prov.remove_live_only_files, plat_prov.verify_live_only_files_removed),
         "write_target_files": (plat_prov, plat_prov.write_target_files, plat_prov.verify_target_files),
         "configure_hostname": (plat_prov, plat_prov.configure_hostname, plat_prov.verify_hostname),
+        "configure_locale": (plat_prov, plat_prov.configure_locale, plat_prov.verify_locale),
         "configure_fstab": (plat_prov, plat_prov.generate_fstab, plat_prov.verify_fstab),
         "configure_user": (user_prov, user_prov.apply, user_prov.verify),
         "configure_services": (srv_prov, srv_prov.apply, srv_prov.verify),

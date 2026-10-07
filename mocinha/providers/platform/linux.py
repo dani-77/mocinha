@@ -10,12 +10,32 @@ from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
 from mocinha.providers.base import (
     CommandRunner,
+    chroot_command,
     read_blkid_uuid,
     remove_target_paths,
     verify_target_files,
     verify_target_paths_absent,
     write_target_files,
 )
+
+
+def _locale_charset(locale: str) -> str:
+    """'pt_PT.UTF-8' -> 'UTF-8' (glibc SUPPORTED format: '<locale> <charset>')."""
+    return locale.split(".", 1)[1].split("@")[0] if "." in locale else "ISO-8859-1"
+
+
+def _normalized_locale(locale: str) -> str:
+    """'pt_PT.UTF-8' -> 'pt_PT.utf8', the form 'locale -a' prints."""
+    if "." not in locale:
+        return locale
+    name, rest = locale.split(".", 1)
+    codeset, _, modifier = rest.partition("@")
+    norm = name + "." + codeset.lower().replace("-", "")
+    return norm + ("@" + modifier if modifier else "")
+
+
+# Locales available without running locale-gen
+BUILTIN_LOCALES = {"C", "POSIX", "C.UTF-8", "C.utf8"}
 
 
 class LinuxPlatformProvider(ProviderContract):
@@ -68,6 +88,32 @@ class LinuxPlatformProvider(ProviderContract):
         except FileNotFoundError:
             pass
 
+        self._validate_locale_settings(context)
+
+    def _validate_locale_settings(self, context: ExecutionContext) -> None:
+        """Checks locale/keymap/timezone against the live system, which the target copies."""
+        locale = context.metadata.get("locale")
+        keymap = context.metadata.get("keymap")
+        timezone = context.metadata.get("timezone")
+        problems = []
+        if locale and locale not in BUILTIN_LOCALES:
+            supported = Path("/usr/share/i18n/SUPPORTED")
+            entry = f"{locale} {_locale_charset(locale)}"
+            if not supported.is_file() or entry not in supported.read_text().splitlines():
+                problems.append(f"locale {locale!r} is not listed in /usr/share/i18n/SUPPORTED as '{entry}'")
+        if timezone and not (Path("/usr/share/zoneinfo") / timezone).is_file():
+            problems.append(f"timezone {timezone!r} not found under /usr/share/zoneinfo")
+        if keymap and not any(Path("/usr/share/kbd/keymaps").rglob(f"{keymap}.map*")):
+            problems.append(f"console keymap {keymap!r} not found under /usr/share/kbd/keymaps")
+        if problems:
+            raise ExecutionError(
+                message="Locale settings are not available in this live system.",
+                cause="; ".join(problems),
+                failed_operation="Validate locale, keymap and timezone",
+                current_state="No disk has been modified.",
+                possible_recovery="Choose values that exist in the live image (e.g. pt_PT.UTF-8, pt-latin1, Europe/Lisbon).",
+            )
+
     def prepare(self, context: ExecutionContext) -> None:
         Path(context.target_mount).mkdir(parents=True, exist_ok=True)
 
@@ -112,6 +158,63 @@ class LinuxPlatformProvider(ProviderContract):
                 entries.append(f"{dev_id:<42} /boot     vfat    rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro 0 2\n")
 
         fstab_file.write_text("".join(entries))
+
+    def configure_locale(self, context: ExecutionContext) -> None:
+        etc = Path(context.target_mount) / "etc"
+        locale, keymap, timezone = context.metadata["locale"], context.metadata["keymap"], context.metadata["timezone"]
+
+        if locale not in BUILTIN_LOCALES:
+            entry = f"{locale} {_locale_charset(locale)}"
+            locale_gen = etc / "locale.gen"
+            lines = locale_gen.read_text().splitlines() if locale_gen.is_file() else []
+            uncommented = [entry if line.lstrip("#").strip() == entry else line for line in lines]
+            if entry not in uncommented:
+                uncommented.append(entry)
+            self.events.action(EventPhase.CONFIGURE, f"Enabling '{entry}' in /etc/locale.gen")
+            locale_gen.write_text("\n".join(uncommented) + "\n")
+            self.runner.run(chroot_command(context.target_mount) + ["locale-gen"], phase=EventPhase.CONFIGURE, check=True)
+
+        self.events.action(EventPhase.CONFIGURE, f"Writing /etc/locale.conf (LANG={locale})")
+        (etc / "locale.conf").write_text(f"LANG={locale}\n")
+
+        vconsole = etc / "vconsole.conf"
+        lines = [l for l in (vconsole.read_text().splitlines() if vconsole.is_file() else []) if not l.startswith("KEYMAP=")]
+        self.events.action(EventPhase.CONFIGURE, f"Writing /etc/vconsole.conf (KEYMAP={keymap})")
+        vconsole.write_text("\n".join([f"KEYMAP={keymap}"] + lines) + "\n")
+
+        localtime = etc / "localtime"
+        self.events.action(EventPhase.CONFIGURE, f"Linking /etc/localtime -> {timezone}")
+        if localtime.is_symlink() or localtime.exists():
+            localtime.unlink()
+        localtime.symlink_to(f"../usr/share/zoneinfo/{timezone}")
+
+    def verify_locale(self, context: ExecutionContext) -> None:
+        root = Path(context.target_mount)
+        etc = root / "etc"
+        locale, keymap, timezone = context.metadata["locale"], context.metadata["keymap"], context.metadata["timezone"]
+        problems = []
+        if (etc / "locale.conf").read_text().strip() != f"LANG={locale}":
+            problems.append(f"/etc/locale.conf is not LANG={locale}")
+        vconsole = etc / "vconsole.conf"
+        if f"KEYMAP={keymap}" not in (vconsole.read_text().splitlines() if vconsole.is_file() else []):
+            problems.append(f"/etc/vconsole.conf lacks KEYMAP={keymap}")
+        localtime = etc / "localtime"
+        if not localtime.is_symlink() or not str(localtime.readlink()).endswith(f"/zoneinfo/{timezone}") \
+                or not (root / "usr" / "share" / "zoneinfo" / timezone).is_file():
+            problems.append(f"/etc/localtime does not point at an existing zoneinfo/{timezone}")
+        if locale not in BUILTIN_LOCALES:
+            proc = self.runner.run(chroot_command(context.target_mount) + ["locale", "-a"], phase=EventPhase.VERIFY, check=True)
+            if _normalized_locale(locale) not in proc.stdout.split():
+                problems.append(f"locale {locale} was not generated (locale -a: {proc.stdout.split()})")
+        if problems:
+            raise VerificationError(
+                message="Target locale settings do not match the plan.",
+                cause="; ".join(problems),
+                failed_operation="Verify locale, keymap and timezone",
+                current_state=f"{len(problems)} problem(s)",
+                possible_recovery="Inspect the locale-gen output in the event log.",
+            )
+        self.events.info(EventPhase.VERIFY, f"Target locale {locale}, keymap {keymap}, timezone {timezone} verified.")
 
     def configure_hostname(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)

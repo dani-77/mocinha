@@ -124,6 +124,14 @@ class TestCruxProviders(unittest.TestCase):
         self.assertIn("MOCINHA INSTALLATION PLAN", summary_text)
         self.assertIn("crux-sysvinit", summary_text)
 
+    def test_crux_rejects_systemd_default_target(self) -> None:
+        from mocinha.core.errors import ExecutionError
+        from mocinha.providers.services.crux_sysv import CruxSysvServiceProvider
+        provider = CruxSysvServiceProvider("crux-sysvinit", self.stream)
+        self.context.metadata["default_target"] = "graphical.target"
+        with self.assertRaises(ExecutionError):
+            provider.validate(self.context)
+
 
 if __name__ == "__main__":
     unittest.main()
