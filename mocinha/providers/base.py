@@ -210,3 +210,24 @@ def chroot_command(target_root: str) -> List[str]:
 
     tool = "arch-chroot" if shutil.which("arch-chroot") else "chroot"
     return [tool, str(target_root)]
+
+
+def release_planned_mounts(runner: CommandRunner, context: ExecutionContext, events: EventStream) -> None:
+    """Unmounts exactly the target-disk mounts listed in the plan ("Will unmount").
+
+    The resolver lists them and re-checks them right before execution, so
+    nothing else (e.g. another disk whose name shares a prefix) is touched.
+    Deepest mount points first; a failed unmount stops the installation.
+    """
+    planned = sorted(context.metadata.get("release_mounts", []), key=lambda m: m[1].count("/"), reverse=True)
+    for device, mountpoint in planned:
+        events.action(EventPhase.PREPARE, f"Unmounting {device} from {mountpoint} (listed in the plan)")
+        runner.run(["umount", mountpoint], phase=EventPhase.PREPARE, check=True)
+        if os.path.ismount(mountpoint):
+            raise ExecutionError(
+                message=f"{mountpoint} is still mounted after umount.",
+                cause="The filesystem from the target disk could not be released.",
+                failed_operation=f"Unmount {mountpoint}",
+                current_state="Partitioning has not started.",
+                possible_recovery="Close programs using it (fuser -m) and retry.",
+            )

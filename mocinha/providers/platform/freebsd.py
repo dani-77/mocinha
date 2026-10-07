@@ -27,6 +27,14 @@ class FreeBSDPlatformProvider(ProviderContract):
         return ["platform", "freebsd"]
 
     def validate(self, context: ExecutionContext) -> None:
+        if os.path.ismount(context.target_mount):
+            raise ExecutionError(
+                message=f"Target staging path '{context.target_mount}' is already a mount point.",
+                cause="Mounting the target there would hide or mix with another filesystem.",
+                failed_operation="Validate target mount safety",
+                current_state=f"{context.target_mount} is mounted",
+                possible_recovery="Unmount it or choose another staging directory.",
+            )
         if any(context.metadata.get(k) for k in ("locale", "keymap", "timezone")):
             raise ExecutionError(
                 message="Locale, keymap and timezone configuration is not implemented for FreeBSD.",

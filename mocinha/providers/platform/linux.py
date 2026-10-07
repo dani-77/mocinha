@@ -68,26 +68,15 @@ class LinuxPlatformProvider(ProviderContract):
                 failed_operation="Validate blkid utility",
                 possible_recovery="Install util-linux in the live image.",
             )
-        # Protect host storage: ensure target_mount is not occupied by foreign filesystems
-        target_mnt = context.target_mount
-        try:
-            with open("/proc/mounts", "r") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        dev_node, mnt_point = parts[0], parts[1]
-                        if mnt_point == target_mnt:
-                            if not dev_node.startswith(context.target_disk):
-                                raise ExecutionError(
-                                    message=f"Target staging path '{target_mnt}' is already mounted by foreign device '{dev_node}'.",
-                                    cause="Target mount directory is occupied by unrelated storage.",
-                                    failed_operation="Validate target mount safety",
-                                    current_state=f"{target_mnt} -> {dev_node}",
-                                    possible_recovery="Unmount foreign storage before proceeding.",
-                                )
-        except FileNotFoundError:
-            pass
-
+        # Nothing may already be mounted on the staging directory
+        if os.path.ismount(context.target_mount):
+            raise ExecutionError(
+                message=f"Target staging path '{context.target_mount}' is already a mount point.",
+                cause="Mounting the target there would hide or mix with another filesystem.",
+                failed_operation="Validate target mount safety",
+                current_state=f"{context.target_mount} is mounted",
+                possible_recovery="Unmount it or choose another staging directory.",
+            )
         self._validate_locale_settings(context)
 
     def _validate_locale_settings(self, context: ExecutionContext) -> None:

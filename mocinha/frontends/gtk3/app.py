@@ -15,13 +15,13 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf, GLib, Gtk
 
-from mocinha.core.errors import ExecutionError, ResolutionError
+from mocinha.core.errors import ExecutionError, MocinhaError, ResolutionError
 from mocinha.core.events import Event, EventPhase, EventStream
 from mocinha.core.executor import InstallationExecutor
 from mocinha.core.manifest import Manifest
 from mocinha.core.plan import InstallationPlan, PlanStep
 from mocinha.core.probe import DiskDevice, SystemFacts, SystemProbe
-from mocinha.core.provider import ExecutionContext
+from mocinha.core.provider import ExecutionContext, build_execution_context
 from mocinha.core.resolver import InstallationResolver, UserChoices
 from mocinha.core.services import ServiceCategory
 from mocinha.providers import create_default_registry
@@ -411,8 +411,8 @@ class MocinhaGTKApp(Gtk.Window):
         if current_name == "boot":
             try:
                 self._resolve_and_update_summary()
-            except ResolutionError as re:
-                self._show_error_dialog("Resolution Error", str(re))
+            except MocinhaError as err:
+                self._show_error_dialog("The plan cannot be executed", str(err))
                 return
 
         # On Summary page, clicking Next means CONFIRM INSTALLATION
@@ -478,8 +478,12 @@ class MocinhaGTKApp(Gtk.Window):
         from mocinha.providers import wire_plan_providers
 
         plan = self.resolver.resolve(choices)
-        # Wire before showing the summary so a missing provider is reported before confirmation
+        # Wire and validate (read-only) before showing the summary, so missing providers,
+        # tools or impossible layouts are reported before confirmation
         wire_plan_providers(plan, self.registry, self.manifest)
+        self.execution_context = build_execution_context(
+            plan, TARGET_MOUNT, self.entry_pass.get_text(), self.entry_root.get_text() or None)
+        self.executor.preflight(plan, self.execution_context)
         self.resolved_plan = plan
         buf = self.summary_text_view.get_buffer()
         buf.set_text(self.resolved_plan.to_human_readable())
@@ -507,15 +511,7 @@ class MocinhaGTKApp(Gtk.Window):
         self.stack.set_visible_child_name("progress")
         self._update_nav_buttons()
 
-        context = ExecutionContext(
-            target_disk=self.resolved_plan.summary.disk,
-            target_mount="/mnt",
-            metadata={
-                **self.resolved_plan.metadata,
-                "password": self.entry_pass.get_text(),
-                "root_password": self.entry_root.get_text() or None,
-            },
-        )
+        context = self.execution_context
 
         def worker() -> None:
             def progress_cb(current: int, total: int, step: PlanStep) -> None:
@@ -586,6 +582,9 @@ class MocinhaGTKApp(Gtk.Window):
         dialog.run()
         dialog.destroy()
 
+
+# Staging directory where the target is mounted during installation
+TARGET_MOUNT = "/mnt"
 
 # Where a live system ships its manifest (docs/manifest-schema.md)
 MANIFEST_LOCATIONS = (Path("/etc/mocinha.toml"), Path("/usr/share/mocinha/mocinha.toml"))

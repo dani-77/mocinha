@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_automated_test.sh --- Automated QEMU install test of Mocinha from a btw-d77 live ISO.
 #
-#   tools/qemu/run_automated_test.sh [--firmware bios|uefi] [--bootloader NAME] [--iso PATH]
+#   tools/qemu/run_automated_test.sh [--firmware bios|uefi] [--bootloader NAME] [--iso PATH] [--script adversarial.sh]
 #
 # Boots the btw-d77 live (kernel/initramfs extracted from the ISO itself, the
 # ISO attached as CD-ROM so archiso mounts its real airootfs), logs in as root
@@ -25,11 +25,13 @@ TIMEOUT="${TIMEOUT:-1200}"
 FIRMWARE="bios"
 BOOTLOADER=""
 ISO=""
+SCRIPT="startup.sh"   # adversarial.sh: disk-safety scenarios instead of a normal install
 while [ $# -gt 0 ]; do
     case "$1" in
         --firmware) FIRMWARE="$2"; shift 2 ;;
         --bootloader) BOOTLOADER="$2"; shift 2 ;;
         --iso) ISO="$2"; shift 2 ;;
+        --script) SCRIPT="$2"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -50,6 +52,7 @@ if [ -z "$ISO" ] || [ ! -f "$ISO" ]; then
 fi
 
 RUN="${FIRMWARE}-${BOOTLOADER}"
+[ "$SCRIPT" = "startup.sh" ] || RUN="${RUN}-${SCRIPT%.sh}"
 WORK="$DIR/work"
 LOGS="$DIR/logs/$RUN"
 KDIR="$WORK/kernel/$(basename "$ISO" .iso)"
@@ -131,7 +134,7 @@ QEMU_PID=$!
 trap 'kill $HTTP_PID 2>/dev/null || true; kill $QEMU_PID 2>/dev/null || true' EXIT
 
 python3 "$DIR/serial_login_run.py" "$SERIAL_SOCK" "$LOGS/serial-live.log" root \
-    "curl -fsS --retry 10 --retry-connrefused http://10.0.2.2:$HTTP_PORT/startup.sh -o /tmp/startup.sh && bash /tmp/startup.sh" \
+    "curl -fsS --retry 10 --retry-connrefused http://10.0.2.2:$HTTP_PORT/$SCRIPT -o /tmp/run.sh && bash /tmp/run.sh" \
     || echo ">> Serial driver exited with status $?"
 wait "$QEMU_PID" || echo ">> QEMU exited with status $?"
 

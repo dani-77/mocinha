@@ -5,14 +5,14 @@ Produces a validated, staged, non-destructive InstallationPlan.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Set
+from typing import Callable, List, Optional, Set
 import re
 
 from mocinha.core.errors import ResolutionError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.manifest import Manifest
 from mocinha.core.plan import InstallationPlan, PlanStep, TargetSummary
-from mocinha.core.probe import FirmwareType, SystemFacts
+from mocinha.core.probe import DiskDevice, FirmwareType, SystemFacts, SystemProbe
 from mocinha.core.provider import ProviderRegistry
 from mocinha.core.services import ServiceCategory, ServiceGraph, ServiceItem
 
@@ -53,11 +53,14 @@ class InstallationResolver:
         manifest: Manifest,
         registry: ProviderRegistry,
         event_stream: Optional[EventStream] = None,
+        reprobe: Optional[Callable[[], SystemFacts]] = None,
     ) -> None:
         self.facts = facts
         self.manifest = manifest
         self.registry = registry
         self.events = event_stream or EventStream()
+        # Fresh probe used to re-check the target right before execution
+        self.reprobe = reprobe or (lambda: SystemProbe(self.events).probe_facts())
 
     def resolve(self, choices: UserChoices) -> InstallationPlan:
         self.events.info(EventPhase.RESOLVE, "Starting resolution of installation plan...")
@@ -73,55 +76,7 @@ class InstallationResolver:
             )
 
         # 1. Validate Target Disk
-        disk = self.facts.find_disk(choices.target_disk)
-        if not disk:
-            raise ResolutionError(
-                message=f"Selected target disk '{choices.target_disk}' was not detected on this system.",
-                cause="The target device does not exist or was disconnected.",
-                failed_operation=f"Verify disk {choices.target_disk}",
-                current_state=f"Available disks: {[d.path for d in self.facts.disks]}",
-                possible_recovery="Select a valid existing disk.",
-            )
-
-        if disk.is_live_medium or disk.path in self._live_disks():
-            raise ResolutionError(
-                message=f"Target disk '{choices.target_disk}' is the active booted live media.",
-                cause="The running live environment is booted from this physical storage device.",
-                failed_operation=f"Validate safety of target disk {choices.target_disk}",
-                current_state=f"Disk {disk.path} holds the running root or the install source {self.manifest.install.source}",
-                possible_recovery="Select a different destination disk to install to.",
-            )
-
-        critical_mounts = {"/", "/usr", "/var", "/etc", "/run", "/boot", "/home"}
-        active_critical = [p.mountpoint for p in disk.partitions if p.mountpoint in critical_mounts]
-        if active_critical:
-            raise ResolutionError(
-                message=f"Target disk '{choices.target_disk}' contains active critical host mounts: {active_critical}",
-                cause="Partitions on this storage device are in active use by the host operating system.",
-                failed_operation=f"Verify disk mount safety for {choices.target_disk}",
-                current_state=f"Active mounts: {active_critical}",
-                possible_recovery="Select a dedicated, non-active installation disk.",
-            )
-
-        if disk.read_only:
-            raise ResolutionError(
-                message=f"Selected target disk '{choices.target_disk}' is read-only.",
-                cause="Device hardware switch or mount status reports read-only.",
-                failed_operation="Check disk write permission",
-                current_state=f"{disk.path} read_only=True",
-                possible_recovery="Select a writable storage device.",
-            )
-
-        if disk.size_bytes < self.manifest.install.min_disk_size_bytes:
-            min_gib = round(self.manifest.install.min_disk_size_bytes / (1024**3), 2)
-            disk_gib = disk.size_gib
-            raise ResolutionError(
-                message=f"Target disk '{choices.target_disk}' is too small ({disk_gib} GiB).",
-                cause=f"The live remaster requires at least {min_gib} GiB for persistent installation.",
-                failed_operation="Validate disk capacity",
-                current_state=f"Disk size: {disk_gib} GiB; Required: {min_gib} GiB",
-                possible_recovery="Select a disk with sufficient capacity.",
-            )
+        disk = self._check_target_disk(self.facts, choices.target_disk)
 
         # 2. Validate Bootloader Compatibility
         # Rule in plano.md: "UEFI/BIOS does not choose the bootloader.
@@ -222,7 +177,7 @@ class InstallationResolver:
             PlanStep(
                 step_id="target_mount",
                 title="Mount target filesystem hierarchy",
-                description="Mount target root and ESP to staging path (/mnt)",
+                description="Mount target root and ESP at the staging directory",
                 is_destructive=False,
                 provider_name="platform",
             ),
@@ -385,11 +340,116 @@ class InstallationResolver:
             "fstab_extra": list(self.manifest.install.fstab_extra),
         }
 
+        metadata["disk_identity"] = disk.identity()
+        metadata["release_mounts"] = self._releasable_mounts(disk)
+        summary.release_mounts = [mp for _, mp in metadata["release_mounts"]]
+
         plan = InstallationPlan(summary=summary, steps=steps, metadata=metadata)
+        plan.revalidate = lambda: self.revalidate(plan)
         self.events.info(EventPhase.RESOLVE, "Installation plan resolved successfully.")
         return plan
 
-    def _live_disks(self) -> Set[str]:
+    # Mount points (and everything below them) that belong to the running system
+    CRITICAL_TREES = ("/usr", "/var", "/etc", "/boot", "/home", "/opt", "/srv", "/root")
+    # Critical only as such: below /run live removable-media mounts (/run/media/...)
+    CRITICAL_EXACT = ("/", "/run")
+
+    def _critical(self, mountpoint: str) -> bool:
+        return mountpoint in self.CRITICAL_EXACT or any(
+            mountpoint == c or mountpoint.startswith(c + "/") for c in self.CRITICAL_TREES)
+
+    def _releasable_mounts(self, disk: DiskDevice) -> List[List[str]]:
+        """Non-critical filesystems mounted from the target disk; the plan lists them
+        and the storage provider unmounts exactly these before partitioning."""
+        return [[p.path, p.mountpoint] for p in disk.partitions if p.mountpoint and not self._critical(p.mountpoint)]
+
+    def _check_target_disk(self, facts: SystemFacts, path: str) -> DiskDevice:
+        """Safety checks on the target disk; used for planning and again right before execution."""
+        disk = facts.find_disk(path)
+        if not disk:
+            raise ResolutionError(
+                message=f"Selected target disk '{path}' was not detected on this system.",
+                cause="The target device does not exist or was disconnected.",
+                failed_operation=f"Verify disk {path}",
+                current_state=f"Available disks: {[d.path for d in facts.disks]}",
+                possible_recovery="Select a valid existing disk.",
+            )
+        if disk.is_live_medium or disk.path in self._live_disks(facts):
+            raise ResolutionError(
+                message=f"Target disk '{path}' is the active booted live media.",
+                cause="The running live environment is booted from this physical storage device.",
+                failed_operation=f"Validate safety of target disk {path}",
+                current_state=f"Disk {disk.path} holds the running root or the install source {self.manifest.install.source}",
+                possible_recovery="Select a different destination disk to install to.",
+            )
+        active_critical = [p.mountpoint for p in disk.partitions if p.mountpoint and self._critical(p.mountpoint)]
+        if active_critical:
+            raise ResolutionError(
+                message=f"Target disk '{path}' contains active critical host mounts: {active_critical}",
+                cause="Partitions on this storage device are in active use by the host operating system.",
+                failed_operation=f"Verify disk mount safety for {path}",
+                current_state=f"Active mounts: {active_critical}",
+                possible_recovery="Select a dedicated, non-active installation disk.",
+            )
+        if disk.in_use:
+            raise ResolutionError(
+                message=f"Target disk '{path}' is in use and Mocinha will not tear that down.",
+                cause="; ".join(disk.in_use),
+                failed_operation=f"Verify disk usage of {path}",
+                current_state=f"{len(disk.in_use)} active use(s)",
+                possible_recovery="Deactivate swap / close LUKS / deactivate LVM or RAID / export ZFS pools on this disk, then plan again.",
+            )
+        if disk.read_only:
+            raise ResolutionError(
+                message=f"Selected target disk '{path}' is read-only.",
+                cause="Device hardware switch or mount status reports read-only.",
+                failed_operation="Check disk write permission",
+                current_state=f"{disk.path} read_only=True",
+                possible_recovery="Select a writable storage device.",
+            )
+        if disk.size_bytes < self.manifest.install.min_disk_size_bytes:
+            min_gib = round(self.manifest.install.min_disk_size_bytes / (1024**3), 2)
+            raise ResolutionError(
+                message=f"Target disk '{path}' is too small ({disk.size_gib} GiB).",
+                cause=f"The live remaster requires at least {min_gib} GiB for persistent installation.",
+                failed_operation="Validate disk capacity",
+                current_state=f"Disk size: {disk.size_gib} GiB; Required: {min_gib} GiB",
+                possible_recovery="Select a disk with sufficient capacity.",
+            )
+        return disk
+
+    def revalidate(self, plan: InstallationPlan) -> None:
+        """Re-probes the machine right before execution and refuses if the target changed.
+
+        Catches a disk swapped, resized or removed after the plan was shown, a new
+        mount or swap on it, or the disk becoming the live medium.
+        """
+        planned = plan.metadata["disk_identity"]
+        self.events.info(EventPhase.PREPARE, f"Re-checking target disk {planned['path']} before any write...")
+        facts = self.reprobe()
+        disk = self._check_target_disk(facts, planned["path"])
+        current = disk.identity()
+        if current != planned:
+            raise ResolutionError(
+                message=f"Target disk {planned['path']} is not the disk shown in the plan.",
+                cause=f"Planned {planned}, found {current}.",
+                failed_operation="Re-check target disk identity",
+                current_state="No disk has been modified.",
+                possible_recovery="Review the disks and create a new plan.",
+            )
+        planned_mounts = sorted(tuple(m) for m in plan.metadata["release_mounts"])
+        current_mounts = sorted(tuple(m) for m in self._releasable_mounts(disk))
+        if current_mounts != planned_mounts:
+            raise ResolutionError(
+                message=f"Mounts on {planned['path']} changed since the plan was shown.",
+                cause=f"Planned to release {planned_mounts}, now mounted: {current_mounts}.",
+                failed_operation="Re-check target disk mounts",
+                current_state="No disk has been modified.",
+                possible_recovery="Create a new plan.",
+            )
+        self.events.info(EventPhase.PREPARE, f"Target disk {planned['path']} unchanged since planning.")
+
+    def _live_disks(self, facts: Optional[SystemFacts] = None) -> Set[str]:
         """Disks holding the running root filesystem or the deployment source.
 
         Derived from observed mounts, not from distribution-specific mount
@@ -401,7 +461,7 @@ class InstallationResolver:
         source = self.manifest.install.source
         best_len = -1
         best: Optional[str] = None
-        for d in self.facts.disks:
+        for d in (facts or self.facts).disks:
             for p in d.partitions:
                 mp = p.mountpoint
                 if not mp:

@@ -47,19 +47,18 @@ class InstallationExecutor:
         # 0. Fail closed: every step must be explicitly wired before anything runs.
         self._check_plan_wired(plan)
 
-        # 1. Identify distinct active providers participating in the plan
-        active_providers = []
-        seen_names = set()
-        for prov in list(plan.providers) + [step.provider for step in plan.steps]:
-            if prov is not None and prov.name not in seen_names:
-                active_providers.append(prov)
-                seen_names.add(prov.name)
+        # 1. Re-check the target against a fresh probe (disk swapped, resized, newly mounted...)
+        if plan.revalidate is None:
+            raise ExecutionError(
+                message="The plan has no target re-check; refusing to execute.",
+                cause="Plans must come from the resolver, which re-checks the target before any write.",
+                failed_operation="Re-check target before execution",
+                current_state="No disk has been modified.",
+            )
+        plan.revalidate()
 
-        # 2. LIFECYCLE PHASE: VALIDATE (Pre-flight checks before ANY disk action)
-        self.events.info(EventPhase.PREPARE, f"Running pre-flight validation across {len(active_providers)} active provider(s)...")
-        for prov in active_providers:
-            self.events.info(EventPhase.PREPARE, f"Validating provider '{prov.name}' requirements...")
-            prov.validate(context)
+        # 2. LIFECYCLE PHASE: VALIDATE again (it already ran before confirmation; state may have changed)
+        active_providers = self.preflight(plan, context)
 
         self.events.info(
             EventPhase.PREPARE,
@@ -136,6 +135,30 @@ class InstallationExecutor:
                     prov.cleanup(context)
                 except Exception as ce:
                     self.events.warning(EventPhase.CLEANUP, f"Cleanup warning in provider '{prov.name}': {ce}")
+
+    @staticmethod
+    def active_providers(plan: InstallationPlan) -> list:
+        providers, seen = [], set()
+        for prov in list(plan.providers) + [step.provider for step in plan.steps]:
+            if prov is not None and prov.name not in seen:
+                providers.append(prov)
+                seen.add(prov.name)
+        return providers
+
+    def preflight(self, plan: InstallationPlan, context: ExecutionContext) -> list:
+        """Runs every provider's validate(): read-only checks, no disk is modified.
+
+        Frontends call this before asking for confirmation, so missing tools,
+        unsupported layouts or firmware combinations are reported with the plan;
+        the executor runs it again right before writing.
+        """
+        self._check_plan_wired(plan)
+        providers = self.active_providers(plan)
+        self.events.info(EventPhase.PREPARE, f"Validating {len(providers)} provider(s) (read-only checks)...")
+        for prov in providers:
+            self.events.info(EventPhase.PREPARE, f"Validating provider '{prov.name}' requirements...")
+            prov.validate(context)
+        return providers
 
     def _check_plan_wired(self, plan: InstallationPlan) -> None:
         """Rejects plans with steps that have no action or no verification.

@@ -52,7 +52,7 @@ class TestExecutor(unittest.TestCase):
             PlanStep("step1", "First Step", "Step 1 desc", True, "mock", execute_fn=step1_action, verify_fn=lambda c: None),
             PlanStep("step2", "Second Step", "Step 2 desc", True, "mock", execute_fn=step2_action, verify_fn=lambda c: None),
         ]
-        plan = InstallationPlan(summary=summary, steps=steps)
+        plan = InstallationPlan(summary=summary, steps=steps, revalidate=lambda: None)
 
         progress_records = []
 
@@ -94,7 +94,7 @@ class TestExecutor(unittest.TestCase):
             init="systemd",
             services=["dbus"],
         )
-        plan = InstallationPlan(summary=summary, steps=[step])
+        plan = InstallationPlan(summary=summary, steps=[step], revalidate=lambda: None)
 
         with self.assertRaises(ExecutionError) as ctx:
             self.executor.execute_plan(plan, self.context, confirmed=True)
@@ -147,7 +147,7 @@ class TestExecutor(unittest.TestCase):
             init="systemd",
             services=[],
         )
-        plan = InstallationPlan(summary=summary, steps=[step], providers=[mock_prov])
+        plan = InstallationPlan(summary=summary, steps=[step], providers=[mock_prov], revalidate=lambda: None)
 
         ok = self.executor.execute_plan(plan, self.context, confirmed=True)
         self.assertTrue(ok)
@@ -194,7 +194,7 @@ class TestExecutor(unittest.TestCase):
             init="systemd",
             services=[],
         )
-        plan = InstallationPlan(summary=summary, steps=[step], providers=[prov])
+        plan = InstallationPlan(summary=summary, steps=[step], providers=[prov], revalidate=lambda: None)
 
         with self.assertRaises(ExecutionError):
             self.executor.execute_plan(plan, self.context, confirmed=True)
@@ -290,10 +290,69 @@ class TestExecutor(unittest.TestCase):
             steps=[PlanStep("s", "S", "Desc", False, "bad-cleanup", provider=prov,
                             execute_fn=prov.apply, verify_fn=prov.verify)],
             providers=[prov],
+            revalidate=lambda: None,
         )
         self.assertTrue(self.executor.execute_plan(plan, self.context, confirmed=True))
         warnings = [e for e in self.stream.history if e.level == EventLevel.WARNING]
         self.assertTrue(any("umount busy" in e.message for e in warnings))
+
+    def _recording_provider(self, calls):
+        from mocinha.core.provider import ProviderContract
+
+        class Recorder(ProviderContract):
+            def capabilities(self):
+                return ["mock"]
+
+            def validate(self, context):
+                calls.append("validate")
+
+            def prepare(self, context):
+                calls.append("prepare")
+
+            def apply(self, context):
+                calls.append("apply")
+
+            def verify(self, context):
+                calls.append("verify")
+
+            def cleanup(self, context):
+                calls.append("cleanup")
+
+        return Recorder("recorder", self.stream)
+
+    def test_plan_without_target_recheck_is_refused(self) -> None:
+        calls = []
+        prov = self._recording_provider(calls)
+        plan = InstallationPlan(summary=self._summary(), providers=[prov], steps=[
+            PlanStep("s", "S", "D", True, "recorder", provider=prov, execute_fn=prov.apply, verify_fn=prov.verify)])
+        with self.assertRaises(ExecutionError) as ctx:
+            self.executor.execute_plan(plan, self.context, confirmed=True)
+        self.assertIn("re-check", str(ctx.exception))
+        self.assertEqual(calls, [])
+
+    def test_failed_target_recheck_stops_before_any_provider_call(self) -> None:
+        from mocinha.core.errors import ResolutionError
+        calls = []
+        prov = self._recording_provider(calls)
+
+        def changed():
+            raise ResolutionError(message="Target disk is not the disk shown in the plan.",
+                                  cause="serial differs", failed_operation="Re-check")
+
+        plan = InstallationPlan(summary=self._summary(), providers=[prov], revalidate=changed, steps=[
+            PlanStep("s", "S", "D", True, "recorder", provider=prov, execute_fn=prov.apply, verify_fn=prov.verify)])
+        with self.assertRaises(ResolutionError):
+            self.executor.execute_plan(plan, self.context, confirmed=True)
+        self.assertEqual(calls, [])
+
+    def test_preflight_only_validates(self) -> None:
+        """Frontends call preflight() before confirmation: read-only, no prepare/apply."""
+        calls = []
+        prov = self._recording_provider(calls)
+        plan = InstallationPlan(summary=self._summary(), providers=[prov], steps=[
+            PlanStep("s", "S", "D", True, "recorder", provider=prov, execute_fn=prov.apply, verify_fn=prov.verify)])
+        self.executor.preflight(plan, self.context)
+        self.assertEqual(calls, ["validate"])
 
 
 if __name__ == "__main__":

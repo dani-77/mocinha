@@ -1,6 +1,6 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-07 (last validated code: commit `01864ca`)
+**Date:** 2026-10-07 (VM results below obtained with the code of the disk-safety commit that follows `2329999`, unless stated otherwise)
 **Branch:** `main` (private GitHub repository `dani-77/mocinha`)
 
 This file records what has actually been done and validated, and how. If
@@ -42,10 +42,20 @@ GUI: the GTK3 frontend has never driven an installation.
   live-only, not-selected services disabled. `wants` and `before` are parsed
   but **not used**.
 - Resolver/plan: rejects the live medium (disk holding `[install].source` or
-  `/`), disks with critical host mounts, read-only/undersized disks, platform
-  mismatch, invalid hostname/locale shapes.
+  `/`), disks with critical host mounts, disks in use that Mocinha will not
+  tear down (swap, device-mapper/LVM/LUKS/RAID holders, ZFS pool members),
+  read-only/undersized disks, platform mismatch, invalid hostname/locale
+  shapes. Other filesystems mounted from the target are listed in the plan
+  ("Will unmount") and released exactly as listed.
+- Disk identity (path, size, model, serial) and the planned mounts are stored
+  in the plan; right before any write the executor re-probes the machine and
+  refuses if the disk changed, disappeared, became the live medium, got new
+  mounts/swap/holders (`plan.revalidate`, mandatory).
+- Provider `validate()` checks (read-only) run **before confirmation** in the
+  CLI and the GUI (`executor.preflight`), and again right before execution.
 - Executor: explicit confirmation; refuses plans with steps lacking an action
-  or a verification; validate -> prepare -> apply -> verify -> cleanup.
+  or a verification, or without the target re-check; re-check -> validate ->
+  prepare -> apply -> verify -> cleanup.
 
 ### Providers (`mocinha/providers/`)
 
@@ -82,8 +92,11 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 80 unit tests (`python3 -m unittest discover -s tests`), including regression
-  tests for the failures found in the VM runs.
+- 91 unit tests (`python3 -m unittest discover -s tests`), including regression
+  tests for the failures found in the VM runs. The executor lifecycle test
+  (`test_provider_full_lifecycle_sequence`) only checks the call order with a
+  mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
+  sysfs/proc trees, synthetic facts) and by the adversarial VM runs below.
 - QEMU harnesses in `tools/qemu/` (below).
 
 ### Packaging
@@ -110,7 +123,7 @@ greetd takes tty1 and the archiso `script=` hook never fires. The test asks for
 `console=ttyS0` through `--kernel-args` so the installed system can be checked
 over serial.
 
-| Run (code `01864ca`) | Install | Boot | Equivalence check |
+| Run | Install | Boot | Equivalence check |
 |---|---|---|---|
 | BIOS + GRUB | pass | pass | pass |
 | UEFI + GRUB | pass | pass | pass |
@@ -145,6 +158,26 @@ links; not-selected services left enabled; `uninitialized` machine-id
 re-enabling units on first boot; dangling `/etc/resolv.conf`; hostname never
 written.
 
+### Disk-safety adversarial runs (code of this commit)
+
+`tools/qemu/run_automated_test.sh --firmware bios --script adversarial.sh` and
+`tools/qemu/run_au_d77_test.sh --firmware bios --script adversarial-freebsd.sh`
+run scenarios inside the real lives. Every refusal must leave the target disk
+byte-identical (partition table + first MiB); the snapshot for the last
+scenario is taken after the test's own mount.
+
+| Scenario | btw-d77 (Linux) | au-d77 (FreeBSD) |
+|---|---|---|
+| Target is the live medium / not a target disk | refused, untouched (`/dev/sr0` is not offered) | refused, untouched (`vtbd0`, the live disk) |
+| Swap active on the target | refused, untouched | refused, untouched |
+| Device-mapper holder on the target (`dmsetup`) | refused, untouched | --- |
+| Filesystem from the target mounted (`/run/media/...`, `/media/...`) | listed in the plan, unmounted, install completed | listed in the plan, unmounted, install completed |
+| Target partition mounted **after** the plan was validated | execution refused by the re-check, untouched | execution refused by the re-check, untouched |
+
+Not tested in a VM: a disk physically swapped or resized between plan and
+execution (covered by unit tests only), LUKS/LVM set up with the real tools
+(only a raw `dmsetup` mapping), ZFS pools, GELI.
+
 ### au-d77 --- 14.5-RELEASE image built from `~/Remaster/au-d77` at `da8e27b` (repository untouched)
 
 Harness: `tools/qemu/run_au_d77_test.sh --firmware bios|uefi`
@@ -157,7 +190,7 @@ restores `/etc/ttys` before Mocinha runs. Boot proof: multi-user boot to the
 getty banner, then a single-user boot that must ask for the root password
 chosen at install time, and diagnostics read in single-user mode.
 
-| Run (code `01864ca`) | Install | Boot | Equivalence check |
+| Run | Install | Boot | Equivalence check |
 |---|---|---|---|
 | BIOS live -> install | pass (14 steps verified) | --- | --- |
 | Installed disk, BIOS | --- | pass | pass |
@@ -208,6 +241,8 @@ driver for QEMU's virtual GPUs, so the live session falls back to a shell.
   is refused at provider validation (after confirmation, before any disk write).
 - `wants` / `before` service metadata parsed but unused.
 - CLI passwords on the command line.
+- Other adversarial cases from `AGENTS.md` not yet tested: failed mount,
+  interrupted deployment, low space, disk disappearing during the install.
 - `plano.md` §5 describes the administrator as an intention resolved by a
   provider; today the remaster declares the administrator group in
   `[users].groups` and sudo/doas rules as `[[target_files]]`. To be decided.

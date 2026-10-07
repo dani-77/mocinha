@@ -43,6 +43,13 @@ class DiskDevice:
     has_active_mounts: bool = False
     partition_table: Optional[str] = None  # "gpt", "dos/mbr", or None
     partitions: List[DiskPartition] = field(default_factory=list)
+    serial: Optional[str] = None
+    # Uses that Mocinha does not tear down: swap, device-mapper/LVM/LUKS/md holders, ZFS vdevs
+    in_use: List[str] = field(default_factory=list)
+
+    def identity(self) -> Dict[str, object]:
+        """What must not change between planning and execution."""
+        return {"path": self.path, "size_bytes": self.size_bytes, "model": self.model, "serial": self.serial}
 
     @property
     def size_gib(self) -> float:
@@ -77,8 +84,10 @@ class SystemFacts:
 class SystemProbe:
     """Collects hardware and runtime facts."""
 
-    def __init__(self, event_stream: Optional[EventStream] = None) -> None:
+    def __init__(self, event_stream: Optional[EventStream] = None, root: str = "/") -> None:
         self.events = event_stream or EventStream()
+        # Root of /sys, /proc and /dev; only changed by tests
+        self.root = Path(root)
 
     def probe_facts(self) -> SystemFacts:
         self.events.info(EventPhase.PROBE, "Starting system probe...")
@@ -158,100 +167,7 @@ class SystemProbe:
     def _detect_disks(self, sys_platform: str) -> List[DiskDevice]:
         devices: List[DiskDevice] = []
         if sys_platform == "linux":
-            # 1. Collect all active mounts
-            mount_map: Dict[str, List[str]] = {}
-            live_nodes: set = set()
-            mounts_file = Path("/proc/mounts")
-            if mounts_file.is_file():
-                try:
-                    for line in mounts_file.read_text().splitlines():
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            dev_node, mnt_point = parts[0], parts[1]
-                            if dev_node.startswith("/dev/"):
-                                mount_map.setdefault(dev_node, []).append(mnt_point)
-                                if mnt_point == "/":
-                                    live_nodes.add(dev_node)
-                except Exception:
-                    pass
-
-            sys_block = Path("/sys/block")
-            if sys_block.is_dir():
-                for dev_entry in sorted(sys_block.iterdir()):
-                    dev_name = dev_entry.name
-                    if dev_name.startswith(("loop", "ram", "zram", "sr")):
-                        continue
-                    dev_path = f"/dev/{dev_name}"
-                    size_file = dev_entry / "size"
-                    size_bytes = 0
-                    if size_file.is_file():
-                        try:
-                            size_bytes = int(size_file.read_text().strip()) * 512
-                        except ValueError:
-                            pass
-                    ro_file = dev_entry / "ro"
-                    is_ro = False
-                    if ro_file.is_file():
-                        try:
-                            is_ro = ro_file.read_text().strip() == "1"
-                        except Exception:
-                            pass
-                    removable_file = dev_entry / "removable"
-                    is_removable = False
-                    if removable_file.is_file():
-                        try:
-                            is_removable = removable_file.read_text().strip() == "1"
-                        except Exception:
-                            pass
-
-                    # Discover partitions under /sys/block/<dev_name>/
-                    partitions: List[DiskPartition] = []
-                    is_live = dev_path in live_nodes
-                    has_mounts = False
-
-                    # Check if whole disk is mounted
-                    if dev_path in mount_map:
-                        has_mounts = True
-                        for m in mount_map[dev_path]:
-                            partitions.append(DiskPartition(path=dev_path, size_bytes=size_bytes, mountpoint=m))
-                            if dev_path in live_nodes:
-                                is_live = True
-
-                    # Check child partition directories
-                    for p_entry in sorted(dev_entry.iterdir()):
-                        p_name = p_entry.name
-                        if p_name.startswith(dev_name) and (p_entry / "partition").is_file():
-                            p_dev = f"/dev/{p_name}"
-                            p_size = 0
-                            p_size_file = p_entry / "size"
-                            if p_size_file.is_file():
-                                try:
-                                    p_size = int(p_size_file.read_text().strip()) * 512
-                                except Exception:
-                                    pass
-                            p_mounts = mount_map.get(p_dev, [])
-                            if p_mounts:
-                                has_mounts = True
-                                for m in p_mounts:
-                                    partitions.append(DiskPartition(path=p_dev, size_bytes=p_size, mountpoint=m))
-                            else:
-                                partitions.append(DiskPartition(path=p_dev, size_bytes=p_size, mountpoint=None))
-
-                            if p_dev in live_nodes:
-                                is_live = True
-
-                    devices.append(
-                        DiskDevice(
-                            path=dev_path,
-                            size_bytes=size_bytes,
-                            model=dev_name,
-                            removable=is_removable,
-                            read_only=is_ro,
-                            is_live_medium=is_live,
-                            has_active_mounts=has_mounts,
-                            partitions=partitions,
-                        )
-                    )
+            devices = self._detect_disks_linux()
         elif sys_platform == "freebsd":
             devices = self._detect_disks_freebsd()
         return devices
@@ -301,21 +217,122 @@ class SystemProbe:
                     DiskPartition(path=f"/dev/{provider}", size_bytes=0, fs_type=parts[2], mountpoint=parts[1])
                 )
 
+        in_use_by_disk: Dict[str, List[str]] = {}
+        for line in self._run(["swapinfo"]).splitlines()[1:]:
+            node = line.split()[0] if line.split() else ""
+            provider = provider_of(node)
+            disk = disk_of(provider) if provider else None
+            if disk:
+                in_use_by_disk.setdefault(disk, []).append(f"swap active on /dev/{provider}")
+        for line in self._run(["zpool", "status", "-P"]).splitlines():
+            word = line.split()[0] if line.split() else ""
+            provider = provider_of(word)
+            disk = disk_of(provider) if provider else None
+            if disk:
+                in_use_by_disk.setdefault(disk, []).append(f"/dev/{provider} is a ZFS pool member")
+
         devices: List[DiskDevice] = []
         for name in self._run(["sysctl", "-n", "kern.disks"]).split():
             if name.startswith(("cd", "pass", "md")):
                 continue
             info = self._run(["diskinfo", name]).split()
             size_bytes = int(info[2]) if len(info) >= 3 and info[2].isdigit() else 0
+            details = {}
+            for line in self._run(["diskinfo", "-v", name]).splitlines():
+                if "#" in line:
+                    value, _, key = line.partition("#")
+                    details[key.strip()] = value.strip()
             partitions = mounts_by_disk.get(name, [])
             devices.append(
                 DiskDevice(
                     path=f"/dev/{name}",
                     size_bytes=size_bytes,
-                    model=name,
+                    model=details.get("Disk descr.") or name,
+                    serial=details.get("Disk ident.") or None,
                     is_live_medium=any(p.mountpoint == "/" for p in partitions),
                     has_active_mounts=bool(partitions),
                     partitions=partitions,
+                    in_use=in_use_by_disk.get(name, []),
                 )
             )
         return sorted(devices, key=lambda d: d.path)
+
+    def _real(self, node: str) -> str:
+        """Resolves /dev/mapper/*, /dev/disk/by-*/* etc. to the kernel node (/dev/dm-0, /dev/sda1)."""
+        if self.root != Path("/"):
+            return node
+        return os.path.realpath(node)
+
+    @staticmethod
+    def _read(path: Path) -> str:
+        try:
+            return path.read_text().strip()
+        except OSError:
+            return ""
+
+    def _detect_disks_linux(self) -> List[DiskDevice]:
+        sys_block = self.root / "sys" / "block"
+        mounts: List[tuple] = []
+        for line in self._read(self.root / "proc" / "mounts").splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[0].startswith("/dev/"):
+                mounts.append((self._real(parts[0]), parts[1].replace("\\040", " "), parts[2]))
+        swaps = [self._real(line.split()[0]) for line in self._read(self.root / "proc" / "swaps").splitlines()[1:] if line.strip()]
+
+        def holders_of(sys_dir: Path) -> List[str]:
+            """Transitive holders (dm-N, mdN) of a block device directory."""
+            found: List[str] = []
+            pending = [sys_dir / "holders"]
+            while pending:
+                hdir = pending.pop()
+                for h in sorted(hdir.iterdir()) if hdir.is_dir() else []:
+                    if h.name not in found:
+                        found.append(h.name)
+                        pending.append(sys_block / h.name / "holders")
+            return found
+
+        devices: List[DiskDevice] = []
+        for dev_entry in sorted(sys_block.iterdir()) if sys_block.is_dir() else []:
+            dev_name = dev_entry.name
+            if dev_name.startswith(("loop", "ram", "zram", "sr", "dm-", "md")):
+                continue
+            dev_path = f"/dev/{dev_name}"
+            size_bytes = int(self._read(dev_entry / "size") or 0) * 512
+            # (node path, sysfs dir, size) for the whole disk and each partition
+            nodes = [(dev_path, dev_entry, size_bytes)]
+            for p_entry in sorted(dev_entry.iterdir()):
+                if p_entry.name.startswith(dev_name) and (p_entry / "partition").is_file():
+                    nodes.append((f"/dev/{p_entry.name}", p_entry, int(self._read(p_entry / "size") or 0) * 512))
+
+            partitions: List[DiskPartition] = []
+            in_use: List[str] = []
+            for node, sys_dir, size in nodes:
+                holders = holders_of(sys_dir)
+                watched = [node] + [f"/dev/{h}" for h in holders]
+                node_mounts = [(dev, mp, fs) for dev, mp, fs in mounts if dev in watched]
+                for dev, mp, fs in node_mounts:
+                    partitions.append(DiskPartition(path=dev, size_bytes=size, fs_type=fs, mountpoint=mp))
+                if node != dev_path and not node_mounts:
+                    partitions.append(DiskPartition(path=node, size_bytes=size))
+                for h in holders:
+                    in_use.append(f"{node} is held by /dev/{h} (device-mapper/LVM/LUKS/RAID)")
+                for sw in swaps:
+                    if sw in watched:
+                        in_use.append(f"swap active on {sw}")
+
+            devices.append(
+                DiskDevice(
+                    path=dev_path,
+                    size_bytes=size_bytes,
+                    model=self._read(dev_entry / "device" / "model") or dev_name,
+                    serial=self._read(dev_entry / "serial") or self._read(dev_entry / "device" / "serial")
+                    or self._read(dev_entry / "device" / "wwid") or None,
+                    removable=self._read(dev_entry / "removable") == "1",
+                    read_only=self._read(dev_entry / "ro") == "1",
+                    is_live_medium=any(p.mountpoint == "/" for p in partitions),
+                    has_active_mounts=any(p.mountpoint for p in partitions),
+                    partitions=partitions,
+                    in_use=in_use,
+                )
+            )
+        return devices

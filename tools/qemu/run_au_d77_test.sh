@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_au_d77_test.sh --- Install au-d77 with Mocinha from the real au-d77 live image, then boot it.
 #
-#   tools/qemu/run_au_d77_test.sh [--firmware bios|uefi] [--image PATH.img.xz]
+#   tools/qemu/run_au_d77_test.sh [--firmware bios|uefi] [--image PATH.img.xz] [--script adversarial-freebsd.sh]
 #
 # 1. live:   boots a throwaway qcow2 overlay of the au-d77 live image, installs to
 #            a fresh disk (see freebsd_serial.py for how the serial shell is obtained)
@@ -19,10 +19,12 @@ HTTP_PORT="${HTTP_PORT:-8001}"
 
 FIRMWARE="bios"
 IMAGE=""
+SCRIPT="startup-freebsd.sh"   # adversarial-freebsd.sh: disk-safety scenarios instead of a normal install
 while [ $# -gt 0 ]; do
     case "$1" in
         --firmware) FIRMWARE="$2"; shift 2 ;;
         --image) IMAGE="$2"; shift 2 ;;
+        --script) SCRIPT="$2"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -31,6 +33,7 @@ done
 [ -f "$IMAGE" ] || { echo "au-d77 image not found (looked in $AU_OUT)" >&2; exit 1; }
 
 RUN="au-$FIRMWARE"
+[ "$SCRIPT" = "startup-freebsd.sh" ] || RUN="${RUN}-${SCRIPT%.sh}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"   # 1: reuse the installed disk, run only the boot checks
 WORK="$DIR/work"
 LOGS="$DIR/logs/$RUN"
@@ -56,7 +59,7 @@ fi
 # Mocinha working tree for the guest
 tar --exclude=./tools/qemu/work --exclude=./tools/qemu/logs --exclude=./.git --exclude='__pycache__' \
     -czf "$WORK/http/mocinha.tgz" -C "$REPO_DIR" .
-cp "$DIR/web/startup-freebsd.sh" "$WORK/http/"
+cp "$DIR/web/$SCRIPT" "$WORK/http/"
 
 if ss -ltn | grep -q ":$HTTP_PORT "; then echo "Port $HTTP_PORT busy; set HTTP_PORT" >&2; exit 1; fi
 python3 "$DIR/http_exchange.py" "$HTTP_PORT" "$WORK/http" "$LOGS" > "$LOGS/http.log" 2>&1 &
@@ -98,13 +101,16 @@ vm "$WORK/serial-$RUN.sock" "$WORK/mon-$RUN.sock" \
     -drive "file=$LIVE,if=virtio,format=qcow2" -drive "file=$DISK,if=virtio,format=qcow2"
 QEMU_PID=$!
 timeout 3600 python3 "$DIR/freebsd_serial.py" live "$WORK/serial-$RUN.sock" "$LOGS/serial-live.log" \
-    "fetch -q -o /tmp/startup-freebsd.sh http://10.0.2.2:$HTTP_PORT/startup-freebsd.sh && sh /tmp/startup-freebsd.sh $HTTP_PORT" \
+    "fetch -q -o /tmp/run.sh http://10.0.2.2:$HTTP_PORT/$SCRIPT && sh /tmp/run.sh $HTTP_PORT" \
     || { echo ">> live driver exited with $?"; kill "$QEMU_PID" 2>/dev/null || true; }
 wait "$QEMU_PID" || true
 if [ "$(cat "$LOGS/result.status" 2>/dev/null)" != "SUCCESS" ]; then
     echo "  ✗ INSTALL FAILED ($RUN). See $LOGS/"; exit 1
 fi
 echo "  ✓ INSTALL PASSED ($RUN)"
+if [ "$SCRIPT" != "startup-freebsd.sh" ]; then
+    cat "$LOGS/adversarial.log"; exit 0
+fi
 fi
 
 echo "== 2/3 multi-user boot of the installed disk"

@@ -244,12 +244,5 @@ class TestFreeBSDProviders(unittest.TestCase):
         self.assertFalse(disks["/dev/vtbd10"].has_active_mounts)
         self.assertEqual(disks["/dev/vtbd1"].size_bytes, 21474836480)
 
-    def test_gpart_disk_match_is_exact(self) -> None:
-        from mocinha.providers.storage.gpart import _belongs_to_disk
-        self.assertTrue(_belongs_to_disk("/dev/da1p2", "da1"))
-        self.assertTrue(_belongs_to_disk("/dev/da1s1a", "da1"))
-        self.assertFalse(_belongs_to_disk("/dev/da10p1", "da1"))
-
-
 if __name__ == "__main__":
     unittest.main()

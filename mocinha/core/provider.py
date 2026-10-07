@@ -23,6 +23,16 @@ class ExecutionContext:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+def build_execution_context(plan: Any, target_mount: str, password: str,
+                            root_password: Optional[str] = None) -> ExecutionContext:
+    """Execution context for a resolved plan; secrets are added here, never stored in the plan."""
+    return ExecutionContext(
+        target_disk=plan.summary.disk,
+        target_mount=target_mount,
+        metadata={**plan.metadata, "password": password, "root_password": root_password or None},
+    )
+
+
 class ProviderContract(ABC):
     """Abstract base class for all Mocinha providers."""
 

@@ -18,7 +18,7 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import CommandRunner, release_planned_mounts
 
 
 class FreeBSDStorageProvider(ProviderContract):
@@ -66,14 +66,7 @@ class FreeBSDStorageProvider(ProviderContract):
                 )
 
     def prepare(self, context: ExecutionContext) -> None:
-        # Unmount anything still mounted from the target disk (exact disk match, not prefix)
-        disk_name = Path(context.target_disk).name
-        proc = self.runner.run(["mount", "-p"], phase=EventPhase.PREPARE, check=True)
-        for line in reversed(proc.stdout.splitlines()):
-            parts = line.split()
-            if len(parts) >= 2 and _belongs_to_disk(parts[0], disk_name):
-                self.events.action(EventPhase.PREPARE, f"Unmounting stale target mount: {parts[1]}")
-                self.runner.run(["umount", "-f", parts[1]], phase=EventPhase.PREPARE, check=True)
+        release_planned_mounts(self.runner, context, self.events)
 
     def apply(self, context: ExecutionContext) -> None:
         disk_name = Path(context.target_disk).name
@@ -136,10 +129,3 @@ class FreeBSDStorageProvider(ProviderContract):
                 possible_recovery="Inspect the gpart output in the event log.",
             )
         self.events.info(EventPhase.VERIFY, f"FreeBSD GPT layout verified: {expected}")
-
-
-def _belongs_to_disk(node: str, disk_name: str) -> bool:
-    """True for /dev/<disk>, /dev/<disk>pN and /dev/<disk>sN[x]; not for /dev/<disk>0..."""
-    import re
-
-    return re.fullmatch(rf"/dev/{re.escape(disk_name)}((p[0-9]+)|(s[0-9]+[a-z]?))?", node) is not None

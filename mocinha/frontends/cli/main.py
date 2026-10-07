@@ -71,105 +71,68 @@ def cmd_check_manifest(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_plan(args: argparse.Namespace) -> int:
-    manifest_path = Path(args.manifest)
-    try:
-        manifest = Manifest.load_from_file(manifest_path)
-    except Exception as e:
-        print(f"Error loading manifest: {e}", file=sys.stderr)
-        return 1
+def prepare_plan(args: argparse.Namespace, stream: EventStream):
+    """Resolve, wire and validate (read-only) a plan; nothing touches a disk here.
 
+    Returns (plan, context, executor). Raises on any problem, so it is reported
+    together with the plan, before confirmation.
+    """
+    from mocinha.core.executor import InstallationExecutor
+    from mocinha.core.provider import build_execution_context
+
+    manifest = Manifest.load_from_file(Path(args.manifest))
+    facts = SystemProbe(stream).probe_facts()
+    registry = create_default_registry(stream)
+    resolver = InstallationResolver(facts, manifest, registry, stream)
+    choices = UserChoices(
+        target_disk=args.disk,
+        bootloader=args.bootloader or manifest.boot.default,
+        username=args.user,
+        password=args.password,
+        hostname=args.hostname,
+        root_password=args.root_password or None,
+        kernel_args=args.kernel_args.split() if args.kernel_args else [],
+        locale=args.locale,
+        keymap=args.keymap,
+        timezone=args.timezone,
+        selected_services=selected_services(manifest, args),
+    )
+    plan = resolver.resolve(choices)
+    wire_plan_providers(plan, registry, manifest)
+    context = build_execution_context(plan, args.mount, args.password, args.root_password)
+    executor = InstallationExecutor(stream)
+    executor.preflight(plan, context)
+    return plan, context, executor
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
     stream = EventStream()
     if args.verbose:
         stream.subscribe(print_event)
-
-    probe = SystemProbe(stream)
-    facts = probe.probe_facts()
-
-    registry = create_default_registry(stream)
-    resolver = InstallationResolver(facts, manifest, registry, stream)
-
-    choices = UserChoices(
-        target_disk=args.disk,
-        bootloader=args.bootloader or manifest.boot.default,
-        username=args.user,
-        password=getattr(args, "password", None) or "",
-        hostname=args.hostname,
-        root_password=args.root_password or None,
-        kernel_args=args.kernel_args.split() if args.kernel_args else [],
-        locale=args.locale,
-        keymap=args.keymap,
-        timezone=args.timezone,
-        selected_services=selected_services(manifest, args),
-    )
-
     try:
-        plan = resolver.resolve(choices)
-        wire_plan_providers(plan, registry, manifest)
-        print("\n" + plan.to_human_readable() + "\n")
-        return 0
+        plan, _, _ = prepare_plan(args, stream)
     except Exception as e:
         print(f"\n{e}\n", file=sys.stderr)
         return 1
+    print("\n" + plan.to_human_readable() + "\n")
+    print("Plan validated by all providers (read-only checks).")
+    return 0
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    from mocinha.core.executor import InstallationExecutor
-    from mocinha.core.provider import ExecutionContext
-
-    manifest_path = Path(args.manifest)
-    try:
-        manifest = Manifest.load_from_file(manifest_path)
-    except Exception as e:
-        print(f"Error loading manifest: {e}", file=sys.stderr)
-        return 1
-
     stream = EventStream()
     stream.subscribe(print_event)
-
-    probe = SystemProbe(stream)
-    facts = probe.probe_facts()
-
-    registry = create_default_registry(stream)
-    resolver = InstallationResolver(facts, manifest, registry, stream)
-
-    choices = UserChoices(
-        target_disk=args.disk,
-        bootloader=args.bootloader or manifest.boot.default,
-        username=args.user,
-        password=getattr(args, "password", None) or "",
-        hostname=args.hostname,
-        root_password=args.root_password or None,
-        kernel_args=args.kernel_args.split() if args.kernel_args else [],
-        locale=args.locale,
-        keymap=args.keymap,
-        timezone=args.timezone,
-        selected_services=selected_services(manifest, args),
-    )
-
     try:
-        plan = resolver.resolve(choices)
-        wire_plan_providers(plan, registry, manifest)
-        print("\n" + plan.to_human_readable() + "\n")
+        plan, context, executor = prepare_plan(args, stream)
     except Exception as e:
-        print(f"Resolution failed:\n{e}", file=sys.stderr)
+        print(f"Planning failed (no disk was modified):\n{e}", file=sys.stderr)
         return 1
+    print("\n" + plan.to_human_readable() + "\n")
 
     if not args.confirm:
         print("To proceed with destructive execution, pass --confirm.", file=sys.stderr)
         return 1
 
-    context = ExecutionContext(
-        target_disk=plan.summary.disk,
-        target_mount=args.mount,
-        metadata={
-            **plan.metadata,
-            "password": args.password,
-            "root_password": args.root_password or None,
-        },
-    )
-
-    executor = InstallationExecutor(stream)
     try:
         executor.execute_plan(plan, context, confirmed=True)
         print("\n✓ Installation completed and verified successfully.\n")
@@ -202,6 +165,8 @@ def main() -> None:
     p_plan.add_argument("--disk", required=True, help="Target disk path (e.g. /dev/nvme0n1)")
     p_plan.add_argument("--bootloader", help="Requested bootloader (e.g. limine)")
     p_plan.add_argument("--user", required=True, help="Primary user account name")
+    p_plan.add_argument("--password", required=True, help="Password for the primary user (needed to validate the plan)")
+    p_plan.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
     p_plan.add_argument("--hostname", required=True, help="Target hostname")
     p_plan.add_argument("--root-password", default="", help="Root password (default: root account locked)")
     p_plan.add_argument("--kernel-args", default="", help="Extra kernel command-line arguments (e.g. 'console=ttyS0,115200')")

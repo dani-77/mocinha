@@ -41,6 +41,7 @@ class TargetSummary:
     username: Optional[str] = None
     hostname: Optional[str] = None
     root_account: Optional[str] = None
+    release_mounts: List[str] = field(default_factory=list)
     locale: Optional[str] = None
     keymap: Optional[str] = None
     timezone: Optional[str] = None
@@ -55,6 +56,8 @@ class InstallationPlan:
     steps: List[PlanStep]
     providers: List[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Re-checks the target right before execution (set by the resolver); required by the executor
+    revalidate: Optional[Callable[[], None]] = None
 
     def to_human_readable(self) -> str:
         lines = [
@@ -79,6 +82,8 @@ class InstallationPlan:
             lines.append("Locale/Keymap/TZ: kept from the live system")
         if self.summary.root_account:
             lines.append(f"Root Account:     {self.summary.root_account}")
+        if self.summary.release_mounts:
+            lines.append(f"Will unmount:     {', '.join(self.summary.release_mounts)} (mounted from the target disk)")
         if self.summary.live_only_users:
             lines.append(f"Live-only Users:  {', '.join(self.summary.live_only_users)} (removed)")
         if self.summary.live_only_removed:

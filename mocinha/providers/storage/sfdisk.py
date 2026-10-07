@@ -11,7 +11,7 @@ import time
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner
+from mocinha.providers.base import CommandRunner, release_planned_mounts
 
 
 class SfdiskStorageProvider(ProviderContract):
@@ -58,37 +58,11 @@ class SfdiskStorageProvider(ProviderContract):
                 failed_operation="Validate partition layout",
                 possible_recovery="Remove [install].swap_size from the manifest or implement swap in sfdisk.",
             )
-        # Protect user host disks from destruction: verify no critical mountpoints on target disk
-        try:
-            with open("/proc/mounts", "r") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        dev, mnt = parts[0], parts[1]
-                        if dev.startswith(context.target_disk) and mnt in (
-                            "/", "/usr", "/var", "/etc", "/run", "/boot", "/home"
-                        ):
-                            raise ExecutionError(
-                                message=f"Target disk '{context.target_disk}' has active critical system mount '{mnt}' on '{dev}'.",
-                                cause="Target disk is actively in use by the running operating system.",
-                                failed_operation="Validate target disk safety",
-                                current_state=f"{dev} mounted on {mnt}",
-                                possible_recovery="Choose a dedicated target disk that does not host the active system.",
-                            )
-        except FileNotFoundError:
-            pass
+        # Disk-level safety (live medium, critical mounts, swap/LVM/LUKS, identity) is checked
+        # by the resolver at planning time and again from a fresh probe right before execution.
 
     def prepare(self, context: ExecutionContext) -> None:
-        # Safely unmount any stale mounts belonging strictly to target_disk
-        disk = context.target_disk
-        try:
-            with open("/proc/mounts", "r") as f:
-                stale_mounts = [line.split()[1] for line in f if line.split()[0].startswith(disk)]
-            for m in reversed(stale_mounts):
-                self.events.action(EventPhase.PREPARE, f"Unmounting stale partition on target disk: {m}")
-                self.runner.run(["umount", "-f", m], phase=EventPhase.PREPARE, check=False)
-        except Exception:
-            pass
+        release_planned_mounts(self.runner, context, self.events)
 
     def apply(self, context: ExecutionContext) -> None:
 
