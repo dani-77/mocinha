@@ -33,3 +33,5 @@ htmlcov/
 *.qcow2
 *.img
 *.raw
+tools/qemu/kernel/
+tools/qemu/result.status
