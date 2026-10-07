@@ -43,7 +43,13 @@ class MkinitcpioProvider(ProviderContract):
                         shutil.copy2(kimg, target_kernel)
                         break
 
-        # 2. Run mkinitcpio on target
+        # 2. Remove live-only mkinitcpio drop-ins (archiso.conf) so target builds standard initramfs
+        archiso_conf = target_root / "etc" / "mkinitcpio.conf.d" / "archiso.conf"
+        if archiso_conf.is_file():
+            self.events.info(EventPhase.CONFIGURE, "Removing live-only archiso.conf drop-in from target mkinitcpio config")
+            archiso_conf.unlink(missing_ok=True)
+
+        # 3. Run mkinitcpio on target
         self.events.action(EventPhase.CONFIGURE, "Generating target initramfs via mkinitcpio")
         if shutil.which("arch-chroot"):
             self.runner.run(
