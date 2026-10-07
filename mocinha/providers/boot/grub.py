@@ -71,13 +71,16 @@ class GrubBootProvider(ProviderContract):
 
         grub_cfg = grub_dir / "grub.cfg"
         cfg_content = (
+            "serial --unit=0 --speed=115200\n"
+            "terminal_input --append serial\n"
+            "terminal_output --append serial\n"
             "set default=0\n"
-            "set timeout=5\n"
+            "set timeout=3\n"
             "\n"
             "menuentry 'btw-d77 Arch Linux' {\n"
             "    insmod ext2\n"
             "    set root=(hd0,1)\n"
-            f"    linux /boot/vmlinuz-linux {root_param} rw quiet\n"
+            f"    linux /boot/vmlinuz-linux {root_param} rw console=ttyS0 console=tty1 quiet\n"
             "    initrd /boot/initramfs-linux.img\n"
             "}\n"
         )
