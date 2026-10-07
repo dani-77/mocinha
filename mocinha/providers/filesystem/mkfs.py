@@ -48,7 +48,8 @@ class LinuxMkfsProvider(ProviderContract):
         if "root" in context.target_partitions:
             root_dev = context.target_partitions["root"]
             self.events.action(EventPhase.PREPARE, f"Formatting root partition {root_dev} as ext4")
-            self.runner.run(["mkfs.ext4", "-F", "-L", "ROOT", root_dev], phase=EventPhase.PREPARE, check=True)
+            label = context.metadata.get("root_label") or "ROOT"
+            self.runner.run(["mkfs.ext4", "-F", "-L", label, root_dev], phase=EventPhase.PREPARE, check=True)
 
     def verify(self, context: ExecutionContext) -> None:
         self.events.info(EventPhase.VERIFY, "Verifying filesystem superblocks via blkid...")

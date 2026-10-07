@@ -28,9 +28,10 @@ class UserChoices:
     hostname: str = "mocinha"
     # None: lock the root account on the target (administration through the primary user)
     root_password: Optional[str] = None
-    locale: str = "en_US.UTF-8"
-    keymap: str = "us"
-    timezone: str = "UTC"
+    # None: keep the live system's setting
+    locale: Optional[str] = None
+    keymap: Optional[str] = None
+    timezone: Optional[str] = None
     selected_services: Set[str] = field(default_factory=set)
 
 
@@ -153,6 +154,10 @@ class InstallationResolver:
                     possible_recovery="Select BIOS-compatible bootloader (e.g. Limine, GRUB).",
                 )
             partition_table = "dos"
+        # Remaster policy overrides the firmware-derived default; the storage
+        # provider rejects layouts it cannot make bootable on this firmware.
+        if self.manifest.install.partition_table:
+            partition_table = self.manifest.install.partition_table
 
         # 3. Resolve Service Graph
         service_graph = self._build_service_graph()
@@ -183,7 +188,7 @@ class InstallationResolver:
             ("keymap", choices.keymap, KEYMAP_RE),
             ("timezone", choices.timezone, TIMEZONE_RE),
         ):
-            if not pattern.match(value or ""):
+            if value is not None and not pattern.match(value):
                 raise ResolutionError(
                     message=f"Invalid {label}: {value!r}",
                     cause=f"The {label} contains characters that cannot name a {label}.",
@@ -249,7 +254,10 @@ class InstallationResolver:
             ),
             PlanStep(
                 step_id="configure_locale",
-                title=f"Set locale {choices.locale}, keymap {choices.keymap}, timezone {choices.timezone}",
+                title=(
+                    f"Set locale {choices.locale or '(live)'}, keymap {choices.keymap or '(live)'}, "
+                    f"timezone {choices.timezone or '(live)'}"
+                ),
                 description="Generate the locale and write locale, console keymap and timezone configuration",
                 is_destructive=False,
                 provider_name="platform",
@@ -360,6 +368,11 @@ class InstallationResolver:
             "timezone": choices.timezone,
             "extra_groups": list(self.manifest.users.groups),
             "default_target": self.manifest.services.default_target,
+            "partition_table": partition_table,
+            "root_label": self.manifest.install.root_label,
+            "swap_size": self.manifest.install.swap_size,
+            "install_exclude": list(self.manifest.install.exclude),
+            "fstab_extra": list(self.manifest.install.fstab_extra),
         }
 
         plan = InstallationPlan(summary=summary, steps=steps, metadata=metadata)

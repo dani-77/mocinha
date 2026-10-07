@@ -1,6 +1,7 @@
 """Unit tests for Target #2: au-d77 (FreeBSD + rc.d / rc.conf)."""
 
 from pathlib import Path
+from unittest import mock
 import tempfile
 import unittest
 
@@ -59,64 +60,115 @@ class TestFreeBSDProviders(unittest.TestCase):
 
     def test_freebsd_platform_fstab_and_hostname(self) -> None:
         provider = FreeBSDPlatformProvider("freebsd", self.stream)
+        self.context.target_partitions = {"esp": "/dev/ada0p2", "swap": "/dev/ada0p3", "root": "/dev/ada0p4"}
+        self.context.metadata.update(
+            root_label="AU_D77_ROOT",
+            partition_labels={"efi": "gpt/au-d77-efi", "swap": "gpt/au-d77-swap", "root": "gpt/au-d77-root"},
+            fstab_extra=["tmpfs /tmp tmpfs rw,mode=1777 0 0"],
+        )
+        (self.target / "etc").mkdir(parents=True)
+        (self.target / "etc" / "rc.conf").write_text('hostname="au-d77"\nseatd_enable="YES"\n')
         provider.configure_hostname(self.context)
         provider.generate_fstab(self.context)
 
-        # Verify hostname in rc.conf
-        rc_conf = self.target / "etc" / "rc.conf"
-        self.assertTrue(rc_conf.is_file())
-        self.assertIn('hostname="aubox"', rc_conf.read_text())
+        rc_conf = (self.target / "etc" / "rc.conf").read_text()
+        self.assertEqual(rc_conf.count("hostname="), 1)
+        self.assertIn('hostname="aubox"', rc_conf)
+        self.assertIn('seatd_enable="YES"', rc_conf)
+        provider.verify_hostname(self.context)
 
-        # Verify fstab format (FreeBSD ufs and msdosfs)
-        fstab_file = self.target / "etc" / "fstab"
-        self.assertTrue(fstab_file.is_file())
-        fstab_content = fstab_file.read_text()
-        self.assertIn("/dev/ada0p2", fstab_content)
-        self.assertIn("ufs", fstab_content)
-        self.assertIn("/dev/ada0p1", fstab_content)
-        self.assertIn("msdosfs", fstab_content)
+        # Durable names only (disk renumbering: ada0 vs nvd0 vs da0)
+        fstab = (self.target / "etc" / "fstab").read_text()
+        self.assertIn("/dev/ufs/AU_D77_ROOT", fstab)
+        self.assertIn("/dev/gpt/au-d77-swap", fstab)
+        self.assertIn("/dev/gpt/au-d77-efi", fstab)
+        self.assertIn("tmpfs /tmp tmpfs rw,mode=1777 0 0", fstab)
+        self.assertNotIn("/dev/ada0", fstab)
 
-    def test_freebsd_users_pw_and_doas(self) -> None:
+        gpart_l = "=>  40  41942960  ada0  GPT  (20G)\n  40  1024  1  au-d77-boot  (512K)\n  1064  409600  2  au-d77-efi  (200M)\n  410664  4194304  3  au-d77-swap  (2.0G)\n  4604968  37337992  4  au-d77-root  (18G)\n"
+        # Mounted partitions have withered labels: only swap shows up in glabel
+        glabel_target = "gpt/au-d77-swap N/A ada0p3\n"
+        glabel_dup = glabel_target + "gpt/au-d77-efi N/A da0p2\n"
+
+        def runner(glabel_out, ufs_label="AU_D77_ROOT"):
+            def run(cmd, **kw):
+                out = {"gpart": gpart_l, "glabel": glabel_out, "fstyp": f"ufs {ufs_label}\n"}[cmd[0]]
+                return mock.Mock(stdout=out, returncode=0)
+            return run
+
+        with mock.patch.object(provider.runner, "run", side_effect=runner(glabel_target)):
+            provider.verify_fstab(self.context)
+        for bad in (runner(glabel_dup), runner(glabel_target, ufs_label="AU_D77_LIVE")):
+            with mock.patch.object(provider.runner, "run", side_effect=bad):
+                with self.assertRaises(VerificationError):
+                    provider.verify_fstab(self.context)
+
+    def test_freebsd_users_pw_commands_and_verification(self) -> None:
         provider = FreeBSDUsersProvider("pw", self.stream)
-        provider.apply(self.context)
+        self.context.metadata.update(
+            password="pw1", root_password="r00t", live_only_users=["d77"], extra_groups=["operator", "video"],
+        )
+        etc = self.target / "etc"
+        etc.mkdir(parents=True)
+        (etc / "master.passwd").write_text("root:*:0:0::0:0:Charlie &:/root:/bin/sh\nd77:$6$x:1001:1001::0:0::/home/d77:/bin/sh\n")
+        (etc / "group").write_text("wheel:*:0:root\noperator:*:5:root\nvideo:*:44:\n")
+        calls = []
+        with mock.patch.object(provider.runner, "run", side_effect=lambda cmd, **kw: calls.append((cmd, kw.get("input_text")))):
+            provider.apply(self.context)
+        commands = [c for c, _ in calls]
+        self.assertIn(["pw", "-R", str(self.target), "userdel", "d77", "-r"], commands)
+        self.assertEqual(calls[1], (["pw", "-R", str(self.target), "usermod", "root", "-h", "0"], "r00t\n"))
+        self.assertEqual(calls[2][0][-3:], ["wheel,operator,video", "-h", "0"])
+        self.assertEqual(calls[2][1], "pw1\n")
+        self.assertNotIn("pw1", " ".join(" ".join(c) for c in commands))  # password only via stdin
+        self.assertFalse((self.target / "usr" / "local" / "etc" / "doas.conf").exists())
 
-        # Verify passwd
-        passwd_file = self.target / "etc" / "passwd"
-        self.assertTrue(passwd_file.is_file())
-        self.assertIn("freebsduser:", passwd_file.read_text())
-
-        # Verify doas.conf
-        doas_file = self.target / "usr" / "local" / "etc" / "doas.conf"
-        self.assertTrue(doas_file.is_file())
-        self.assertIn("permit :wheel", doas_file.read_text())
-
-        # Verify call succeeds
+        # State after pw: live user gone, primary user in groups, root password set
+        (etc / "master.passwd").write_text("root:$6$r:0:0::0:0:Charlie &:/root:/bin/sh\nfreebsduser:$6$u:1001:1001::0:0::/home/freebsduser:/bin/sh\n")
+        (etc / "passwd").write_text("root:*:0:0:Charlie &:/root:/bin/sh\nfreebsduser:*:1001:1001::/home/freebsduser:/bin/sh\n")
+        (etc / "group").write_text("wheel:*:0:root,freebsduser\noperator:*:5:root,freebsduser\nvideo:*:44:freebsduser\n")
         provider.verify(self.context)
+
+        # Regression guard: live user left behind
+        (etc / "passwd").write_text((etc / "passwd").read_text() + "d77:*:1002:1002::/home/d77:/bin/sh\n")
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+    def test_freebsd_pw_requires_user_password(self) -> None:
+        from mocinha.core.errors import ExecutionError
+        provider = FreeBSDUsersProvider("pw", self.stream)
+        with mock.patch("mocinha.providers.users.pw.shutil.which", return_value="/usr/sbin/pw"):
+            with self.assertRaises(ExecutionError):
+                provider.validate(self.context)
 
     def test_freebsd_bootloader_verification(self) -> None:
-        provider = FreeBSDBootProvider("freebsd-loader", self.stream)
-
-        # Before apply -> fails
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        # Apply without loader.efi on the target -> fails, no placeholder written
         from mocinha.core.errors import ExecutionError
+        provider = FreeBSDBootProvider("freebsd-loader", self.stream)
+        # ESP not mounted at /boot/efi -> refuses instead of writing to the root filesystem
+        (self.target / "boot" / "efi").mkdir(parents=True)
+        (self.target / "boot" / "loader.efi").write_bytes(b"MZ\x90\x00loader")
         with self.assertRaises(ExecutionError):
             provider.apply(self.context)
-        with self.assertRaises(VerificationError):
+
+        disk = self.target / "disk.img"
+        part = self.target / "disk.imgp1"
+        mbr = bytearray(512)
+        mbr[0:4] = b"\xfa\x31\xc0\x8e"
+        mbr[450] = 0xEE
+        mbr[510:512] = b"\x55\xaa"
+        disk.write_bytes(bytes(mbr))
+        part.write_bytes(b"\x00" * 64 + b"gptboot: boot loader" + b"\x00" * 64)
+        self.context.target_disk = str(disk)
+        esp = self.target / "boot" / "efi"
+        for rel in ("EFI/BOOT/BOOTX64.EFI", "EFI/freebsd/loader.efi"):
+            (esp / rel).parent.mkdir(parents=True, exist_ok=True)
+            (esp / rel).write_bytes(b"MZ\x90\x00loader")
+        real_open = open
+        with mock.patch("builtins.open", side_effect=lambda f, *a, **k: real_open(str(part) if str(f) == "/dev/disk.imgp1" else f, *a, **k)):
             provider.verify(self.context)
-
-        # Apply with a real PE loader.efi
-        (self.target / "boot").mkdir(parents=True, exist_ok=True)
-        (self.target / "boot" / "loader.efi").write_bytes(b"MZ\x90\x00loader")
-        provider.apply(self.context)
-
-        # Verify bootx64.efi
-        boot_binary = self.target / "boot" / "efi" / "efi" / "boot" / "bootx64.efi"
-        self.assertTrue(boot_binary.is_file())
-
-        provider.verify(self.context)
+            part.write_bytes(b"\x00" * 256)
+            with self.assertRaises(VerificationError):
+                provider.verify(self.context)
 
     def test_freebsd_end_to_end_plan_resolution(self) -> None:
         manifest_path = Path(__file__).parent.parent / "examples" / "manifests" / "au-d77.toml"
@@ -146,7 +198,7 @@ class TestFreeBSDProviders(unittest.TestCase):
             username="dani",
             password="auboxpassword",
             hostname="au-box",
-            selected_services={"moused"},
+            root_password="r00t",
         )
 
         plan = resolver.resolve(choices)
@@ -154,11 +206,39 @@ class TestFreeBSDProviders(unittest.TestCase):
         self.assertEqual(plan.summary.bootloader, "freebsd-loader")
         self.assertEqual(plan.summary.filesystem, "ufs")
         self.assertIn("devd", plan.summary.services)
-        self.assertIn("moused", plan.summary.services)
+        self.assertIn("seatd", plan.summary.services)
+        self.assertEqual(plan.summary.partition_table, "GPT")
+        self.assertEqual(plan.metadata["live_only_users"], ["d77"])
+        self.assertEqual(plan.metadata["root_label"], "AU_D77_ROOT")
 
         summary_text = plan.to_human_readable()
         self.assertIn("MOCINHA INSTALLATION PLAN", summary_text)
         self.assertIn("/dev/ada0", summary_text)
+
+    def test_freebsd_probe_maps_live_label_to_disk(self) -> None:
+        """Regression: live root mounted by label (ufs/AU_D77_LIVE) was not detected; sizes were 0."""
+        from mocinha.core.probe import SystemProbe
+        out = {
+            ("glabel", "status", "-s"): "ufs/AU_D77_LIVE  N/A  vtbd0p3\ngpt/efiboot N/A vtbd0p2\n",
+            ("mount", "-p"): "/dev/ufs/AU_D77_LIVE\t/\tufs\trw\t1 1\ndevfs\t/dev\tdevfs\trw\t0 0\n",
+            ("sysctl", "-n", "kern.disks"): "vtbd10 vtbd1 vtbd0 cd0 md0\n",
+            ("diskinfo", "vtbd0"): "vtbd0\t512\t4294967296\t8388608\t0\t0\n",
+            ("diskinfo", "vtbd1"): "vtbd1\t512\t21474836480\t41943040\t0\t0\n",
+            ("diskinfo", "vtbd10"): "vtbd10\t512\t1073741824\t2097152\t0\t0\n",
+        }
+        with mock.patch.object(SystemProbe, "_run", staticmethod(lambda c: out.get(tuple(c), ""))):
+            disks = {d.path: d for d in SystemProbe()._detect_disks_freebsd()}
+        self.assertEqual(sorted(disks), ["/dev/vtbd0", "/dev/vtbd1", "/dev/vtbd10"])
+        self.assertTrue(disks["/dev/vtbd0"].is_live_medium)
+        self.assertFalse(disks["/dev/vtbd1"].is_live_medium)
+        self.assertFalse(disks["/dev/vtbd10"].has_active_mounts)
+        self.assertEqual(disks["/dev/vtbd1"].size_bytes, 21474836480)
+
+    def test_gpart_disk_match_is_exact(self) -> None:
+        from mocinha.providers.storage.gpart import _belongs_to_disk
+        self.assertTrue(_belongs_to_disk("/dev/da1p2", "da1"))
+        self.assertTrue(_belongs_to_disk("/dev/da1s1a", "da1"))
+        self.assertFalse(_belongs_to_disk("/dev/da10p1", "da1"))
 
 
 if __name__ == "__main__":

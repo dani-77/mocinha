@@ -1,0 +1,23 @@
+{
+  "_comment": "Installed-system state au-d77-install produces (autologin answered 'no'); hostname, user and passwords are the test's choices.",
+  "contains": {
+    "/etc/fstab": ["/dev/ufs/AU_D77_ROOT", "tmpfs", "swap", "/boot/efi"],
+    "/boot/loader.conf": ["vfs.root.mountfrom=\"ufs:/dev/ufs/AU_D77_ROOT\""],
+    "/etc/rc.conf": ["hostname=\"au-test\"", "tmpmfs=\"NO\"", "dumpdev=\"AUTO\"", "seatd_enable=\"YES\"", "dbus_enable=\"YES\""],
+    "/usr/local/etc/doas.conf": ["permit persist :wheel"],
+    "ttys_console": ["insecure"],
+    "groups": ["(wheel)", "(operator)", "(video)"],
+    "root_hash": ["$6$"]
+  },
+  "absent": {
+    "/etc/fstab": ["AU_D77_LIVE"],
+    "/boot/loader.conf": ["AU_D77_LIVE"],
+    "/etc/rc.conf": ["hostname=\"au-d77\"", "tmpmfs=\"YES\""],
+    "ttys_console": ["al.d77"]
+  },
+  "exact_lines": {
+    "users": ["dani"],
+    "sudoers.d": ["10-wheel", "networkmgr"],
+    "home": ["dani"]
+  }
+}

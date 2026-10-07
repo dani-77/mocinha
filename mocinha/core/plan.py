@@ -75,6 +75,8 @@ class InstallationPlan:
             lines.append(f"Hostname:         {self.summary.hostname}")
         if self.summary.locale:
             lines.append(f"Locale/Keymap/TZ: {self.summary.locale} / {self.summary.keymap} / {self.summary.timezone}")
+        else:
+            lines.append("Locale/Keymap/TZ: kept from the live system")
         if self.summary.root_account:
             lines.append(f"Root Account:     {self.summary.root_account}")
         if self.summary.live_only_users:

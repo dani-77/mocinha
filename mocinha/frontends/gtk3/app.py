@@ -209,20 +209,33 @@ class MocinhaGTKApp(Gtk.Window):
         grid.set_column_spacing(16)
         grid.set_row_spacing(12)
 
-        grid.attach(Gtk.Label(label="Username:", xalign=0), 0, 0, 1, 1)
-        self.entry_user = Gtk.Entry(text="dani")
-        grid.attach(self.entry_user, 1, 0, 1, 1)
+        def password_entry(placeholder: str) -> Gtk.Entry:
+            entry = Gtk.Entry()
+            entry.set_visibility(False)
+            entry.set_placeholder_text(placeholder)
+            return entry
 
-        grid.attach(Gtk.Label(label="Password:", xalign=0), 0, 1, 1, 1)
-        self.entry_pass = Gtk.Entry()
-        self.entry_pass.set_visibility(False)
-        self.entry_pass.set_text("mocinha")
-        grid.attach(self.entry_pass, 1, 1, 1, 1)
+        rows = [
+            ("Username:", "entry_user", Gtk.Entry(placeholder_text="e.g. dani")),
+            ("Password:", "entry_pass", password_entry("required")),
+            ("Confirm password:", "entry_pass2", password_entry("repeat the password")),
+            ("Root password:", "entry_root", password_entry("empty: root account locked")),
+            ("Confirm root password:", "entry_root2", password_entry("repeat the root password")),
+            ("Hostname:", "entry_host", Gtk.Entry(text=self.manifest.system.id)),
+        ]
+        for row, (label, attr, entry) in enumerate(rows):
+            grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
+            setattr(self, attr, entry)
+            grid.attach(entry, 1, row, 1, 1)
 
-        grid.attach(Gtk.Label(label="Hostname:", xalign=0), 0, 2, 1, 1)
-        self.entry_host = Gtk.Entry(text="mocinha-box")
-        grid.attach(self.entry_host, 1, 2, 1, 1)
-
+        note = Gtk.Label(xalign=0)
+        note.set_line_wrap(True)
+        note.set_markup(
+            "<small>Root password: set one to use the root account, or leave it empty to keep root "
+            "locked and administer the system as the user above (member of <b>wheel</b>). "
+            "The plan summary shows which one applies.</small>"
+        )
+        grid.attach(note, 0, len(rows), 2, 1)
         box.pack_start(grid, False, False, 0)
         return box
 
@@ -388,6 +401,12 @@ class MocinhaGTKApp(Gtk.Window):
     def _on_next_clicked(self, widget: Gtk.Button) -> None:
         current_name, _ = self.pages[self.current_step_index]
 
+        if current_name == "user":
+            problem = self._check_user_page()
+            if problem:
+                self._show_error_dialog("User Account", problem)
+                return
+
         # Before entering Summary, resolve the plan!
         if current_name == "boot":
             try:
@@ -438,6 +457,7 @@ class MocinhaGTKApp(Gtk.Window):
         bootloader = self.boot_combo.get_active_text() or self.manifest.boot.default
         username = self.entry_user.get_text()
         password = self.entry_pass.get_text()
+        root_password = self.entry_root.get_text() or None
         hostname = self.entry_host.get_text()
 
         selected_srvs: Set[str] = set()
@@ -450,6 +470,7 @@ class MocinhaGTKApp(Gtk.Window):
             bootloader=bootloader,
             username=username,
             password=password,
+            root_password=root_password,
             hostname=hostname,
             selected_services=selected_srvs,
         )
@@ -492,8 +513,7 @@ class MocinhaGTKApp(Gtk.Window):
             metadata={
                 **self.resolved_plan.metadata,
                 "password": self.entry_pass.get_text(),
-                # No root password field yet: the plan shows the root account as locked
-                "root_password": None,
+                "root_password": self.entry_root.get_text() or None,
             },
         )
 
@@ -541,6 +561,18 @@ class MocinhaGTKApp(Gtk.Window):
         end_iter = buf.get_end_iter()
         buf.insert(end_iter, text)
         return False
+
+    def _check_user_page(self) -> Optional[str]:
+        """Local form checks; the resolver validates the values themselves."""
+        if not self.entry_user.get_text():
+            return "Enter a user name."
+        if not self.entry_pass.get_text():
+            return "Enter a password for the user."
+        if self.entry_pass.get_text() != self.entry_pass2.get_text():
+            return "The user passwords do not match."
+        if self.entry_root.get_text() != self.entry_root2.get_text():
+            return "The root passwords do not match."
+        return None
 
     def _show_error_dialog(self, title: str, message: str) -> None:
         dialog = Gtk.MessageDialog(

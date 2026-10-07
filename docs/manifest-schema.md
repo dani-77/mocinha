@@ -142,3 +142,33 @@ Related behavior:
   enabled.
 - The root account is locked unless a root password is chosen; the plan shows
   which one applies.
+
+---
+
+## 4. Storage, copy and account policy
+
+```toml
+[install]
+method = "tree-copy"          # copy the live root tree (plain filesystem live, e.g. UFS)
+source = "/"
+partition_table = "gpt"       # remaster policy; default: GPT on UEFI, DOS on BIOS.
+                              # The storage provider refuses layouts it cannot boot.
+root_label = "AU_D77_ROOT"    # filesystem label of the root filesystem
+swap_size = "2g"              # swap partition size; omit for no swap
+exclude = ["./var/cache/pkg/*"]   # extra paths not copied (tree-copy)
+fstab_extra = ["tmpfs /tmp tmpfs rw,mode=1777 0 0"]  # lines appended to /etc/fstab
+
+[users]
+groups = ["operator", "video"]   # supplementary groups for the primary user
+
+[services]
+default_target = "graphical.target"  # systemd only; other providers refuse it
+```
+
+Locale, keymap and timezone are user choices; when not given, the live
+system's settings are kept. Providers that cannot apply a requested change
+refuse it during validation, before any disk is modified.
+
+On FreeBSD, GPT partition labels are prefixed with `[system].id`
+(e.g. `gpt/au-d77-efi`): generic labels such as `efiboot` may already exist
+on the live medium and would make `/dev/gpt/<label>` ambiguous.

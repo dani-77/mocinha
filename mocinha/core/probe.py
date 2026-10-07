@@ -253,53 +253,69 @@ class SystemProbe:
                         )
                     )
         elif sys_platform == "freebsd":
-            import subprocess
-            mount_map: Dict[str, List[str]] = {}
-            try:
-                m_proc = subprocess.run(["mount"], capture_output=True, text=True)
-                for line in m_proc.stdout.splitlines():
-                    # Format: /dev/da0p2 on / (ufs, local, ...)
-                    if " on " in line:
-                        left, right = line.split(" on ", 1)
-                        dev_node = left.strip()
-                        mnt_point = right.split(" (")[0].strip()
-                        if dev_node.startswith("/dev/"):
-                            mount_map.setdefault(dev_node, []).append(mnt_point)
-            except Exception:
-                pass
-
-            try:
-                proc = subprocess.run(["sysctl", "-n", "kern.disks"], capture_output=True, text=True)
-                disk_names = proc.stdout.strip().split()
-                for name in disk_names:
-                    if name.startswith(("cd", "pass")):
-                        continue
-                    dev_path = f"/dev/{name}"
-                    partitions: List[DiskPartition] = []
-                    has_mounts = False
-                    is_live = False
-
-                    # Check partitions matching disk name
-                    for m_dev, m_list in mount_map.items():
-                        if m_dev.startswith(dev_path):
-                            has_mounts = True
-                            for m in m_list:
-                                partitions.append(DiskPartition(path=m_dev, size_bytes=0, mountpoint=m))
-                                if m in ("/", "/rescue", "/boot"):
-                                    is_live = True
-
-                    devices.append(
-                        DiskDevice(
-                            path=dev_path,
-                            size_bytes=0,
-                            model=name,
-                            removable=name.startswith("da"),
-                            read_only=False,
-                            is_live_medium=is_live,
-                            has_active_mounts=has_mounts,
-                            partitions=partitions,
-                        )
-                    )
-            except Exception:
-                pass
+            devices = self._detect_disks_freebsd()
         return devices
+
+    @staticmethod
+    def _run(cmd: List[str]) -> str:
+        import subprocess
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, check=False).stdout
+        except OSError:
+            return ""
+
+    def _detect_disks_freebsd(self) -> List[DiskDevice]:
+        """FreeBSD disks via kern.disks + diskinfo; mounts mapped through glabel.
+
+        Live media usually mount by label (e.g. /dev/ufs/AU_D77_LIVE), so labels
+        are resolved to their GEOM provider (e.g. vtbd0p3) before mapping
+        partitions to disks.
+        """
+        import re
+
+        labels: Dict[str, str] = {}
+        for line in self._run(["glabel", "status", "-s"]).splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                labels[parts[0]] = parts[2]  # e.g. ufs/AU_D77_LIVE -> vtbd0p3
+
+        def provider_of(node: str) -> Optional[str]:
+            name = node[len("/dev/"):] if node.startswith("/dev/") else None
+            if name is None:
+                return None
+            return labels.get(name, name)
+
+        def disk_of(provider: str) -> Optional[str]:
+            m = re.match(r"^[a-z]+[0-9]+", provider)
+            return m.group(0) if m else None
+
+        mounts_by_disk: Dict[str, List[DiskPartition]] = {}
+        for line in self._run(["mount", "-p"]).splitlines():
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+            provider = provider_of(parts[0])
+            disk = disk_of(provider) if provider else None
+            if disk:
+                mounts_by_disk.setdefault(disk, []).append(
+                    DiskPartition(path=f"/dev/{provider}", size_bytes=0, fs_type=parts[2], mountpoint=parts[1])
+                )
+
+        devices: List[DiskDevice] = []
+        for name in self._run(["sysctl", "-n", "kern.disks"]).split():
+            if name.startswith(("cd", "pass", "md")):
+                continue
+            info = self._run(["diskinfo", name]).split()
+            size_bytes = int(info[2]) if len(info) >= 3 and info[2].isdigit() else 0
+            partitions = mounts_by_disk.get(name, [])
+            devices.append(
+                DiskDevice(
+                    path=f"/dev/{name}",
+                    size_bytes=size_bytes,
+                    model=name,
+                    is_live_medium=any(p.mountpoint == "/" for p in partitions),
+                    has_active_mounts=bool(partitions),
+                    partitions=partitions,
+                )
+            )
+        return sorted(devices, key=lambda d: d.path)

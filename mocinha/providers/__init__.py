@@ -11,6 +11,7 @@ from mocinha.providers.boot.limine import LimineBootProvider
 from mocinha.providers.deployment.rsync import RsyncDeploymentProvider
 from mocinha.providers.deployment.squashfs import SquashfsDeploymentProvider
 from mocinha.providers.deployment.tar import TarDeploymentProvider
+from mocinha.providers.deployment.tree_copy import TreeCopyDeploymentProvider
 from mocinha.providers.filesystem.mkfs import LinuxMkfsProvider
 from mocinha.providers.filesystem.newfs import FreeBSDNewfsProvider
 from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
@@ -45,6 +46,7 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("deployment", SquashfsDeploymentProvider("squashfs-extract", event_stream))
     registry.register("deployment", TarDeploymentProvider("tar-extract", event_stream))
     registry.register("deployment", RsyncDeploymentProvider("rsync-copy", event_stream))
+    registry.register("deployment", TreeCopyDeploymentProvider("tree-copy", event_stream))
 
     # Initramfs
     registry.register("initramfs", MkinitcpioProvider("mkinitcpio", event_stream))

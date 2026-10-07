@@ -12,12 +12,13 @@ matches what btw-d77's own installer (`d77-install`) produces on the checked
 points: enabled services, accounts, root account, greetd, hostname, DNS. This
 is verified automatically in QEMU for BIOS/GRUB and UEFI/GRUB
 (`tools/qemu/expect/btw-d77.json`). Remaining differences are listed below.
-au-d77 and sysvd77 are still skeletons.
+au-d77 installs and boots from its real live image, equivalent to its own
+installer (`au-d77-install`). sysvd77 is still a skeleton.
 
 | Target | State |
 |---|---|
 | btw-d77 (Arch + systemd) | Install + boot + equivalence check pass from btw-d77 2026.10.07 ISO, BIOS/GRUB and UEFI/GRUB. |
-| au-d77 (FreeBSD + rc.d) | Skeleton only. Cannot work yet (probe reports every disk as 0 bytes; `pw` provider refuses live-only users/root policy). Never run on FreeBSD. |
+| au-d77 (FreeBSD + rc.d) | Install + boot + equivalence check pass from the au-d77 14.5 image (built from `da8e27b`), BIOS; UEFI: see validation log. |
 | sysvd77 (CRUX + sysvinit) | Skeleton only. No working BIOS bootloader path (no LILO provider); Linux platform writes `/etc/hostname`, CRUX uses `HOSTNAME` in `/etc/rc.conf`. Never run on CRUX. |
 
 ---|---|
@@ -114,6 +115,50 @@ Problems the btw-d77 runs exposed and that are now fixed:
 
 ---
 
+**2026-10-07 --- au-d77 14.5-RELEASE image (built from `~/Remaster/au-d77` at `da8e27b`, untouched)**
+
+Harness: `tools/qemu/run_au_d77_test.sh --firmware bios|uefi` (expectations in
+`tools/qemu/expect/au-d77.json`). FreeBSD 14 has no 9p, so Mocinha is fetched
+over HTTP and logs are uploaded with HTTP PUT. The live has no serial login, so
+the driver boots it single-user from the loader, switches `ttyu0` to an
+autologin getty on a throwaway qcow2 overlay of the image, continues to
+multi-user and restores `/etc/ttys` before Mocinha runs. Boot proof: multi-user
+boot to the getty banner, then a single-user boot that must ask for the root
+password chosen at install time, and diagnostics.
+
+| Run | Install | Boot | Equivalence with au-d77-install |
+|---|---|---|---|
+| BIOS | pass (14/14 steps verified) | pass (login prompt, hostname `au-test`) | pass |
+| UEFI (installed disk) | --- | pass (empty NVRAM: removable path `EFI/BOOT/BOOTX64.EFI`) | pass |
+
+The au-d77 **live image does not boot under OVMF (UEFI)**: its 32 MiB ESP is
+formatted FAT32 with 1-sector clusters, i.e. ~64 496 clusters, below the 65 525
+the FAT specification requires for FAT32; EDK2 refuses it
+(`assemble-image.sh` hides mkfs.fat's warning with `>/dev/null`). Real firmware
+may be lenient. The UEFI path of the *installed* system was therefore tested by
+booting the disk installed from the BIOS-booted live. Mocinha's own ESP
+(200 MB) is valid FAT32.
+
+Checked: fstab by labels (`ufs/AU_D77_ROOT`, `gpt/au-d77-swap`, `gpt/au-d77-efi`,
+tmpfs `/tmp`); `loader.conf` mounts `AU_D77_ROOT`; `rc.conf` hostname `au-test`,
+`tmpmfs="NO"`, `dumpdev="AUTO"`; console `insecure` (single-user asks for the root
+password), no `al.d77` autologin; only user `dani` (wheel, operator, video), live
+user `d77` and its home removed; root password set; `sudoers.d/10-live` removed,
+`10-wheel` present; `doas.conf` `permit persist :wheel`.
+
+Problems the au-d77 runs exposed and that are now fixed:
+- The FreeBSD probe reported every disk as 0 bytes and did not recognize the live
+  root mounted by label (`ufs/AU_D77_LIVE`).
+- The agy manifest extracted `base.txz` instead of copying the live: new
+  `tree-copy` deployment (tar pipe, `--one-file-system`, both ends checked),
+  which must not copy over target mount points (ESP at `/boot/efi`).
+- `pw` provider fell back to writing `/etc/passwd` by hand and hard-coded `doas.conf`.
+- GPT labels must not collide with the live's (`efiboot`); labels are verified on
+  the partition table and UFS superblock because GEOM withers label providers of
+  mounted partitions.
+
+---
+
 ## Open issues found so far
 
 Remaining differences from a `d77-install` system:
@@ -127,6 +172,13 @@ Remaining differences from a `d77-install` system:
 4. GUI has no root password, locale, keymap or timezone fields (root locked;
    en_US.UTF-8 / us / UTC from the GUI).
 5. Firmware/bootloader incompatibilities are only detected at provider validation (after confirmation).
+
+Remaining differences from an `au-d77-install` system:
+1. No autologin option (au-d77-install asks, default yes); Mocinha installs without autologin.
+2. Swap size is fixed by the manifest (`2g`); au-d77-install scales it with disk size.
+3. No MBR layout for BIOS (au-d77-install offers it; Mocinha uses the hybrid GPT layout).
+4. GPT labels differ (`au-d77-*` instead of `bootcode/efiboot/swap0/rootfs`), on purpose.
+5. Keymap/timezone are not offered (au-d77-install asks interactively; both keep the live values otherwise).
 
 Other platforms:
 - Locale/keymap/timezone and `[services].default_target` are refused by the

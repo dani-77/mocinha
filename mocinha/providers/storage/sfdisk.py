@@ -40,6 +40,24 @@ class SfdiskStorageProvider(ProviderContract):
                 current_state=context.target_disk,
                 possible_recovery="Verify disk selection.",
             )
+        firmware = context.metadata.get("firmware", "UEFI").upper()
+        table = context.metadata.get("partition_table")
+        supported = {"UEFI": "gpt", "BIOS": "dos"}.get(firmware)
+        if table and table != supported:
+            raise ExecutionError(
+                message=f"The sfdisk provider cannot make a bootable {table.upper()} layout on {firmware} firmware.",
+                cause=f"It supports GPT+ESP on UEFI and DOS on BIOS (GPT on BIOS would need a BIOS boot partition).",
+                failed_operation="Validate partition layout",
+                current_state=f"Requested partition_table={table}, firmware={firmware}",
+                possible_recovery="Remove [install].partition_table from the manifest or implement that layout.",
+            )
+        if swap := context.metadata.get("swap_size"):
+            raise ExecutionError(
+                message="The sfdisk provider does not create swap partitions.",
+                cause=f"The manifest requests swap_size={swap}.",
+                failed_operation="Validate partition layout",
+                possible_recovery="Remove [install].swap_size from the manifest or implement swap in sfdisk.",
+            )
         # Protect user host disks from destruction: verify no critical mountpoints on target disk
         try:
             with open("/proc/mounts", "r") as f:

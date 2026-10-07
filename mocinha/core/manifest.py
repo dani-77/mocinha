@@ -27,6 +27,14 @@ class InstallConfig:
     method: str  # "squashfs" | "rsync" | "tar"
     source: Optional[str] = None
     min_disk_size_bytes: int = 10 * 1024 * 1024 * 1024  # 10 GiB default
+    # Remaster storage policy (None: provider/firmware default)
+    partition_table: Optional[str] = None  # "gpt" | "dos"
+    root_label: Optional[str] = None       # filesystem label of the root filesystem
+    swap_size: Optional[str] = None        # e.g. "2g"; None = no swap partition
+    # Extra paths (relative to the copied tree, e.g. "./var/cache/pkg/*") not copied to the target
+    exclude: List[str] = field(default_factory=list)
+    # Extra lines appended verbatim to the generated /etc/fstab
+    fstab_extra: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -188,6 +196,29 @@ def _parse_target_files(entries: Any) -> List["TargetFile"]:
     return result
 
 
+def _validate_install(install: "InstallConfig") -> None:
+    problems = []
+    if install.partition_table not in (None, "gpt", "dos"):
+        problems.append(f"partition_table must be 'gpt' or 'dos', not {install.partition_table!r}")
+    if install.root_label is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,16}", str(install.root_label)):
+        problems.append(f"root_label must be 1-16 letters, digits, '_' or '-', not {install.root_label!r}")
+    if install.swap_size is not None and not re.fullmatch(r"[1-9][0-9]*[mMgG]", str(install.swap_size)):
+        problems.append(f"swap_size must look like '512m' or '2g', not {install.swap_size!r}")
+    for key in ("exclude", "fstab_extra"):
+        value = getattr(install, key)
+        if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() and "\n" not in v for v in value):
+            problems.append(f"{key} must be a list of single-line strings")
+    if any(e.lstrip("./").split("/")[0] in ("", "*") for e in install.exclude if isinstance(e, str)):
+        problems.append("exclude entries must name a path below the root, not the root itself")
+    if problems:
+        raise ManifestError(
+            message="Invalid [install] section",
+            cause="; ".join(problems),
+            failed_operation="Validate [install]",
+            current_state=f"[install] = {install}",
+        )
+
+
 @dataclass
 class Manifest:
     system: SystemConfig
@@ -249,7 +280,13 @@ class Manifest:
             method=inst_data.get("method", "squashfs"),
             source=inst_data.get("source"),
             min_disk_size_bytes=inst_data.get("min_disk_size_bytes", 10 * 1024 * 1024 * 1024),
+            partition_table=inst_data.get("partition_table"),
+            root_label=inst_data.get("root_label"),
+            swap_size=inst_data.get("swap_size"),
+            exclude=inst_data.get("exclude", []),
+            fstab_extra=inst_data.get("fstab_extra", []),
         )
+        _validate_install(install)
 
         prov_data = data["providers"]
         providers = ProvidersConfig(

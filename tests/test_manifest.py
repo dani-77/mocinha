@@ -35,9 +35,19 @@ class TestManifest(unittest.TestCase):
         manifest = Manifest.load_from_file(path)
         self.assertEqual(manifest.system.id, "au-d77")
         self.assertEqual(manifest.system.platform, "freebsd")
-        self.assertEqual(manifest.install.method, "tar")
+        # Mirrors au-d77-install: copy of the live tree, hybrid GPT, label AU_D77_ROOT
+        self.assertEqual(manifest.install.method, "tree-copy")
+        self.assertEqual(manifest.install.partition_table, "gpt")
+        self.assertEqual(manifest.install.root_label, "AU_D77_ROOT")
         self.assertEqual(manifest.boot.default, "freebsd-loader")
         self.assertIn("devd", manifest.services.required)
+        self.assertEqual(manifest.live_only.users, ["d77"])
+        files = {t.path: t for t in manifest.target_files}
+        self.assertIn("AU_D77_ROOT", files["/boot/loader.conf"].content)
+        self.assertNotIn("AU_D77_LIVE", files["/boot/loader.conf"].content)
+        self.assertNotIn("al.d77", files["/etc/ttys"].content)
+        self.assertIn('tmpmfs="NO"', files["/etc/rc.conf"].content)
+        self.assertEqual(files["/usr/local/etc/doas.conf"].mode, 0o600)
 
     def test_load_sysvd77_manifest(self) -> None:
         path = self.examples_dir / "sysvd77.toml"
