@@ -123,6 +123,30 @@ class TestProviders(unittest.TestCase):
 
         provider.verify(self.context)
 
+    def test_grub_provider_verification(self) -> None:
+        from mocinha.providers.boot.grub import GrubBootProvider
+        provider = GrubBootProvider("grub", self.stream)
+
+        # Missing grub.cfg -> fails
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # Create grub.cfg -> succeeds
+        grub_dir = self.target / "boot" / "grub"
+        grub_dir.mkdir(parents=True, exist_ok=True)
+        (grub_dir / "grub.cfg").write_text("set timeout=5\n")
+        provider.verify(self.context)
+
+    def test_mkinitcpio_provider_verification(self) -> None:
+        from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
+        provider = MkinitcpioProvider("mkinitcpio", self.stream)
+
+        boot_dir = self.target / "boot"
+        boot_dir.mkdir(parents=True, exist_ok=True)
+        (boot_dir / "vmlinuz-linux").touch()
+        (boot_dir / "initramfs-linux.img").touch()
+        provider.verify(self.context)
+
 
 if __name__ == "__main__":
     unittest.main()

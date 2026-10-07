@@ -156,39 +156,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         },
     )
 
-    storage_prov = registry.get("storage", manifest.providers.storage or "linux-sfdisk")
-    fs_prov = registry.get("filesystem", manifest.providers.filesystem or "linux-mkfs")
-    plat_prov = registry.get("platform", manifest.providers.platform)
-    deploy_prov = registry.get("deployment", manifest.providers.deployment or "squashfs-extract")
-    user_prov = registry.get("users", manifest.providers.users)
-    srv_prov = registry.get("services", manifest.providers.services)
-    boot_prov = registry.get("bootloader", plan.summary.bootloader)
-
-    for step in plan.steps:
-        if step.step_id == "storage_partition" and storage_prov:
-            step.execute_fn = storage_prov.apply
-            step.verify_fn = storage_prov.verify
-        elif step.step_id == "storage_format" and fs_prov:
-            step.execute_fn = fs_prov.apply
-            step.verify_fn = fs_prov.verify
-        elif step.step_id == "target_mount" and plat_prov and hasattr(plat_prov, "mount_target"):
-            step.execute_fn = plat_prov.mount_target
-        elif step.step_id == "deployment_copy" and deploy_prov:
-            step.execute_fn = deploy_prov.apply
-            step.verify_fn = deploy_prov.verify
-        elif step.step_id == "configure_fstab" and plat_prov and hasattr(plat_prov, "generate_fstab"):
-            step.execute_fn = plat_prov.generate_fstab
-        elif step.step_id == "configure_user" and user_prov:
-            step.execute_fn = user_prov.apply
-            step.verify_fn = user_prov.verify
-        elif step.step_id == "configure_services" and srv_prov:
-            step.execute_fn = srv_prov.apply
-            step.verify_fn = srv_prov.verify
-        elif step.step_id == "install_bootloader" and boot_prov:
-            step.execute_fn = boot_prov.apply
-            step.verify_fn = boot_prov.verify
-        elif step.step_id == "target_unmount" and plat_prov and hasattr(plat_prov, "unmount_target"):
-            step.execute_fn = plat_prov.unmount_target
+    from mocinha.providers import wire_plan_providers
+    wire_plan_providers(plan, registry, manifest)
 
     executor = InstallationExecutor(stream)
     try:

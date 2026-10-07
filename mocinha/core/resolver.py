@@ -180,6 +180,20 @@ class InstallationResolver:
                 is_destructive=False,
                 provider_name=self.manifest.providers.users,
             ),
+        ]
+
+        if self.manifest.providers.initramfs and self.manifest.providers.initramfs.lower() != "none":
+            steps.append(
+                PlanStep(
+                    step_id="configure_initramfs",
+                    title="Generate kernel ramdisk (initramfs)",
+                    description=f"Generate initial ramdisk on target using {self.manifest.providers.initramfs}",
+                    is_destructive=False,
+                    provider_name=self.manifest.providers.initramfs,
+                )
+            )
+
+        steps.extend([
             PlanStep(
                 step_id="configure_services",
                 title="Configure persistent services",
@@ -208,7 +222,7 @@ class InstallationResolver:
                 is_destructive=False,
                 provider_name="platform",
             ),
-        ]
+        ])
 
         summary = TargetSummary(
             disk=choices.target_disk,

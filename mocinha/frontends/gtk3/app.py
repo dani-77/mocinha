@@ -495,6 +495,9 @@ class MocinhaGTKApp(Gtk.Window):
             },
         )
 
+        from mocinha.providers import wire_plan_providers
+        wire_plan_providers(self.resolved_plan, self.registry, self.manifest)
+
         def worker() -> None:
             def progress_cb(current: int, total: int, step: PlanStep) -> None:
                 fraction = current / total
