@@ -78,9 +78,11 @@ class GrubBootProvider(ProviderContract):
             "set timeout=3\n"
             "\n"
             "menuentry 'btw-d77 Arch Linux' {\n"
+            "    insmod part_msdos\n"
+            "    insmod part_gpt\n"
             "    insmod ext2\n"
-            "    set root=(hd0,1)\n"
-            f"    linux /boot/vmlinuz-linux {root_param} rw console=ttyS0 console=tty1 quiet\n"
+            f"    search --no-floppy --fs-uuid --set=root {root_uuid}\n"
+            f"    linux /boot/vmlinuz-linux {root_param} rw console=tty1 console=ttyS0,115200\n"
             "    initrd /boot/initramfs-linux.img\n"
             "}\n"
         )
