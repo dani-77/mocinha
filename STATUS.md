@@ -20,14 +20,16 @@ Localizado em `mocinha/core/` (estritamente desacoplado de qualquer biblioteca g
 - **Erros diagnósticos:** [`mocinha/core/errors.py`](mocinha/core/errors.py) com campos detalhados de causa, operação, comando, estado e recuperação.
 - **Transparência e Logs:** [`mocinha/core/events.py`](mocinha/core/events.py) com `EventStream` em tempo real.
 - **Leitor de Manifest:** [`mocinha/core/manifest.py`](mocinha/core/manifest.py) com validação rígida via `tomllib`.
-- **Probe do Sistema:** [`mocinha/core/probe.py`](mocinha/core/probe.py) para deteção de firmware (UEFI/BIOS), memória e discos sem alterações em disco.
+- **Probe do Sistema:** [`mocinha/core/probe.py`](mocinha/core/probe.py) para deteção de firmware (UEFI/BIOS), memória e discos sem alterações em disco (suporte nativo Linux e FreeBSD).
 - **Subsistema de Serviços:** [`mocinha/core/services.py`](mocinha/core/services.py) com `ServiceGraph`, resolução de dependências, deteção de ciclos, conflitos e isolamento de serviços `live-only`.
 - **Contrato de Providers:** [`mocinha/core/provider.py`](mocinha/core/provider.py) com o ciclo de vida completo (`probe`, `capabilities`, `validate`, `prepare`, `apply`, `verify`, `cleanup`).
 - **Planeamento Não-Destrutivo:** [`mocinha/core/plan.py`](mocinha/core/plan.py) e [`mocinha/core/resolver.py`](mocinha/core/resolver.py) gerando um plano encenado validado antes de qualquer toque no disco.
 - **Execução com Confirmação:** [`mocinha/core/executor.py`](mocinha/core/executor.py) que exige confirmação explícita e valida cada passo pós-execução via `verify()`.
 
-### Providers Nativos para o Alvo #1 (`btw-d77` --- Arch + systemd)
+### Providers Nativos para os 3 Alvos de Referência
 Localizado em `mocinha/providers/`:
+
+#### 1. btw-d77 (Arch Linux + systemd)
 - `storage/sfdisk.py`: Particionamento GPT/MBR.
 - `filesystem/mkfs.py`: Formatação FAT32 (ESP) e ext4 (Root).
 - `deployment/squashfs.py`: Extração da live airootfs.
@@ -36,12 +38,26 @@ Localizado em `mocinha/providers/`:
 - `users/shadow.py`: Utilizador, palavra-passe e concessão de privilégios `wheel`/`sudo`.
 - `platform/linux.py`: Montagens, desmontagens recursivas, `/etc/fstab`, `/etc/hostname`.
 
+#### 2. au-d77 (FreeBSD + rc.d / rc.conf)
+- `storage/gpart.py`: Esquema GPT com `efi` e `freebsd-ufs` via `gpart`.
+- `filesystem/newfs.py`: Formatação UFS2 com soft updates e journaling (`newfs -U -j`) e `newfs_msdos`.
+- `deployment/tar.py`: Extração de arquivos base/kernel (`tar -xpf`).
+- `services/freebsd_rc.py`: Ativação de serviços em `/etc/rc.conf` com verificação estrita.
+- `boot/freebsd_loader.py`: Instalação e verificação de `loader.efi` na partição ESP.
+- `users/pw.py`: Gestão de contas com `pw` e privilégios administrativos via `doas.conf`.
+- `platform/freebsd.py`: Montagem UFS/msdosfs, geração de `/etc/fstab` FreeBSD e hostname em `rc.conf`.
+
+#### 3. sysvd77 (CRUX + sysvinit)
+- `services/crux_sysv.py`: Gestão e ordenação do array `SERVICES=(...)` em `/etc/rc.conf`.
+- `deployment/rsync.py`: Cópia de filesystem via `rsync -aHAX` com exclusões de pseudo-diretórios.
+- Partilha limpa de providers Linux (`sfdisk`, `mkfs`, `shadow`, `limine`, `platform/linux`).
+
 ### Fase 2 --- Frontend Gráfico GTK3 e Launcher
 - [`mocinha/frontends/gtk3/app.py`](mocinha/frontends/gtk3/app.py): Assistente multi-páginas (Welcome, Disk, User, Services, Boot, Summary, Progress/Details, Finish) com execução assíncrona multithread.
 - [`mocinha/frontends/cli/main.py`](mocinha/frontends/cli/main.py): Operação via terminal (`probe`, `check-manifest`, `plan`).
 - [`bin/mocinha`](bin/mocinha): Launcher automático (abre GTK3 se detetar ambiente gráfico, ou CLI caso contrário).
 
-### Testes Automatizados (22 testes a passar)
+### Testes Automatizados (31 testes a passar)
 - Executar com:
   ```bash
   python3 -m unittest discover -s tests -v
@@ -55,11 +71,5 @@ Localizado em `mocinha/providers/`:
 2. `48bcf2e` feat(core): implement Phase 0 variability map and Phase 1 headless core engine
 3. `348a95c` feat(providers): implement native providers for btw-d77 milestone
 4. `19476bb` feat(frontend): implement GTK3 multi-step wizard and bin/mocinha launcher
-
----
-
-## 3. Próximos Passos Quando Regressares
-
-1. Testar o launcher `./bin/mocinha` no teu novo terminal (ou com `DISPLAY`/servidor gráfico ativo).
-2. Validação prática do alvo **btw-d77** em ambiente de VM / disco virtual descartável.
-3. Avançar para o ataque arquitetónico da **Fase 3: au-d77 (FreeBSD + rc.d)** para testar a independência de plataforma.
+5. `d76adeb` docs: add STATUS.md tracking current progress and next steps
+6. *(próximo commit)* feat(targets): implement au-d77 (FreeBSD) and sysvd77 (CRUX) providers

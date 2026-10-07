@@ -124,9 +124,27 @@ class SystemProbe:
                 return FirmwareType.UEFI
             return FirmwareType.BIOS
         elif sys_platform == "freebsd":
-            # On FreeBSD, kenv or sysctl machdep.bootmethod reports BIOS or UEFI
-            # Fallback to checking EFI sysctl if available
-            return FirmwareType.UEFI  # Provider will refine
+            # On FreeBSD, machdep.bootmethod reports BIOS or UEFI
+            import subprocess
+            try:
+                proc = subprocess.run(["sysctl", "-n", "machdep.bootmethod"], capture_output=True, text=True)
+                val = proc.stdout.strip().upper()
+                if "UEFI" in val:
+                    return FirmwareType.UEFI
+                elif "BIOS" in val:
+                    return FirmwareType.BIOS
+            except Exception:
+                pass
+            try:
+                proc = subprocess.run(["kenv", "-q", "machdep.bootmethod"], capture_output=True, text=True)
+                val = proc.stdout.strip().upper()
+                if "UEFI" in val:
+                    return FirmwareType.UEFI
+                elif "BIOS" in val:
+                    return FirmwareType.BIOS
+            except Exception:
+                pass
+            return FirmwareType.UNKNOWN
         return FirmwareType.UNKNOWN
 
     def _detect_memory(self) -> int:
@@ -178,4 +196,24 @@ class SystemProbe:
                             read_only=is_ro,
                         )
                     )
+        elif sys_platform == "freebsd":
+            import subprocess
+            try:
+                proc = subprocess.run(["sysctl", "-n", "kern.disks"], capture_output=True, text=True)
+                disk_names = proc.stdout.strip().split()
+                for name in disk_names:
+                    if name.startswith(("cd", "pass")):
+                        continue
+                    dev_path = f"/dev/{name}"
+                    devices.append(
+                        DiskDevice(
+                            path=dev_path,
+                            size_bytes=0,
+                            model=name,
+                            removable=name.startswith("da"),
+                            read_only=False,
+                        )
+                    )
+            except Exception:
+                pass
         return devices
