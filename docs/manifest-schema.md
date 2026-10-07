@@ -1,107 +1,109 @@
-# Mocinha --- Especificação e Schema do Manifest (`mocinha.toml`)
+# Mocinha --- Manifest specification (`mocinha.toml`)
 
-> **Manifest = Intenção e conhecimento do remaster.**
+> **Manifest = the remaster's intention and knowledge.**
 >
-> O manifest reside na live (tipicamente em `/etc/mocinha.toml` ou `/usr/share/mocinha/mocinha.toml`).
-> Ele não substitui o `Probe` (que reporta a realidade da máquina); serve para o `Resolver` conciliar intenção, capacidades e realidade observada.
+> The manifest lives in the live system (`/etc/mocinha.toml` or
+> `/usr/share/mocinha/mocinha.toml`; the GUI looks there when no path is
+> given). It does not replace the probe, which reports the machine's
+> reality; the resolver reconciles intention, capabilities and observed
+> reality.
+
+The manifest is **strict**: required keys must be present, values are
+type-checked, and unknown keys or sections are rejected rather than
+ignored. Mocinha never fills in policy the remaster did not state.
+Complete, validated examples: `examples/manifests/btw-d77.toml` and
+`examples/manifests/au-d77.toml`.
 
 ---
 
-## 1. Estrutura Geral (TOML)
+## 1. Sections and keys
 
-```toml
-[system]
-id = "btw-d77"
-name = "BTW-d77 Live"
-version = "2026.10"
-arch = "x86_64"
-platform = "linux"       # "linux" | "freebsd"
+### `[system]` (required)
 
-[install]
-method = "squashfs"      # "squashfs" | "rsync" | "tar"
-source = "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
-min_disk_size_bytes = 10737418240  # 10 GiB
+| Key | Required | Meaning |
+|---|---|---|
+| `id` | yes | Canonical identifier (`btw-d77`, `au-d77`). Also used for the GRUB EFI bootloader id and FreeBSD GPT label prefixes. |
+| `name` | yes | Human-readable name (installer title, boot menu entries). |
+| `platform` | yes | `linux` or `freebsd`. Must match the running live. |
+| `version`, `arch` | no | Informational. |
 
-[providers]
-platform = "linux"
-storage = "linux-sfdisk"
-filesystem = "linux-mkfs"
-deployment = "squashfs-extract"
-users = "shadow"
-administrator = "sudo"
-initramfs = "mkinitcpio"
-services = "arch-systemd"
+### `[install]` (required)
 
-[boot]
-available = ["limine", "systemd-boot", "grub"]
-default = "limine"
+| Key | Required | Meaning |
+|---|---|---|
+| `method` | yes | Deployment family, e.g. `squashfs`, `tree-copy`, `rsync`. |
+| `source` | yes | What is deployed: the live root image file or tree. Never guessed. The disk holding it (or the running `/`) is treated as the live medium and cannot be selected as target. |
+| `min_disk_size_bytes` | yes | Minimum target disk size. |
+| `root_filesystem` | yes | e.g. `ext4`, `ufs`. Filesystem providers refuse types they do not implement. |
+| `root_mount_options` | yes | fstab options of the root filesystem. |
+| `esp_size` | yes | EFI system partition size, e.g. `512m`, `1g`. |
+| `esp_mountpoint` | yes | Where the ESP is mounted, e.g. `/boot`, `/boot/efi`. |
+| `esp_mount_options` | yes | fstab options of the ESP. |
+| `partition_table` | no | `gpt` or `dos`. Default: GPT on UEFI, DOS on BIOS. Storage providers refuse layouts they cannot make bootable. |
+| `root_label`, `esp_label` | no | Filesystem labels; omitted means no label. |
+| `swap_size` | no | Swap partition size; omitted means no swap. |
+| `exclude` | no | Extra paths not copied by `tree-copy` (e.g. `./var/cache/pkg/*`). |
+| `fstab_extra` | no | Lines appended verbatim to the generated `/etc/fstab`. |
 
-[services]
-# Serviços indispensáveis que não podem ser desativados na UI
-required = ["dbus"]
+### `[providers]` (required)
 
-# Serviços ativados por omissão pelo criador do remaster, alteráveis pelo utilizador
-default_enabled = ["NetworkManager"]
+Maps capabilities to provider names; all keys are required:
+`platform`, `storage`, `filesystem`, `deployment`, `users`, `services`,
+`initramfs` (`none` when the platform needs no initramfs step). A name
+that is not registered fails plan wiring, before confirmation.
 
-# Serviços disponíveis na live para ativação facultativa
-optional = ["sshd", "cups", "bluetooth"]
+### `[boot]` (required)
 
-# Serviços presentes ou a correr na live que NUNCA devem persistir no target
-live_only = ["mocinha-autologin", "reflector"]
+| Key | Required | Meaning |
+|---|---|---|
+| `available` | yes | Bootloaders the live actually ships and the remaster supports. |
+| `default` | yes | Suggested choice; must be one of `available`. |
+| `timeout` | no | Boot menu timeout; omitted keeps the bootloader's/remaster's own setting. |
+| `kernel_args` | no | Arguments appended to the kernel command line (the user may add more). |
 
-# Metadados e restrições opcionais declaradas pelo remaster
-[services.metadata.NetworkManager]
-requires = ["dbus"]
-conflicts = ["systemd-networkd", "dhcpcd"]
+GRUB is configured with the target's own `grub-mkconfig` and
+`/etc/default/grub`; only `timeout` and extra kernel arguments are
+changed there. Limine entries come from the kernels/initramfs images the
+initramfs provider discovers.
 
-[services.metadata.sshd]
-optional = true
-```
+### `[services]` (optional)
 
----
+| Key | Meaning |
+|---|---|
+| `required` | Always enabled; the GUI shows them locked. |
+| `default_enabled` | Pre-selected; the user may deselect them. |
+| `optional` | Shown unselected; the user may select them. |
+| `live_only` | Enabled in the live only; disabled on the target. |
+| `metadata.<id>` | Relations: `requires`, `wants`, `conflicts`, `before`, `after`. |
+| `default_target` | Boot target for systemd (e.g. `graphical.target`); other service providers refuse it. |
 
-## 2. Descrição dos Campos
+Services in `default_enabled` or `optional` that the user does not select
+are **disabled** on the target, because the live copy may have them
+enabled. Units whose package is not installed only leave dangling
+enablement links, which are removed.
 
-### `[system]`
-- `id`: Identificador canónico do sistema/remaster (ex: `btw-d77`, `au-d77`, `sysvd77`).
-- `name`: Nome legível exibido no ecrã inicial do instalador.
-- `version`: Versão do release.
-- `arch`: Arquitetura esperada (`x86_64`, `aarch64`, etc.).
-- `platform`: Família do sistema operativo (`linux` ou `freebsd`).
+### `[users]` (optional)
 
-### `[install]`
-- `method`: Mecanismo primário de descompressão/cópia da imagem live.
-- `source`: Caminho absoluto para a fonte de deployment (ficheiro squashfs, diretório raiz ou tarball). Se omitido, o provider tenta autodetectar o ponto de montagem da live.
-- `min_disk_size_bytes`: Espaço livre mínimo exigido no disco de destino.
+| Key | Meaning |
+|---|---|
+| `groups` | Groups of the primary user, including the administrator group (e.g. `wheel`). Missing groups fail the install. |
+| `shell` | Login shell; omitted uses the target's `useradd`/`pw` default. |
 
-### `[providers]`
-Mapeia capacidades a implementações concretas de providers:
-- `platform`: Provider de SO (`linux`, `freebsd`).
-- `services`: Provider de gestão e persistência de serviços (`arch-systemd`, `freebsd-rc`, `crux-sysvinit`, `void-runit`, etc.).
-- `users`: Gestão de contas e palavras-passe (`shadow`, `pw`).
-- `administrator`: Concessão de privilégios (`sudo`, `doas`).
-- `initramfs`: Reconstrução do kernel/initramfs se necessário (`mkinitcpio`, `dracut`, `none`).
+Administrator rules (sudoers, doas) are remaster policy and are declared
+as `[[target_files]]`.
 
-### `[boot]`
-- `available`: Lista ordenada de bootloaders que o remaster empacota e suporta.
-- `default`: Bootloader sugerido por omissão caso a máquina satisfaça os seus requisitos de firmware.
-
-### `[services]`
-Define a taxonomia de serviços para evitar atolamento em checkboxes ingénuas:
-- `required`: O resolver força a inclusão; a UI mostra bloqueado com cadeado.
-- `default_enabled`: Pré-selecionados na UI; utilizador pode desmarcar se quiser.
-- `optional`: Mostrados desmarcados; utilizador pode selecionar.
-- `live_only`: Se o probe detetar estes serviços a correr na live, o executor garante que são limpos e desativados no target persistente.
-- `metadata.<id>`: Declarativo de relações (`requires`, `conflicts`, `wants`).
+The root account is locked unless the user chooses a root password; the
+plan shows which one applies.
 
 ---
 
-## 3. Live-only artifacts and installed-system files
+## 2. Live-only artifacts and installed-system files
 
-Mocinha installs by copying the booted live system. Anything that exists only
-to run the live session is copied too, unless the manifest declares it. An
-installer that builds the target from packages (pacstrap, debootstrap) never
-sees these artifacts; a copying installer must remove them explicitly.
+Mocinha installs by copying the booted live system. Anything that exists
+only to run the live session is copied too, unless the manifest declares
+it. An installer that builds the target from packages (pacstrap,
+debootstrap) never sees these artifacts; a copying installer must remove
+them explicitly.
 
 ```toml
 [live_only]
@@ -131,44 +133,21 @@ user = "greeter"
 '''
 ```
 
-Unknown keys in `[live_only]` and `[[target_files]]` are rejected, not ignored.
+---
 
-Related behavior:
+## 3. User choices (not in the manifest)
 
-- `[services].live_only` units are disabled on the target; enablement links
-  left by units whose package is not installed are removed.
-- Services listed in `default_enabled` or `optional` that the user does not
-  select are **disabled** on the target, because the live copy may have them
-  enabled.
-- The root account is locked unless a root password is chosen; the plan shows
-  which one applies.
+Chosen in the GUI or on the CLI and shown in the plan: target disk,
+bootloader (from `[boot].available`), user name and password, root
+password (empty: locked), hostname, optional services, extra kernel
+arguments, and locale/keymap/timezone (unset: keep the live's settings;
+providers that cannot apply a requested change refuse it during
+validation, before any disk is modified).
 
 ---
 
-## 4. Storage, copy and account policy
-
-```toml
-[install]
-method = "tree-copy"          # copy the live root tree (plain filesystem live, e.g. UFS)
-source = "/"
-partition_table = "gpt"       # remaster policy; default: GPT on UEFI, DOS on BIOS.
-                              # The storage provider refuses layouts it cannot boot.
-root_label = "AU_D77_ROOT"    # filesystem label of the root filesystem
-swap_size = "2g"              # swap partition size; omit for no swap
-exclude = ["./var/cache/pkg/*"]   # extra paths not copied (tree-copy)
-fstab_extra = ["tmpfs /tmp tmpfs rw,mode=1777 0 0"]  # lines appended to /etc/fstab
-
-[users]
-groups = ["operator", "video"]   # supplementary groups for the primary user
-
-[services]
-default_target = "graphical.target"  # systemd only; other providers refuse it
-```
-
-Locale, keymap and timezone are user choices; when not given, the live
-system's settings are kept. Providers that cannot apply a requested change
-refuse it during validation, before any disk is modified.
+## 4. Platform notes
 
 On FreeBSD, GPT partition labels are prefixed with `[system].id`
-(e.g. `gpt/au-d77-efi`): generic labels such as `efiboot` may already exist
-on the live medium and would make `/dev/gpt/<label>` ambiguous.
+(e.g. `gpt/au-d77-efi`): generic labels such as `efiboot` may already
+exist on the live medium and would make `/dev/gpt/<label>` ambiguous.

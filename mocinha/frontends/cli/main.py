@@ -93,9 +93,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
         target_disk=args.disk,
         bootloader=args.bootloader or manifest.boot.default,
         username=args.user,
-        password=args.password or "secret",
+        password=getattr(args, "password", None) or "",
         hostname=args.hostname,
         root_password=args.root_password or None,
+        kernel_args=args.kernel_args.split() if args.kernel_args else [],
         locale=args.locale,
         keymap=args.keymap,
         timezone=args.timezone,
@@ -136,9 +137,10 @@ def cmd_install(args: argparse.Namespace) -> int:
         target_disk=args.disk,
         bootloader=args.bootloader or manifest.boot.default,
         username=args.user,
-        password=args.password or "secret",
+        password=getattr(args, "password", None) or "",
         hostname=args.hostname,
         root_password=args.root_password or None,
+        kernel_args=args.kernel_args.split() if args.kernel_args else [],
         locale=args.locale,
         keymap=args.keymap,
         timezone=args.timezone,
@@ -162,7 +164,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         target_mount=args.mount,
         metadata={
             **plan.metadata,
-            "password": args.password or "secret",
+            "password": args.password,
             "root_password": args.root_password or None,
         },
     )
@@ -199,10 +201,10 @@ def main() -> None:
     p_plan.add_argument("--manifest", required=True, help="Path to manifest file")
     p_plan.add_argument("--disk", required=True, help="Target disk path (e.g. /dev/nvme0n1)")
     p_plan.add_argument("--bootloader", help="Requested bootloader (e.g. limine)")
-    p_plan.add_argument("--user", default="user", help="Primary user account name")
-    p_plan.add_argument("--password", default="", help="Password for user")
-    p_plan.add_argument("--hostname", default="mocinha", help="Target hostname")
+    p_plan.add_argument("--user", required=True, help="Primary user account name")
+    p_plan.add_argument("--hostname", required=True, help="Target hostname")
     p_plan.add_argument("--root-password", default="", help="Root password (default: root account locked)")
+    p_plan.add_argument("--kernel-args", default="", help="Extra kernel command-line arguments (e.g. 'console=ttyS0,115200')")
     p_plan.add_argument("--locale", default=None, help="System locale (LANG); default: keep the live setting")
     p_plan.add_argument("--keymap", default=None, help="Console keymap; default: keep the live setting")
     p_plan.add_argument("--timezone", default=None, help="Timezone (e.g. Europe/Lisbon); default: keep the live setting")
@@ -214,10 +216,11 @@ def main() -> None:
     p_inst.add_argument("--manifest", required=True, help="Path to manifest file")
     p_inst.add_argument("--disk", required=True, help="Target disk path (e.g. /dev/vda)")
     p_inst.add_argument("--bootloader", help="Requested bootloader (e.g. limine)")
-    p_inst.add_argument("--user", default="user", help="Primary user account name")
-    p_inst.add_argument("--password", default="secret", help="Password for user")
-    p_inst.add_argument("--hostname", default="mocinha", help="Target hostname")
+    p_inst.add_argument("--user", required=True, help="Primary user account name")
+    p_inst.add_argument("--password", required=True, help="Password for the primary user")
+    p_inst.add_argument("--hostname", required=True, help="Target hostname")
     p_inst.add_argument("--root-password", default="", help="Root password (default: root account locked)")
+    p_inst.add_argument("--kernel-args", default="", help="Extra kernel command-line arguments (e.g. 'console=ttyS0,115200')")
     p_inst.add_argument("--locale", default=None, help="System locale (LANG); default: keep the live setting")
     p_inst.add_argument("--keymap", default=None, help="Console keymap; default: keep the live setting")
     p_inst.add_argument("--timezone", default=None, help="Timezone (e.g. Europe/Lisbon); default: keep the live setting")

@@ -165,12 +165,13 @@ Remaining differences from a `d77-install` system:
 1. Packages: the target keeps the live package set (e.g. archinstall, dialog,
    reflector, iwd, openssh), only their services are disabled. Mocinha is not a
    package manager; removing them would be an explicit, separate decision.
-2. GRUB: Mocinha writes its own `grub.cfg` (serial console hard-coded) instead of
-   `grub-mkconfig` with btw-d77's GRUB theme; no removable-media fallback
-   (`\EFI\BOOT\BOOTX64.EFI`), so UEFI boot relies on the NVRAM entry.
+2. GRUB theme: GRUB is configured with the target's own `grub-mkconfig` and
+   `/etc/default/grub`, but `d77-grub-theme` is not in the live image
+   (d77-install installs it online). No removable-media fallback
+   (`\EFI\BOOT\BOOTX64.EFI`) for GRUB, so UEFI boot relies on the NVRAM entry.
 3. No LUKS, btrfs or swapfile options (d77-install offers them).
-4. GUI has no root password, locale, keymap or timezone fields (root locked;
-   en_US.UTF-8 / us / UTC from the GUI).
+4. GUI has no locale, keymap, timezone or kernel-argument fields (the live's
+   settings are kept from the GUI; the CLI has the options).
 5. Firmware/bootloader incompatibilities are only detected at provider validation (after confirmation).
 
 Remaining differences from an `au-d77-install` system:
@@ -186,10 +187,24 @@ Other platforms:
   systemd-style files (`/etc/locale.conf`, `/etc/vconsole.conf`, `/etc/hostname`),
   which CRUX does not use (it uses `/etc/rc.conf`).
 
-Architectural debt (from the 2026-10-07 audit):
-- Manifest parsing silently fills defaults (`services="systemd"`, `platform="linux"`, ...) and accepts unknown keys.
-- Firmware decides partition table; filesystem is hard-coded per platform;
-  bootloader/firmware compatibility lives in the resolver instead of provider capabilities.
-- `shadow` ignores `administrator` (always `wheel` + sudoers); btw-d77 branding and serial console hard-coded in boot providers.
+Architectural debt:
+- Bootloader/firmware compatibility (lilo/syslinux vs UEFI, systemd-boot vs
+  BIOS) lives in the resolver instead of provider capabilities.
 - `wants` / `before` service metadata parsed but unused.
-- CLI defaults the user password to `secret` and accepts it on the command line.
+- The CLI takes passwords on the command line (visible in `ps`); fine for
+  automated tests, not for interactive use.
+- `plano.md` §5 describes the administrator as an intention resolved by a
+  provider (`capabilities = administrator`); today the remaster declares the
+  administrator group in `[users].groups` and the sudo/doas rules as
+  `[[target_files]]`. Decide whether that is enough or a provider is needed.
+
+Removed hard-coded policy (2026-10-07): the manifest is strict (required keys,
+no invented defaults, unknown keys rejected); kernels/initramfs are discovered
+from the target (mkinitcpio presets) instead of `vmlinuz-linux`; GRUB uses
+`grub-mkconfig` instead of a hand-written `grub.cfg` with a forced serial
+console; Limine timeout/cmdline come from the manifest/user; root filesystem,
+ESP size/label/mount point, mount options, user groups and shell come from the
+manifest; the live medium is found from the mounts holding `[install].source`
+or `/` instead of archiso path names; no squashfs path guessing; no default
+user, password or hostname in the CLI/GUI; the GUI no longer loads an example
+manifest by default.

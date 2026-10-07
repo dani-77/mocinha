@@ -40,7 +40,7 @@ class SfdiskStorageProvider(ProviderContract):
                 current_state=context.target_disk,
                 possible_recovery="Verify disk selection.",
             )
-        firmware = context.metadata.get("firmware", "UEFI").upper()
+        firmware = context.metadata["firmware"].upper()
         table = context.metadata.get("partition_table")
         supported = {"UEFI": "gpt", "BIOS": "dos"}.get(firmware)
         if table and table != supported:
@@ -93,7 +93,7 @@ class SfdiskStorageProvider(ProviderContract):
     def apply(self, context: ExecutionContext) -> None:
 
         disk = context.target_disk
-        is_uefi = context.metadata.get("firmware", "UEFI").upper() == "UEFI"
+        is_uefi = context.metadata["firmware"].upper() == "UEFI"
         self.events.action(
             EventPhase.PREPARE,
             f"Partitioning disk {disk} (Mode: {'UEFI/GPT' if is_uefi else 'BIOS/MBR'})",
@@ -105,7 +105,7 @@ class SfdiskStorageProvider(ProviderContract):
             # Part 2: Remainder Linux Root (type: L = 4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709)
             sfdisk_script = (
                 "label: gpt\n"
-                "size=512M, type=U\n"
+                f"size={context.metadata['esp_size'].upper()}, type=U\n"
                 "type=L\n"
             )
         else:

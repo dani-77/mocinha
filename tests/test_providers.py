@@ -32,6 +32,14 @@ class TestProviders(unittest.TestCase):
                 "firmware": "UEFI",
                 "system_id": "testos",
                 "system_name": "Test OS",
+                "password": "pw",
+                "lock_root": True,
+                "user_groups": ["wheel"],
+                "root_filesystem": "ext4",
+                "root_mount_options": "rw,relatime",
+                "esp_size": "512m",
+                "esp_mountpoint": "/boot",
+                "esp_mount_options": "rw",
             },
         )
 
@@ -107,38 +115,6 @@ class TestProviders(unittest.TestCase):
         with mock.patch("mocinha.providers.users.shadow.shutil.which", return_value="/usr/bin/x"):
             with self.assertRaises(ExecutionError):
                 provider.validate(self.context)
-
-    @mock.patch("mocinha.providers.boot.limine.read_blkid_uuid", return_value="1234-ROOT")
-    def test_limine_provider_verification(self, _uuid) -> None:
-        provider = LimineBootProvider("limine", self.stream)
-
-        # Missing EFI binary -> fails
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        boot_dir = self.target / "boot"
-        esp_dir = boot_dir / "EFI" / "BOOT"
-        esp_dir.mkdir(parents=True, exist_ok=True)
-
-        # Placeholder (non-PE) binary -> fails
-        (esp_dir / "BOOTX64.EFI").write_bytes(b"MOCINHA_LIMINE_BOOTX64_PLACEHOLDER")
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        (esp_dir / "BOOTX64.EFI").write_bytes(b"MZ\x90\x00EFI")
-
-        # Missing limine.conf -> fails
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        # limine.conf not pointing at the root UUID -> fails
-        (boot_dir / "limine.conf").write_text("timeout: 5\n    cmdline: root=/dev/sda2 rw\n")
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        # With limine.conf referencing the root UUID -> succeeds
-        (boot_dir / "limine.conf").write_text("timeout: 5\n    cmdline: root=UUID=1234-ROOT rw\n")
-        provider.verify(self.context)
 
     @mock.patch("mocinha.providers.boot.limine.LIVE_EFI_CANDIDATES", [])
     def test_limine_never_writes_placeholder(self) -> None:
@@ -234,99 +210,6 @@ class TestProviders(unittest.TestCase):
 
         provider.verify(self.context)
 
-    @mock.patch("mocinha.providers.boot.grub.read_blkid_uuid", return_value="1234-ROOT")
-    def test_grub_provider_verification(self, _uuid) -> None:
-        from mocinha.providers.boot.grub import GrubBootProvider
-        provider = GrubBootProvider("grub", self.stream)
-
-        # Missing EFI binary -> fails
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        efi_dir = self.target / "boot" / "EFI" / "testos"
-        efi_dir.mkdir(parents=True, exist_ok=True)
-        (efi_dir / "grubx64.efi").write_bytes(b"MZ\x90\x00GRUB")
-
-        # Missing grub.cfg -> fails
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        grub_dir = self.target / "boot" / "grub"
-        grub_dir.mkdir(parents=True, exist_ok=True)
-
-        # grub.cfg without the root UUID -> fails
-        (grub_dir / "grub.cfg").write_text("set timeout=5\n")
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        (self.target / "boot" / "vmlinuz-linux").write_bytes(b"kernel")
-
-        # Regression (btw-d77 UEFI): kernel searched on root under /boot, but it lives on the ESP
-        (grub_dir / "grub.cfg").write_text(
-            "search --no-floppy --fs-uuid --set=root 1234-ROOT\n"
-            "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n"
-        )
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        # ESP UUID searched, kernel at the top of the ESP -> succeeds
-        (grub_dir / "grub.cfg").write_text(
-            "search --no-floppy --fs-uuid --set=root 1234-ROOT\n"
-            "linux /vmlinuz-linux root=UUID=1234-ROOT rw\n"
-        )
-        provider.verify(self.context)
-
-    @mock.patch("mocinha.providers.boot.grub.read_blkid_uuid", return_value="1234-ROOT")
-    def test_grub_bios_verification_checks_mbr(self, _uuid) -> None:
-        from mocinha.providers.boot.grub import GrubBootProvider
-        provider = GrubBootProvider("grub", self.stream)
-
-        disk_img = self.target / "disk.img"
-        disk_img.write_bytes(b"\x00" * 512)
-        self.context.target_disk = str(disk_img)
-        self.context.metadata["firmware"] = "BIOS"
-
-        grub_dir = self.target / "boot" / "grub"
-        (grub_dir / "i386-pc").mkdir(parents=True, exist_ok=True)
-        (grub_dir / "i386-pc" / "core.img").write_bytes(b"core")
-        (grub_dir / "grub.cfg").write_text(
-            "search --no-floppy --fs-uuid --set=root 1234-ROOT\n"
-            "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n"
-        )
-        (self.target / "boot" / "vmlinuz-linux").write_bytes(b"kernel")
-        bios_partitions = {"root": "/dev/mock0p1"}
-        self.context.target_partitions = bios_partitions
-
-        # Empty MBR -> fails
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        mbr = bytearray(512)
-        mbr[0x180:0x185] = b"GRUB "
-        mbr[510:512] = b"\x55\xaa"
-        disk_img.write_bytes(bytes(mbr))
-        provider.verify(self.context)
-
-    def test_mkinitcpio_provider_verification(self) -> None:
-        from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
-        provider = MkinitcpioProvider("mkinitcpio", self.stream)
-
-        boot_dir = self.target / "boot"
-        boot_dir.mkdir(parents=True, exist_ok=True)
-
-        # Missing images -> fails (used to log INFO and pass)
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        # Empty images -> fails
-        (boot_dir / "vmlinuz-linux").touch()
-        (boot_dir / "initramfs-linux.img").touch()
-        with self.assertRaises(VerificationError):
-            provider.verify(self.context)
-
-        (boot_dir / "vmlinuz-linux").write_bytes(b"kernel")
-        (boot_dir / "initramfs-linux.img").write_bytes(b"initrd")
-        provider.verify(self.context)
     def test_mkinitcpio_restores_stock_preset(self) -> None:
         """Regression (btw-d77 live): the archiso preset made 'mkinitcpio -P' fail on the target."""
         from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
@@ -436,7 +319,7 @@ class TestProviders(unittest.TestCase):
         etc.mkdir()
         (etc / "passwd").write_text("root:x:0:0::/root:/bin/bash\n")
         (etc / "group").write_text("root:x:0:root\nwheel:x:10:\n")
-        self.context.metadata["extra_groups"] = ["storage"]
+        self.context.metadata["user_groups"] = ["wheel", "storage"]
         with self.assertRaises(ExecutionError) as ctx:
             provider.apply(self.context)
         self.assertIn("storage", str(ctx.exception))
@@ -455,6 +338,112 @@ class TestProviders(unittest.TestCase):
         (sys_dir / "default.target").unlink()
         (sys_dir / "default.target").symlink_to("/usr/lib/systemd/system/graphical.target")
         provider.verify(self.context)
+
+    def _preset_target(self) -> None:
+        """A target with one mkinitcpio preset and its images on the ESP mounted at /boot."""
+        md = self.target / "etc" / "mkinitcpio.d"
+        md.mkdir(parents=True, exist_ok=True)
+        (md / "linux-lts.preset").write_text(
+            "ALL_kver='/boot/vmlinuz-linux-lts'\nPRESETS=('default' 'fallback')\n"
+            "default_image=\"/boot/initramfs-linux-lts.img\"\nfallback_image=\"/boot/initramfs-linux-lts-fallback.img\"\n"
+        )
+        boot = self.target / "boot"
+        boot.mkdir(exist_ok=True)
+        for f in ("vmlinuz-linux-lts", "initramfs-linux-lts.img", "initramfs-linux-lts-fallback.img"):
+            (boot / f).write_bytes(b"image")
+
+    def test_mkinitcpio_boot_entries_come_from_presets(self) -> None:
+        """No hard-coded vmlinuz-linux: kernels are discovered from the target's presets."""
+        from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider, boot_entries
+        provider = MkinitcpioProvider("mkinitcpio", self.stream)
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+        self._preset_target()
+        provider.verify(self.context)
+        names = [e["name"] for e in self.context.metadata["boot_entries"]]
+        self.assertEqual(names, ["linux-lts (default)", "linux-lts (fallback)"])
+        (self.target / "boot" / "initramfs-linux-lts-fallback.img").write_bytes(b"")
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+        self.assertEqual(boot_entries(self.target)[0]["kernel"], "/boot/vmlinuz-linux-lts")
+
+    def test_mkinitcpio_restores_preset_with_missing_config(self) -> None:
+        from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
+        provider = MkinitcpioProvider("mkinitcpio", self.stream)
+        md = self.target / "etc" / "mkinitcpio.d"
+        md.mkdir(parents=True)
+        (md / "linux.preset").write_text("PRESETS=('live')\nlive_config='/etc/mkinitcpio.conf.d/live.conf'\n")
+        (md / "other.preset").write_text("PRESETS=('default')\ndefault_config='/etc/mkinitcpio.conf'\n")
+        (self.target / "etc" / "mkinitcpio.conf").write_text("")
+        tpl = self.target / "usr" / "share" / "mkinitcpio"
+        tpl.mkdir(parents=True)
+        (tpl / "hook.preset").write_text("PRESETS=('default')\ndefault_image=\"/boot/initramfs-%PKGBASE%.img\"\n")
+        provider._restore_stock_presets(self.target)
+        self.assertIn("/boot/initramfs-linux.img", (md / "linux.preset").read_text())
+        self.assertIn("default_config", (md / "other.preset").read_text())  # untouched
+
+    @mock.patch("mocinha.providers.boot.limine.read_blkid_uuid", return_value="1234-ROOT")
+    def test_limine_config_from_boot_entries(self, _uuid) -> None:
+        provider = LimineBootProvider("limine", self.stream)
+        self.context.metadata.update(kernel_args=["console=ttyS0"], boot_timeout=None)
+        # No boot entries reported by the initramfs provider -> explicit error
+        with self.assertRaises(ExecutionError):
+            provider._config(self.context)
+        self._preset_target()
+        from mocinha.providers.initramfs.mkinitcpio import boot_entries
+        self.context.metadata["boot_entries"] = boot_entries(self.target)
+        conf = provider._config(self.context)
+        self.assertIn("kernel_path: boot():/vmlinuz-linux-lts", conf)
+        self.assertIn("cmdline: root=UUID=1234-ROOT rw console=ttyS0", conf)
+        self.assertNotIn("quiet", conf)
+        self.assertNotIn("timeout", conf)  # Limine default unless the manifest sets one
+        esp = self.target / "boot"
+        (esp / "EFI" / "BOOT").mkdir(parents=True)
+        (esp / "EFI" / "BOOT" / "BOOTX64.EFI").write_bytes(b"MZ\x90\x00")
+        (esp / "limine.conf").write_text(conf)
+        provider.verify(self.context)
+        (esp / "limine.conf").write_text(conf.replace("rw ", "ro "))
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+    def test_limine_rejects_kernel_outside_esp(self) -> None:
+        provider = LimineBootProvider("limine", self.stream)
+        self.context.metadata.update(esp_mountpoint="/boot/efi", boot_entries=[
+            {"name": "linux (default)", "kernel": "/boot/vmlinuz-linux", "initrd": "/boot/initramfs-linux.img"}])
+        with self.assertRaises(ExecutionError):
+            provider._entries(self.context)
+
+    def test_grub_default_file_editing(self) -> None:
+        from mocinha.providers.boot.grub import get_default_grub, set_default_grub
+        text = 'GRUB_TIMEOUT=5\nGRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet"\nGRUB_CMDLINE_LINUX=""\n#GRUB_THEME="/x"\n'
+        out = set_default_grub(text, "GRUB_CMDLINE_LINUX", "console=ttyS0")
+        self.assertEqual(get_default_grub(out, "GRUB_CMDLINE_LINUX"), "console=ttyS0")
+        self.assertIn('GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet"', out)  # remaster setting kept
+        self.assertIn('GRUB_TIMEOUT="2"', set_default_grub(text, "GRUB_TIMEOUT", "2"))
+
+    @mock.patch("mocinha.providers.boot.grub.read_blkid_uuid", return_value="1234-ROOT")
+    def test_grub_verification_reads_generated_entries(self, _uuid) -> None:
+        from mocinha.providers.boot.grub import GrubBootProvider
+        provider = GrubBootProvider("grub", self.stream)
+        self.context.metadata.update(firmware="BIOS", kernel_args=["console=ttyS0"])
+        disk = self.target / "disk.img"
+        mbr = bytearray(512)
+        mbr[0x180:0x185] = b"GRUB "
+        disk.write_bytes(bytes(mbr))
+        self.context.target_disk = str(disk)
+        grub = self.target / "boot" / "grub"
+        (grub / "i386-pc").mkdir(parents=True)
+        (grub / "i386-pc" / "core.img").write_bytes(b"core")
+        (self.target / "boot" / "vmlinuz-linux").write_bytes(b"k")
+        good = "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw console=ttyS0 loglevel=3 quiet\n"
+        (grub / "grub.cfg").write_text(good)
+        provider.verify(self.context)
+        for bad in ("linux /boot/vmlinuz-missing root=UUID=1234-ROOT rw console=ttyS0\n",
+                    "linux /boot/vmlinuz-linux root=UUID=9999 rw console=ttyS0\n",
+                    "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw\n", ""):
+            (grub / "grub.cfg").write_text(bad)
+            with self.assertRaises(VerificationError, msg=bad):
+                provider.verify(self.context)
 
 
 if __name__ == "__main__":

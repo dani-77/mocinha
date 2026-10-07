@@ -1,3 +1,9 @@
+# sysvd77 --- CRUX + sysvinit
+#
+# DRAFT, NOT DERIVED FROM THE sysvd77 REMASTER YET. Kept valid so the CRUX
+# providers can be unit-tested; it will be rewritten from sysvd77's own
+# installer before any sysvd77 validation (as done for btw-d77 and au-d77).
+
 [system]
 id = "sysvd77"
 name = "sysvd77 CRUX Live"
@@ -9,6 +15,11 @@ platform = "linux"
 method = "rsync"
 source = "/"
 min_disk_size_bytes = 8589934592
+root_filesystem = "ext4"
+root_mount_options = "rw,relatime"
+esp_size = "512m"
+esp_mountpoint = "/boot"
+esp_mount_options = "rw"
 
 [providers]
 platform = "linux"
@@ -16,7 +27,6 @@ storage = "linux-sfdisk"
 filesystem = "linux-mkfs"
 deployment = "rsync-copy"
 users = "shadow"
-administrator = "sudo"
 initramfs = "none"
 services = "crux-sysvinit"
 

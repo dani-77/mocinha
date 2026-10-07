@@ -76,9 +76,23 @@ class Serial:
         if slow:  # the loader reads keys one at a time
             for ch in text:
                 self.sock.sendall(ch.encode())
-                time.sleep(0.05)
+                time.sleep(0.12)
         else:
             self.sock.sendall(text.encode())
+
+    def loader_command(self, command: str, attempts: int = 3) -> None:
+        """Types a loader command and checks its echo; the loader may drop keys typed too fast."""
+        for _ in range(attempts):
+            self.send(command, slow=True)
+            try:
+                self.expect(re.escape(command), 5)
+            except TimeoutError:
+                self.sock.sendall(b"\x15")  # ^U: kill the garbled line and retype
+                time.sleep(0.5)
+                continue
+            self.send("\r")
+            return
+        raise TimeoutError(f"loader did not echo {command!r} after {attempts} attempts")
 
     def drain_until_closed(self, timeout: float) -> None:
         deadline = time.time() + timeout
@@ -92,9 +106,9 @@ def to_single_user(s: Serial) -> None:
     s.expect(r"OK ", 30)
     # Serial only: with a dual console the single-user shell may land on the video
     # console, and "vidconsole" does not exist under UEFI (it is "efi" there)
-    s.send("set console=comconsole\r", slow=True)
+    s.loader_command("set console=comconsole")
     s.expect(r"OK ", 30)
-    s.send("boot -s\r", slow=True)
+    s.loader_command("boot -s")
     return None
 
 

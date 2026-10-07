@@ -70,7 +70,7 @@ class FreeBSDPlatformProvider(ProviderContract):
 
         if "esp" in context.target_partitions:
             esp_dev = context.target_partitions["esp"]
-            esp_mount = target_root / "boot" / "efi"
+            esp_mount = target_root / context.metadata["esp_mountpoint"].lstrip("/")
             esp_mount.mkdir(parents=True, exist_ok=True)
             self.events.action(EventPhase.PREPARE, f"Mounting FreeBSD ESP {esp_dev} -> {esp_mount}")
             self.runner.run(["mount", "-t", "msdosfs", esp_dev, str(esp_mount)], phase=EventPhase.PREPARE, check=True)
@@ -84,13 +84,15 @@ class FreeBSDPlatformProvider(ProviderContract):
         labels = context.metadata.get("partition_labels", {})
         root_label = context.metadata.get("root_label")
         root = f"/dev/ufs/{root_label}" if root_label else f"/dev/{labels['root']}"
-        entries = [(f"{root:<24} /               ufs     rw,noatime      1       1", root, parts["root"])]
+        fs, opts = context.metadata["root_filesystem"], context.metadata["root_mount_options"]
+        entries = [(f"{root:<24} {'/':<15} {fs:<7} {opts:<15} 1       1", root, parts["root"])]
         if "swap" in parts:
             node = f"/dev/{labels['swap']}"
             entries.append((f"{node:<24} none            swap    sw              0       0", node, parts["swap"]))
         if "esp" in parts:
             node = f"/dev/{labels['efi']}"
-            entries.append((f"{node:<24} /boot/efi       msdosfs rw              2       2", node, parts["esp"]))
+            mp, opts = context.metadata["esp_mountpoint"], context.metadata["esp_mount_options"]
+            entries.append((f"{node:<24} {mp:<15} msdosfs {opts:<15} 2       2", node, parts["esp"]))
         return entries
 
     def generate_fstab(self, context: ExecutionContext) -> None:
@@ -102,7 +104,7 @@ class FreeBSDPlatformProvider(ProviderContract):
 
     def configure_hostname(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
-        hostname = context.metadata.get("hostname", "au-box")
+        hostname = context.metadata["hostname"]
         rc_conf = target_root / "etc" / "rc.conf"
         rc_conf.parent.mkdir(parents=True, exist_ok=True)
 
@@ -122,7 +124,7 @@ class FreeBSDPlatformProvider(ProviderContract):
     def verify_mounted(self, context: ExecutionContext) -> None:
         mounts = {"root": Path(context.target_mount)}
         if "esp" in context.target_partitions:
-            mounts["esp"] = Path(context.target_mount) / "boot" / "efi"
+            mounts["esp"] = Path(context.target_mount) / context.metadata["esp_mountpoint"].lstrip("/")
         for role, path in mounts.items():
             if not os.path.ismount(path):
                 raise VerificationError(
@@ -184,8 +186,9 @@ class FreeBSDPlatformProvider(ProviderContract):
         target_root = Path(context.target_mount)
         self.events.action(EventPhase.CLEANUP, f"Unmounting FreeBSD target hierarchy at {target_root}")
         self.runner.run(["sync"], phase=EventPhase.CLEANUP, check=strict)
-        esp_mount = target_root / "boot" / "efi"
-        if os.path.ismount(esp_mount):
+        esp_mp = context.metadata.get("esp_mountpoint")
+        esp_mount = target_root / esp_mp.lstrip("/") if esp_mp else None
+        if esp_mount is not None and os.path.ismount(esp_mount):
             self.runner.run(["umount", str(esp_mount)], phase=EventPhase.CLEANUP, check=strict)
         if os.path.ismount(target_root):
             self.runner.run(["umount", str(target_root)], phase=EventPhase.CLEANUP, check=strict)

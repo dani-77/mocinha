@@ -1,8 +1,8 @@
 """Limine bootloader provider (UEFI only for now).
 
-Installs the Limine EFI binary on the EFI System Partition
-and writes limine.conf with durable UUID kernel command line.
-BIOS installation (limine bios-install) is not implemented yet.
+Installs the Limine EFI binary at the ESP's removable-media path and writes
+limine.conf with one entry per kernel/initramfs reported by the initramfs
+provider. BIOS installation (limine bios-install) is not implemented yet.
 """
 
 from pathlib import Path
@@ -33,7 +33,7 @@ class LimineBootProvider(ProviderContract):
         return ["bootloader", "limine"]
 
     def validate(self, context: ExecutionContext) -> None:
-        firmware = context.metadata.get("firmware", "UEFI").upper()
+        firmware = context.metadata["firmware"].upper()
         if firmware != "UEFI":
             raise ExecutionError(
                 message="The Limine provider currently supports UEFI installs only.",
@@ -53,8 +53,8 @@ class LimineBootProvider(ProviderContract):
 
     def apply(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
-        boot_dir = target_root / "boot"
-        esp_dir = boot_dir / "EFI" / "BOOT"
+        esp_root = target_root / context.metadata["esp_mountpoint"].lstrip("/")
+        esp_dir = esp_root / "EFI" / "BOOT"
         esp_dir.mkdir(parents=True, exist_ok=True)
 
         self.events.action(EventPhase.BOOTLOADER, f"Installing Limine EFI binary to {esp_dir}")
@@ -71,42 +71,65 @@ class LimineBootProvider(ProviderContract):
             )
         shutil.copy2(efi_src, esp_dir / "BOOTX64.EFI")
 
-        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.BOOTLOADER)
-
-        limine_conf = boot_dir / "limine.conf"
-        conf_content = (
-            "timeout: 5\n"
-            "\n"
-            f"/{context.metadata['system_name']}\n"
-            "    protocol: linux\n"
-            "    kernel_path: boot():/vmlinuz-linux\n"
-            f"    cmdline: root=UUID={root_uuid} rw quiet\n"
-            "    module_path: boot():/initramfs-linux.img\n"
-        )
-        limine_conf.write_text(conf_content)
+        limine_conf = esp_root / "limine.conf"
+        limine_conf.write_text(self._config(context))
         self.events.info(EventPhase.BOOTLOADER, f"Generated {limine_conf}")
 
+    def _entries(self, context: ExecutionContext) -> List[tuple]:
+        """(title, kernel, initrd) with paths relative to the ESP, from the initramfs provider's boot entries."""
+        entries = context.metadata.get("boot_entries")
+        if not entries:
+            raise ExecutionError(
+                message="No boot entries known for Limine.",
+                cause="The initramfs provider did not report kernels/initramfs images.",
+                failed_operation="Configure Limine",
+                possible_recovery="Use an initramfs provider that reports boot entries (e.g. mkinitcpio).",
+            )
+        esp_mp = context.metadata["esp_mountpoint"].rstrip("/")
+        result = []
+        for e in entries:
+            kernel, initrd = str(e["kernel"]), str(e["initrd"])
+            if not (kernel.startswith(esp_mp + "/") and initrd.startswith(esp_mp + "/")):
+                raise ExecutionError(
+                    message=f"Kernel {kernel} is not on the ESP ({esp_mp}); Limine cannot load it.",
+                    cause="Limine reads kernels from the partition it boots from.",
+                    failed_operation="Configure Limine",
+                    possible_recovery="Mount the ESP at the kernel directory (esp_mountpoint) or choose another bootloader.",
+                )
+            result.append((f"{context.metadata['system_name']} - {e['name']}", kernel[len(esp_mp):], initrd[len(esp_mp):]))
+        return result
+
+    def _config(self, context: ExecutionContext) -> str:
+        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.BOOTLOADER)
+        cmdline = " ".join([f"root=UUID={root_uuid}", "rw"] + list(context.metadata.get("kernel_args", [])))
+        lines = []
+        if context.metadata.get("boot_timeout") is not None:
+            lines.append(f"timeout: {context.metadata['boot_timeout']}\n")
+        for title, kernel, initrd in self._entries(context):
+            lines += [f"/{title}\n", "    protocol: linux\n", f"    kernel_path: boot():{kernel}\n",
+                      f"    cmdline: {cmdline}\n", f"    module_path: boot():{initrd}\n", "\n"]
+        return "".join(lines)
+
     def verify(self, context: ExecutionContext) -> None:
-        target_root = Path(context.target_mount)
-        require_pe_binary(target_root / "boot" / "EFI" / "BOOT" / "BOOTX64.EFI", "Limine EFI binary")
-
-        limine_conf = target_root / "boot" / "limine.conf"
-        if not limine_conf.is_file():
+        esp_root = Path(context.target_mount) / context.metadata["esp_mountpoint"].lstrip("/")
+        require_pe_binary(esp_root / "EFI" / "BOOT" / "BOOTX64.EFI", "Limine EFI binary")
+        limine_conf = esp_root / "limine.conf"
+        expected = self._config(context)
+        actual = limine_conf.read_text() if limine_conf.is_file() else None
+        if actual != expected:
             raise VerificationError(
-                message=f"Limine configuration missing at {limine_conf}",
-                cause="limine.conf was not written to /boot.",
+                message=f"limine.conf at {limine_conf} does not match the planned configuration.",
+                cause="Missing file or different entries/kernel command line.",
                 failed_operation="Verify limine.conf",
+                current_state=(actual or "missing").strip(),
                 possible_recovery="Re-run bootloader configuration.",
             )
-
-        root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.VERIFY)
-        if f"root=UUID={root_uuid}" not in limine_conf.read_text():
-            raise VerificationError(
-                message="limine.conf does not reference the target root filesystem.",
-                cause=f"Expected 'root=UUID={root_uuid}' in the kernel command line.",
-                failed_operation="Verify limine.conf root parameter",
-                current_state=limine_conf.read_text().strip(),
-                possible_recovery="Re-run bootloader configuration.",
-            )
-
+        for _, kernel, initrd in self._entries(context):
+            for rel in (kernel, initrd):
+                if not (esp_root / rel.lstrip("/")).is_file():
+                    raise VerificationError(
+                        message=f"{rel} referenced by limine.conf is missing on the ESP.",
+                        cause="The kernel/initramfs images are not where limine.conf points.",
+                        failed_operation="Verify Limine entries",
+                    )
         self.events.info(EventPhase.VERIFY, "Limine bootloader verified on target.")

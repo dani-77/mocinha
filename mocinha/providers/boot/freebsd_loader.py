@@ -1,9 +1,9 @@
 """FreeBSD loader boot provider (au-d77).
 
 The hybrid GPT layout from the gpart provider already carries the BIOS boot
-code (pmbr + gptboot). This provider installs loader.efi on the ESP, mounted
-at /boot/efi, both at the removable-media path and under EFI/freebsd, like
-au-d77's own installer, and verifies both boot paths.
+code (pmbr + gptboot). This provider installs loader.efi on the ESP (mounted
+at the manifest's esp_mountpoint) at the UEFI removable-media path and under
+EFI/freebsd, and verifies both boot paths.
 """
 
 from pathlib import Path
@@ -45,7 +45,7 @@ class FreeBSDBootProvider(ProviderContract):
                 cause="The FreeBSD loader provider installs loader.efi on the ESP.",
                 failed_operation="Install FreeBSD EFI loader",
             )
-        esp = target_root / "boot" / "efi"
+        esp = target_root / context.metadata["esp_mountpoint"].lstrip("/")
         if not esp.is_mount():
             raise ExecutionError(
                 message=f"The ESP is not mounted at {esp}.",
@@ -68,7 +68,7 @@ class FreeBSDBootProvider(ProviderContract):
             shutil.copyfile(src, dest)
 
     def verify(self, context: ExecutionContext) -> None:
-        esp = Path(context.target_mount) / "boot" / "efi"
+        esp = Path(context.target_mount) / context.metadata["esp_mountpoint"].lstrip("/")
         for rel in EFI_TARGETS:
             require_pe_binary(esp / rel, f"FreeBSD EFI loader ({rel})")
 

@@ -134,10 +134,10 @@ class LinuxPlatformProvider(ProviderContract):
         self.events.action(EventPhase.PREPARE, f"Mounting root {root_dev} -> {target_root}")
         self.runner.run(["mount", root_dev, str(target_root)], phase=EventPhase.PREPARE, check=True)
 
-        # Mount ESP at /boot if present
+        # Mount the ESP where the manifest places it
         if "esp" in context.target_partitions:
             esp_dev = context.target_partitions["esp"]
-            esp_mount = target_root / "boot"
+            esp_mount = target_root / context.metadata["esp_mountpoint"].lstrip("/")
             esp_mount.mkdir(parents=True, exist_ok=True)
             self.events.action(EventPhase.PREPARE, f"Mounting ESP {esp_dev} -> {esp_mount}")
             self.runner.run(["mount", esp_dev, str(esp_mount)], phase=EventPhase.PREPARE, check=True)
@@ -153,9 +153,11 @@ class LinuxPlatformProvider(ProviderContract):
         for role, dev in context.target_partitions.items():
             dev_id = f"UUID={read_blkid_uuid(self.runner, dev)}"
             if role == "root":
-                entries.append(f"{dev_id:<42} /         ext4    rw,relatime    0 1\n")
+                fs, opts = context.metadata["root_filesystem"], context.metadata["root_mount_options"]
+                entries.append(f"{dev_id:<42} /         {fs:<7} {opts}    0 1\n")
             elif role == "esp":
-                entries.append(f"{dev_id:<42} /boot     vfat    rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro 0 2\n")
+                mp, opts = context.metadata["esp_mountpoint"], context.metadata["esp_mount_options"]
+                entries.append(f"{dev_id:<42} {mp:<9} vfat    {opts} 0 2\n")
 
         entries += [f"{line}\n" for line in context.metadata.get("fstab_extra", [])]
         fstab_file.write_text("".join(entries))
@@ -228,7 +230,7 @@ class LinuxPlatformProvider(ProviderContract):
         target_root = Path(context.target_mount)
         etc_dir = target_root / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
-        hostname = context.metadata.get("hostname", "mocinha")
+        hostname = context.metadata["hostname"]
         (etc_dir / "hostname").write_text(f"{hostname}\n")
         hosts_file = etc_dir / "hosts"
         hosts_content = (
@@ -241,7 +243,7 @@ class LinuxPlatformProvider(ProviderContract):
     def verify_mounted(self, context: ExecutionContext) -> None:
         mounts = {"root": Path(context.target_mount)}
         if "esp" in context.target_partitions:
-            mounts["esp"] = Path(context.target_mount) / "boot"
+            mounts["esp"] = Path(context.target_mount) / context.metadata["esp_mountpoint"].lstrip("/")
         for role, path in mounts.items():
             if not os.path.ismount(path):
                 raise VerificationError(

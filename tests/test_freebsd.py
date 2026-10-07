@@ -32,6 +32,16 @@ class TestFreeBSDProviders(unittest.TestCase):
                 "hostname": "aubox",
                 "enabled_services": ["devd", "moused"],
                 "live_only_to_clean": ["live-config"],
+                "system_id": "au-d77",
+                "system_name": "au-d77",
+                "firmware": "BIOS",
+                "lock_root": True,
+                "user_groups": ["wheel"],
+                "root_filesystem": "ufs",
+                "root_mount_options": "rw,noatime",
+                "esp_size": "200m",
+                "esp_mountpoint": "/boot/efi",
+                "esp_mount_options": "rw",
             },
         )
 
@@ -106,7 +116,7 @@ class TestFreeBSDProviders(unittest.TestCase):
     def test_freebsd_users_pw_commands_and_verification(self) -> None:
         provider = FreeBSDUsersProvider("pw", self.stream)
         self.context.metadata.update(
-            password="pw1", root_password="r00t", live_only_users=["d77"], extra_groups=["operator", "video"],
+            password="pw1", root_password="r00t", live_only_users=["d77"], user_groups=["wheel", "operator", "video"],
         )
         etc = self.target / "etc"
         etc.mkdir(parents=True)

@@ -1,7 +1,8 @@
 """Manifest parsing and validation for Mocinha Installer.
 
-Reads mocinha.toml using standard library tomllib.
-Validates structure, types, and constraints before resolution.
+Reads mocinha.toml using standard library tomllib. The manifest is the
+remaster's policy: required keys must be present, unknown keys and sections
+are rejected, and nothing is silently filled in.
 """
 
 from dataclasses import dataclass, field
@@ -17,42 +18,46 @@ from mocinha.core.errors import ManifestError
 class SystemConfig:
     id: str
     name: str
-    version: str
-    arch: str
     platform: str  # "linux" | "freebsd"
+    version: Optional[str] = None
+    arch: Optional[str] = None
 
 
 @dataclass
 class InstallConfig:
-    method: str  # "squashfs" | "rsync" | "tar"
-    source: Optional[str] = None
-    min_disk_size_bytes: int = 10 * 1024 * 1024 * 1024  # 10 GiB default
-    # Remaster storage policy (None: provider/firmware default)
-    partition_table: Optional[str] = None  # "gpt" | "dos"
-    root_label: Optional[str] = None       # filesystem label of the root filesystem
-    swap_size: Optional[str] = None        # e.g. "2g"; None = no swap partition
-    # Extra paths (relative to the copied tree, e.g. "./var/cache/pkg/*") not copied to the target
+    method: str                      # deployment provider family (squashfs, tree-copy, ...)
+    source: str                      # what the deployment copies (image file or tree)
+    min_disk_size_bytes: int
+    root_filesystem: str             # e.g. "ext4", "ufs"
+    root_mount_options: str          # fstab options of the root filesystem
+    esp_size: str                    # size of the EFI system partition, e.g. "512m"
+    esp_mountpoint: str              # where the ESP is mounted, e.g. "/boot" or "/boot/efi"
+    esp_mount_options: str
+    partition_table: Optional[str] = None  # "gpt" | "dos"; None: GPT on UEFI, DOS on BIOS
+    root_label: Optional[str] = None
+    esp_label: Optional[str] = None
+    swap_size: Optional[str] = None        # None: no swap partition
     exclude: List[str] = field(default_factory=list)
-    # Extra lines appended verbatim to the generated /etc/fstab
     fstab_extra: List[str] = field(default_factory=list)
 
 
 @dataclass
 class ProvidersConfig:
     platform: str
+    storage: str
+    filesystem: str
+    deployment: str
+    users: str
     services: str
-    users: str = "shadow"
-    administrator: str = "sudo"
-    initramfs: str = "none"
-    storage: Optional[str] = None
-    filesystem: Optional[str] = None
-    deployment: Optional[str] = None
+    initramfs: str  # "none" when the platform needs no initramfs step
 
 
 @dataclass
 class BootConfig:
     available: List[str]
     default: str
+    timeout: Optional[int] = None    # None: bootloader/remaster default
+    kernel_args: List[str] = field(default_factory=list)  # appended to the kernel command line
 
 
 @dataclass
@@ -78,8 +83,9 @@ class ServicesConfig:
 
 @dataclass
 class UsersConfig:
-    # Supplementary groups for the primary user, besides the administrator group
+    # Groups of the primary user (including the administrator group, e.g. "wheel")
     groups: List[str] = field(default_factory=list)
+    shell: Optional[str] = None  # None: the target's useradd/pw default
 
 
 @dataclass
@@ -104,7 +110,6 @@ class TargetFile:
     mode: int = 0o644
 
 
-# Paths too broad to remove or overwrite as a single live-only entry
 PROTECTED_PATHS = {
     "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64", "/mnt", "/opt",
     "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/usr/bin",
@@ -196,27 +201,72 @@ def _parse_target_files(entries: Any) -> List["TargetFile"]:
     return result
 
 
+class _Table:
+    """Typed, strict access to one manifest table."""
+
+    def __init__(self, data: Any, where: str, required: Dict[str, type], optional: Dict[str, type]) -> None:
+        if not isinstance(data, dict):
+            raise ManifestError(
+                message=f"{where} must be a table",
+                cause=f"Got {type(data).__name__}.",
+                failed_operation=f"Validate {where}",
+            )
+        _reject_unknown_keys(data, set(required) | set(optional), where)
+        missing = [k for k in required if k not in data]
+        if missing:
+            raise ManifestError(
+                message=f"Missing required keys in {where}: {missing}",
+                cause="The manifest states the remaster's policy; Mocinha does not invent it.",
+                failed_operation=f"Validate {where}",
+                current_state=f"keys={sorted(data)}",
+                possible_recovery=f"Add {missing} to {where}.",
+            )
+        for key, value in data.items():
+            want = {**required, **optional}[key]
+            ok = all(isinstance(v, str) for v in value) if want is list and isinstance(value, list) else (
+                isinstance(value, want) and not (want is int and isinstance(value, bool))
+            )
+            if not ok or (want is str and not value.strip()):
+                raise ManifestError(
+                    message=f"Invalid value for {where}.{key}: {value!r}",
+                    cause=f"Expected {'a list of strings' if want is list else 'a non-empty ' + want.__name__}.",
+                    failed_operation=f"Validate {where}.{key}",
+                )
+        self.data = data
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.data.get(key, default)
+
+
 def _validate_install(install: "InstallConfig") -> None:
     problems = []
     if install.partition_table not in (None, "gpt", "dos"):
         problems.append(f"partition_table must be 'gpt' or 'dos', not {install.partition_table!r}")
-    if install.root_label is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,16}", str(install.root_label)):
-        problems.append(f"root_label must be 1-16 letters, digits, '_' or '-', not {install.root_label!r}")
-    if install.swap_size is not None and not re.fullmatch(r"[1-9][0-9]*[mMgG]", str(install.swap_size)):
-        problems.append(f"swap_size must look like '512m' or '2g', not {install.swap_size!r}")
-    for key in ("exclude", "fstab_extra"):
+    for key in ("root_label", "esp_label"):
         value = getattr(install, key)
-        if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() and "\n" not in v for v in value):
-            problems.append(f"{key} must be a list of single-line strings")
-    if any(e.lstrip("./").split("/")[0] in ("", "*") for e in install.exclude if isinstance(e, str)):
+        if value is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,16}", value):
+            problems.append(f"{key} must be 1-16 letters, digits, '_' or '-', not {value!r}")
+    for key in ("swap_size", "esp_size"):
+        value = getattr(install, key)
+        if value is not None and not re.fullmatch(r"[1-9][0-9]*[mMgG]", value):
+            problems.append(f"{key} must look like '512m' or '2g', not {value!r}")
+    if not install.esp_mountpoint.startswith("/") or install.esp_mountpoint == "/":
+        problems.append(f"esp_mountpoint must be an absolute directory below /, not {install.esp_mountpoint!r}")
+    if install.min_disk_size_bytes <= 0:
+        problems.append("min_disk_size_bytes must be positive")
+    if any("\n" in v for v in install.exclude + install.fstab_extra):
+        problems.append("exclude and fstab_extra entries must be single lines")
+    if any(e.lstrip("./").split("/")[0] in ("", "*") for e in install.exclude):
         problems.append("exclude entries must name a path below the root, not the root itself")
     if problems:
         raise ManifestError(
             message="Invalid [install] section",
             cause="; ".join(problems),
             failed_operation="Validate [install]",
-            current_state=f"[install] = {install}",
         )
+
+
+SECTIONS = {"system", "install", "providers", "boot", "services", "users", "live_only", "target_files"}
 
 
 @dataclass
@@ -256,95 +306,80 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], raw_path: Optional[Path] = None) -> "Manifest":
-        for section in ["system", "install", "providers", "boot"]:
-            if section not in data:
-                raise ManifestError(
-                    message=f"Missing mandatory manifest section: [{section}]",
-                    cause=f"Required table [{section}] not present in manifest.",
-                    failed_operation="Validate manifest schema",
-                    current_state=f"Manifest has sections: {list(data.keys())}",
-                    possible_recovery=f"Add [{section}] definition to manifest.",
-                )
+        unknown = sorted(set(data) - SECTIONS)
+        missing = [s for s in ("system", "install", "providers", "boot") if s not in data]
+        if unknown or missing:
+            raise ManifestError(
+                message=f"Manifest sections: missing {missing}, unknown {unknown}",
+                cause="Required sections must be present; unknown sections are rejected, not ignored.",
+                failed_operation="Validate manifest schema",
+                current_state=f"Manifest has sections: {sorted(data)}",
+                possible_recovery="See docs/manifest-schema.md.",
+            )
 
-        sys_data = data["system"]
-        system = SystemConfig(
-            id=sys_data.get("id", "generic"),
-            name=sys_data.get("name", "Generic Live System"),
-            version=sys_data.get("version", "0.0.1"),
-            arch=sys_data.get("arch", "x86_64"),
-            platform=sys_data.get("platform", "linux"),
-        )
+        t = _Table(data["system"], "[system]", {"id": str, "name": str, "platform": str}, {"version": str, "arch": str})
+        system = SystemConfig(id=t.get("id"), name=t.get("name"), platform=t.get("platform"),
+                              version=t.get("version"), arch=t.get("arch"))
+        if system.platform not in ("linux", "freebsd"):
+            raise ManifestError(
+                message=f"Unsupported platform {system.platform!r}",
+                cause="Known platforms: linux, freebsd.",
+                failed_operation="Validate [system].platform",
+            )
 
-        inst_data = data["install"]
-        install = InstallConfig(
-            method=inst_data.get("method", "squashfs"),
-            source=inst_data.get("source"),
-            min_disk_size_bytes=inst_data.get("min_disk_size_bytes", 10 * 1024 * 1024 * 1024),
-            partition_table=inst_data.get("partition_table"),
-            root_label=inst_data.get("root_label"),
-            swap_size=inst_data.get("swap_size"),
-            exclude=inst_data.get("exclude", []),
-            fstab_extra=inst_data.get("fstab_extra", []),
+        t = _Table(
+            data["install"], "[install]",
+            {"method": str, "source": str, "min_disk_size_bytes": int, "root_filesystem": str,
+             "root_mount_options": str, "esp_size": str, "esp_mountpoint": str, "esp_mount_options": str},
+            {"partition_table": str, "root_label": str, "esp_label": str, "swap_size": str,
+             "exclude": list, "fstab_extra": list},
         )
+        install = InstallConfig(**{k: t.get(k) for k in (
+            "method", "source", "min_disk_size_bytes", "root_filesystem", "root_mount_options",
+            "esp_size", "esp_mountpoint", "esp_mount_options", "partition_table", "root_label",
+            "esp_label", "swap_size")}, exclude=t.get("exclude", []), fstab_extra=t.get("fstab_extra", []))
+        install.esp_mountpoint = install.esp_mountpoint.rstrip("/") or "/"
         _validate_install(install)
 
-        prov_data = data["providers"]
-        providers = ProvidersConfig(
-            platform=prov_data.get("platform", system.platform),
-            services=prov_data.get("services", "systemd"),
-            users=prov_data.get("users", "shadow"),
-            administrator=prov_data.get("administrator", "sudo"),
-            initramfs=prov_data.get("initramfs", "none"),
-            storage=prov_data.get("storage"),
-            filesystem=prov_data.get("filesystem"),
-            deployment=prov_data.get("deployment"),
-        )
+        t = _Table(data["providers"], "[providers]",
+                   {k: str for k in ("platform", "storage", "filesystem", "deployment", "users", "services", "initramfs")}, {})
+        providers = ProvidersConfig(**t.data)
 
-        boot_data = data["boot"]
-        boot = BootConfig(
-            available=boot_data.get("available", []),
-            default=boot_data.get("default", ""),
-        )
-
-        srv_data = data.get("services", {})
-        metadata_map: Dict[str, ServiceMetadata] = {}
-        for srv_name, meta_dict in srv_data.get("metadata", {}).items():
-            metadata_map[srv_name] = ServiceMetadata(
-                requires=meta_dict.get("requires", []),
-                wants=meta_dict.get("wants", []),
-                conflicts=meta_dict.get("conflicts", []),
-                before=meta_dict.get("before", []),
-                after=meta_dict.get("after", []),
-            )
-
-        services = ServicesConfig(
-            required=srv_data.get("required", []),
-            default_enabled=srv_data.get("default_enabled", []),
-            optional=srv_data.get("optional", []),
-            live_only=srv_data.get("live_only", []),
-            metadata=metadata_map,
-            default_target=srv_data.get("default_target"),
-        )
-        if services.default_target is not None and (
-            not isinstance(services.default_target, str) or not services.default_target.strip()
-        ):
+        t = _Table(data["boot"], "[boot]", {"available": list, "default": str}, {"timeout": int, "kernel_args": list})
+        boot = BootConfig(available=t.get("available"), default=t.get("default"),
+                          timeout=t.get("timeout"), kernel_args=t.get("kernel_args", []))
+        if not boot.available or boot.default not in boot.available or (boot.timeout is not None and boot.timeout < 0):
             raise ManifestError(
-                message="Invalid [services].default_target",
-                cause="default_target must be a non-empty string.",
-                failed_operation="Validate [services].default_target",
-                current_state=f"default_target={services.default_target!r}",
+                message="Invalid [boot] section",
+                cause="available must be non-empty, default must be one of them, timeout must be >= 0.",
+                failed_operation="Validate [boot]",
+                current_state=f"available={boot.available}, default={boot.default!r}, timeout={boot.timeout!r}",
             )
 
-        users_data = data.get("users", {})
-        _reject_unknown_keys(users_data, {"groups"}, "[users]")
-        groups = users_data.get("groups", [])
-        if not isinstance(groups, list) or not all(isinstance(g, str) and re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups):
+        t = _Table(data.get("services", {}), "[services]", {},
+                   {"required": list, "default_enabled": list, "optional": list, "live_only": list,
+                    "metadata": dict, "default_target": str})
+        metadata_map: Dict[str, ServiceMetadata] = {}
+        for srv_name, meta in t.get("metadata", {}).items():
+            m = _Table(meta, f"[services.metadata.{srv_name}]", {},
+                       {k: list for k in ("requires", "wants", "conflicts", "before", "after")})
+            metadata_map[srv_name] = ServiceMetadata(**{k: m.get(k, []) for k in ("requires", "wants", "conflicts", "before", "after")})
+        services = ServicesConfig(
+            required=t.get("required", []), default_enabled=t.get("default_enabled", []),
+            optional=t.get("optional", []), live_only=t.get("live_only", []),
+            metadata=metadata_map, default_target=t.get("default_target"),
+        )
+
+        t = _Table(data.get("users", {}), "[users]", {}, {"groups": list, "shell": str})
+        groups = t.get("groups", [])
+        if not all(re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups):
             raise ManifestError(
                 message="Invalid [users].groups",
                 cause="groups must be a list of valid group names.",
                 failed_operation="Validate [users].groups",
                 current_state=f"groups={groups!r}",
             )
+        users = UsersConfig(groups=groups, shell=t.get("shell"))
 
         return cls(
             system=system,
@@ -352,7 +387,7 @@ class Manifest:
             providers=providers,
             boot=boot,
             services=services,
-            users=UsersConfig(groups=groups),
+            users=users,
             live_only=_parse_live_only(data.get("live_only", {})),
             target_files=_parse_target_files(data.get("target_files", [])),
             raw_path=raw_path,

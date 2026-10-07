@@ -36,6 +36,13 @@ class ShadowUsersProvider(ProviderContract):
                     failed_operation=f"Validate {tool} binary",
                     possible_recovery="Install shadow package.",
                 )
+        if not context.metadata.get("password"):
+            raise ExecutionError(
+                message=f"No password given for '{context.metadata.get('username')}'.",
+                cause="An installed system must not have a passwordless administrator account.",
+                failed_operation="Validate primary user password",
+                possible_recovery="Provide a password for the primary user.",
+            )
         if context.metadata.get("username") in context.metadata.get("live_only_users", []):
             raise ExecutionError(
                 message=f"Primary user '{context.metadata['username']}' is declared live-only in the manifest.",
@@ -69,75 +76,60 @@ class ShadowUsersProvider(ProviderContract):
 
     def apply(self, context: ExecutionContext) -> None:
         target_root = context.target_mount
-        username = context.metadata.get("username", "user")
-        password = context.metadata.get("password", "")
+        username = context.metadata["username"]
+        password = context.metadata["password"]
 
         # 0. Live-only accounts go first, so the primary user gets the first free UID
         self._remove_live_only_users(target_root, context.metadata.get("live_only_users", []))
 
         self.events.action(EventPhase.CONFIGURE, f"Creating persistent user '{username}' on target")
 
-        # 1. Create user with wheel group for sudo (check if already present)
-        passwd_path = Path(target_root) / "etc" / "passwd"
-        user_exists = False
-        if passwd_path.exists():
-            try:
-                for line in passwd_path.read_text().splitlines():
-                    if line.startswith(f"{username}:"):
-                        user_exists = True
-                        break
-            except Exception:
-                pass
-
-        groups = ["wheel"] + [g for g in context.metadata.get("extra_groups", []) if g != "wheel"]
-        missing_groups = [g for g in groups if g not in _db_entries(Path(target_root) / "etc" / "group")]
+        # 1. Primary user with the manifest's groups and shell (target defaults otherwise)
+        etc = Path(target_root) / "etc"
+        if username in _db_entries(etc / "passwd"):
+            raise ExecutionError(
+                message=f"User '{username}' already exists on the target.",
+                cause="The deployed live system already has an account with this name.",
+                failed_operation=f"Create user '{username}'",
+                possible_recovery="Choose another name or declare the live account in [live_only].users.",
+            )
+        groups = list(context.metadata.get("user_groups", []))
+        missing_groups = [g for g in groups if g not in _db_entries(etc / "group")]
         if missing_groups:
             raise ExecutionError(
                 message=f"Groups {missing_groups} do not exist on the target.",
-                cause="The manifest asks for supplementary groups that the deployed system does not define.",
+                cause="The manifest asks for groups that the deployed system does not define.",
                 failed_operation=f"Create user '{username}'",
                 current_state=f"Missing groups: {missing_groups}",
                 possible_recovery="Fix [users].groups in the manifest or the live image's /etc/group.",
             )
-
-        if not user_exists:
-            self.runner.run(
-                ["useradd", "-R", target_root, "-m", "-s", "/bin/bash", "-G", ",".join(groups), username],
-                phase=EventPhase.CONFIGURE,
-                check=True,
-            )
-        else:
-            self.events.info(EventPhase.CONFIGURE, f"User '{username}' already exists on target; ensuring groups {groups}")
-            self.runner.run(
-                ["usermod", "-R", target_root, "-aG", ",".join(groups), username],
-                phase=EventPhase.CONFIGURE,
-                check=True,
-            )
+        shell = context.metadata.get("user_shell")
+        self.runner.run(
+            ["useradd", "-R", target_root, "-m"]
+            + (["-s", shell] if shell else [])
+            + (["-G", ",".join(groups)] if groups else [])
+            + [username],
+            phase=EventPhase.CONFIGURE,
+            check=True,
+        )
 
         # 2. Set user password
-        if password:
-            self.events.action(EventPhase.CONFIGURE, f"Setting password for '{username}'")
-            self.runner.run(
-                ["chpasswd", "-R", target_root],
-                phase=EventPhase.CONFIGURE,
-                check=True,
-                input_text=f"{username}:{password}\n",
-            )
+        self.events.action(EventPhase.CONFIGURE, f"Setting password for '{username}'")
+        self.runner.run(
+            ["chpasswd", "-R", target_root],
+            phase=EventPhase.CONFIGURE,
+            check=True,
+            input_text=f"{username}:{password}\n",
+        )
 
         # 3. Root account: explicit password or locked
         self._configure_root(target_root, context)
 
-        # 4. Grant sudo admin privileges to wheel group
-        sudoers_d = Path(target_root) / "etc" / "sudoers.d"
-        sudoers_d.mkdir(parents=True, exist_ok=True)
-        wheel_file = sudoers_d / "10-wheel"
-        wheel_file.write_text("%wheel ALL=(ALL:ALL) ALL\n")
-        wheel_file.chmod(0o440)
-        self.events.info(EventPhase.CONFIGURE, "Configured %wheel in /etc/sudoers.d/10-wheel")
+        # Administrator rules (sudoers/doas) are remaster policy: [[target_files]]
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
-        username = context.metadata.get("username", "user")
+        username = context.metadata["username"]
 
         passwd_file = target_root / "etc" / "passwd"
         if not passwd_file.is_file():
@@ -170,14 +162,14 @@ class ShadowUsersProvider(ProviderContract):
                 problems.append(f"/home/{u} still exists")
 
         group = _db_entries(etc / "group")
-        for g in ["wheel"] + context.metadata.get("extra_groups", []):
+        for g in context.metadata.get("user_groups", []):
             if g not in group or username not in group[g][-1].split(","):
                 problems.append(f"'{username}' is not a member of group {g}")
 
         root_hash = _db_entries(etc / "shadow").get("root", ["root", ""])[1]
         if root_hash == "":
             problems.append("root has an empty password on target")
-        elif context.metadata.get("lock_root", True) and not root_hash.startswith(("!", "*")):
+        elif context.metadata["lock_root"] and not root_hash.startswith(("!", "*")):
             problems.append("root account is not locked although no root password was chosen")
 
         if problems:
@@ -188,4 +180,4 @@ class ShadowUsersProvider(ProviderContract):
                 current_state=f"{len(problems)} problem(s)",
                 possible_recovery="Inspect userdel/usermod output in the event log.",
             )
-        self.events.info(EventPhase.VERIFY, f"User '{username}' verified on target; live-only users removed; root {'locked' if context.metadata.get('lock_root', True) else 'password set'}.")
+        self.events.info(EventPhase.VERIFY, f"User '{username}' verified on target; live-only users removed; root {'locked' if context.metadata['lock_root'] else 'password set'}.")

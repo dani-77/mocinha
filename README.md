@@ -1,14 +1,24 @@
-# Mocinha Installer --- kickoff pack
+# Mocinha Installer
 
-Conteúdo:
+A small, modular, platform-aware installer for live systems: it installs
+the booted live system to disk, offline, after showing a complete plan.
 
--   `plano.md` --- plano arquitetónico consolidado;
--   `AGENTS.md` --- regras persistentes para Gemini/coding agents;
--   `mocinha-logo-mascot.png` --- logo/mascote;
--   `mocinha-logo-sticker.png` --- variante gráfica;
--   `mocinha-logo-desktop-round-grey.png` --- variante circular/greyish
-    para `.desktop`.
+*Knowledgeable, not opinionated.*
 
-Data de arranque: 2026-10-07.
+Contents:
+
+-   `plano.md` --- consolidated architectural plan;
+-   `AGENTS.md` --- persistent rules for coding agents;
+-   `STATUS.md` --- current state, VM validation results and open issues;
+-   `docs/` --- variability map, language spike, manifest specification;
+-   `examples/manifests/` --- manifests of the reference remasters;
+-   `tools/qemu/` --- automated QEMU install/boot tests against the real
+    remaster images;
+-   `mocinha-logo-mascot.png` --- logo/mascot;
+-   `mocinha-logo-sticker.png` --- graphic variant;
+-   `mocinha-logo-desktop-round-grey.png` --- round/greyish variant for
+    `.desktop`.
+
+Started: 2026-10-07.
 
 **Small. Simple. Stubbornly robust.**

@@ -25,9 +25,11 @@ class UserChoices:
     bootloader: str
     username: str
     password: str
-    hostname: str = "mocinha"
+    hostname: Optional[str] = None  # required; no invented default
     # None: lock the root account on the target (administration through the primary user)
     root_password: Optional[str] = None
+    # Extra kernel command-line arguments chosen by the user (e.g. a serial console)
+    kernel_args: List[str] = field(default_factory=list)
     # None: keep the live system's setting
     locale: Optional[str] = None
     keymap: Optional[str] = None
@@ -81,12 +83,12 @@ class InstallationResolver:
                 possible_recovery="Select a valid existing disk.",
             )
 
-        if disk.is_live_medium:
+        if disk.is_live_medium or disk.path in self._live_disks():
             raise ResolutionError(
                 message=f"Target disk '{choices.target_disk}' is the active booted live media.",
                 cause="The running live environment is booted from this physical storage device.",
                 failed_operation=f"Validate safety of target disk {choices.target_disk}",
-                current_state=f"Disk {disk.path} has is_live_medium=True",
+                current_state=f"Disk {disk.path} holds the running root or the install source {self.manifest.install.source}",
                 possible_recovery="Select a different destination disk to install to.",
             )
 
@@ -273,9 +275,8 @@ class InstallationResolver:
                 step_id="configure_user",
                 title=f"Create primary user '{choices.username}' and grant admin capability",
                 description=(
-                    f"Remove live-only users {live_only.users}; create user account (extra groups: "
-                    f"{self.manifest.users.groups}), assign admin privilege via "
-                    f"{self.manifest.providers.administrator}; root account: {root_account}"
+                    f"Remove live-only users {live_only.users}; create user account in groups "
+                    f"{self.manifest.users.groups}; root account: {root_account}"
                 ),
                 is_destructive=False,
                 provider_name=self.manifest.providers.users,
@@ -334,7 +335,7 @@ class InstallationResolver:
             disk=choices.target_disk,
             firmware=self.facts.firmware.value,
             partition_table=partition_table.upper(),
-            filesystem="ext4" if self.manifest.system.platform == "linux" else "ufs",
+            filesystem=self.manifest.install.root_filesystem,
             bootloader=choices.bootloader,
             init=self.manifest.providers.services,
             services=service_res.enabled_services,
@@ -366,7 +367,16 @@ class InstallationResolver:
             "locale": choices.locale,
             "keymap": choices.keymap,
             "timezone": choices.timezone,
-            "extra_groups": list(self.manifest.users.groups),
+            "user_groups": list(self.manifest.users.groups),
+            "user_shell": self.manifest.users.shell,
+            "root_filesystem": self.manifest.install.root_filesystem,
+            "root_mount_options": self.manifest.install.root_mount_options,
+            "esp_size": self.manifest.install.esp_size,
+            "esp_label": self.manifest.install.esp_label,
+            "esp_mountpoint": self.manifest.install.esp_mountpoint,
+            "esp_mount_options": self.manifest.install.esp_mount_options,
+            "boot_timeout": self.manifest.boot.timeout,
+            "kernel_args": list(self.manifest.boot.kernel_args) + list(choices.kernel_args),
             "default_target": self.manifest.services.default_target,
             "partition_table": partition_table,
             "root_label": self.manifest.install.root_label,
@@ -378,6 +388,32 @@ class InstallationResolver:
         plan = InstallationPlan(summary=summary, steps=steps, metadata=metadata)
         self.events.info(EventPhase.RESOLVE, "Installation plan resolved successfully.")
         return plan
+
+    def _live_disks(self) -> Set[str]:
+        """Disks holding the running root filesystem or the deployment source.
+
+        Derived from observed mounts, not from distribution-specific mount
+        point names: the source (e.g. a squashfs image) lives on the boot
+        medium, so the disk mounted at the longest prefix of the source path
+        is the live medium.
+        """
+        live: Set[str] = set()
+        source = self.manifest.install.source
+        best_len = -1
+        best: Optional[str] = None
+        for d in self.facts.disks:
+            for p in d.partitions:
+                mp = p.mountpoint
+                if not mp:
+                    continue
+                if mp == "/":
+                    live.add(d.path)
+                prefix = mp.rstrip("/") + "/"
+                if mp != "/" and (source == mp or source.startswith(prefix)) and len(mp) > best_len:
+                    best, best_len = d.path, len(mp)
+        if best:
+            live.add(best)
+        return live
 
     def _build_service_graph(self) -> ServiceGraph:
         graph = ServiceGraph()

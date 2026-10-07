@@ -587,8 +587,19 @@ class MocinhaGTKApp(Gtk.Window):
         dialog.destroy()
 
 
+# Where a live system ships its manifest (docs/manifest-schema.md)
+MANIFEST_LOCATIONS = (Path("/etc/mocinha.toml"), Path("/usr/share/mocinha/mocinha.toml"))
+
+
 def run_gtk_app(manifest_path: Optional[str] = None) -> int:
-    path = Path(manifest_path) if manifest_path else Path(__file__).parent.parent.parent.parent / "examples" / "manifests" / "btw-d77.toml"
+    path = Path(manifest_path) if manifest_path else next((p for p in MANIFEST_LOCATIONS if p.is_file()), None)
+    if path is None:
+        print(
+            "No manifest given and none found in the live system "
+            f"({', '.join(str(p) for p in MANIFEST_LOCATIONS)}). Pass the remaster manifest path.",
+            file=sys.stderr,
+        )
+        return 1
     try:
         manifest = Manifest.load_from_file(path)
     except Exception as e:

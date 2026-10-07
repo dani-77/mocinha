@@ -1,73 +1,75 @@
-# Mocinha --- Avaliação de Linguagem para o Motor (Spike Técnico)
+# Mocinha --- Engine language evaluation (technical spike)
 
-> **Critério de Decisão (de acordo com `plano.md` §19 e `AGENTS.md`):**
-> 1. Manipulação segura de processos e captura de logs (stdout/stderr/status).
-> 2. Operações de filesystem/mounts e limpeza previsível.
-> 3. Modelação expressiva de erros diagnósticos.
-> 4. Suporte a providers/plugins limpos.
-> 5. Bindings para GTK3 no frontend (sem vazamento para o core).
-> 6. Portabilidade estrita aos 3 alvos: btw-d77 (Arch), au-d77 (FreeBSD), sysvd77 (CRUX).
-> 7. Superfície de dependências mínima e auditável.
-
----
-
-## 1. Avaliação dos Candidatos
-
-### Candidato A: Python 3 (com biblioteca padrão)
-
-- **Disponibilidade nos Alvos:**
-  - **Arch (btw-d77):** Presente por omissão em qualquer desktop live ISO.
-  - **FreeBSD (au-d77):** Pacote nativo em ports/packages (`pkg install python3`), amplamente testado.
-  - **CRUX (sysvd77):** Disponível na coleção oficial de ports (`opt/python3`); fácil de incluir no ISO da live.
-- **Vantagens Técnicas:**
-  - **Zero dependências externas no core:** Python 3.11+ inclui `tomllib` nativo (leitura do `mocinha.toml`), `dataclasses`, `typing`, `enum`, `logging`, `pathlib`, `subprocess`.
-  - **Frontend GTK3:** `PyGObject` (`gi.repository.Gtk`) é a integração padrão e mais estável para GTK3 em Linux e BSD.
-  - **Isolamento de frontend:** O core pode ser 100% puro (sem `import gi`), executável via CLI ou importável por qualquer frontend.
-  - **Expressividade de erros:** Facilidade em modelar exceções ricas e detalhadas com contexto diagnóstico completo.
-  - **Iteração e testes rápidos:** Testes unitários nativos com `unittest` executam instantaneamente em qualquer máquina sem compilação.
-- **Desafios / Mitigações:**
-  - Requer o interpretador Python na live ISO (~30MB). *Mitigação:* Como Mocinha tem GUI GTK3 no plano inicial, o runtime Python e PyGObject já são necessários para a UI e comuns em lives desktop.
+> **Decision criteria (per `plano.md` §19 and `AGENTS.md`):**
+> 1. Safe process handling and log capture (stdout/stderr/status).
+> 2. Filesystem/mount operations and predictable cleanup.
+> 3. Expressive modelling of diagnostic errors.
+> 4. Support for clean providers/plugins.
+> 5. GTK3 bindings for the frontend (without leaking into the core).
+> 6. Strict portability to the 3 targets: btw-d77 (Arch), au-d77 (FreeBSD), sysvd77 (CRUX).
+> 7. Minimal, auditable dependency surface.
 
 ---
 
-### Candidato B: Rust
+## 1. Candidates
 
-- **Disponibilidade nos Alvos:**
-  - Gera binário estático ou dinâmico sem runtime.
-  - No entanto, a compilação cruzada ou nativa no FreeBSD e CRUX exige o compilador Rust completo (`rustc` + LLVM), o que adiciona atrito sério à manutenção de remasters mínimos como sysvd77.
-- **Vantagens Técnicas:**
-  - Tipagem forte, sem garbage collector, tratamento de erros via `Result<T, E>`.
-- **Desafios / Mitigações:**
-  - Tempos de compilação elevados.
-  - Bindings GTK3 (`gtk-rs`) exigem compilação com dependências de desenvolvimento do sistema C.
-  - Complexidade acrescida para plugins dinâmicos em tempo de execução sem recompilar o binário.
+### Candidate A: Python 3 (standard library)
 
----
-
-### Candidato C: C (C99 / C11)
-
-- **Disponibilidade nos Alvos:**
-  - Compilador C (`gcc` ou `clang`) existe universalmente em todos os três sistemas.
-- **Vantagens Técnicas:**
-  - Sem overhead de runtime.
-- **Desafios / Mitigações:**
-  - Gestão manual de memória com risco acrescido de corrupção ou vazamentos durante manipulação de discos e strings.
-  - Falta de biblioteca padrão para TOML/JSON (obrigaria a embutir ou ligar a `libtoml`, `cJSON`, etc.).
-  - Grande verbosidade para implementar estruturas de dados, grafos de dependências de serviços e pipelines assíncronos.
+- **Availability on the targets:**
+  - **Arch (btw-d77):** present by default on any desktop live ISO.
+  - **FreeBSD (au-d77):** native package (`pkg install python3`), widely tested.
+    Note: FreeBSD installs versioned interpreters (e.g. `python3.12`); a plain
+    `python3` command needs the `python3` meta package.
+  - **CRUX (sysvd77):** available in the official ports collection (`opt/python3`); easy to include in the live ISO.
+- **Technical advantages:**
+  - **No external dependencies in the core:** Python 3.11+ ships `tomllib` (reading `mocinha.toml`), `dataclasses`, `typing`, `enum`, `logging`, `pathlib`, `subprocess`.
+  - **GTK3 frontend:** `PyGObject` (`gi.repository.Gtk`) is the standard and most stable GTK3 integration on Linux and BSD.
+  - **Frontend isolation:** the core can be 100% pure (no `import gi`), runnable from the CLI or importable by any frontend.
+  - **Expressive errors:** easy to model rich exceptions with full diagnostic context.
+  - **Fast iteration and tests:** `unittest` runs instantly on any machine without compilation.
+- **Challenges / mitigations:**
+  - Requires the Python interpreter in the live ISO (~30 MB). *Mitigation:* since Mocinha's initial plan has a GTK3 GUI, Python and PyGObject are needed for the UI anyway and are common on desktop lives.
 
 ---
 
-## 2. Decisão e Recomendação de Arquitetura
+### Candidate B: Rust
 
-**Adotar Python 3 (>= 3.11) para o Core e Frontend GTK3 inicial:**
+- **Availability on the targets:**
+  - Produces static or dynamic binaries without a runtime.
+  - However, cross or native compilation on FreeBSD and CRUX requires the full Rust toolchain (`rustc` + LLVM), which adds serious friction to maintaining minimal remasters such as sysvd77.
+- **Technical advantages:**
+  - Strong typing, no garbage collector, error handling via `Result<T, E>`.
+- **Challenges / mitigations:**
+  - Long compile times.
+  - GTK3 bindings (`gtk-rs`) require building against the system's C development dependencies.
+  - Extra complexity for runtime-loaded plugins without recompiling the binary.
 
-1. **Core em Python puro (`mocinha/core` e `mocinha/providers`):**
-   - **Zero bibliotecas de terceiros** no core (`pip` desnecessário). Utilização exclusiva da biblioteca padrão (`tomllib`, `subprocess`, `dataclasses`, `pathlib`, `enum`, `logging`).
-   - Não importa nem toca em bibliotecas gráficas.
-2. **Frontend GTK3 em módulo separado (`mocinha/frontends/gtk3`):**
-   - Utiliza `PyGObject` (`gi.repository.Gtk`).
-   - Consome o motor estritamente através da API pública do engine.
-3. **Frontend CLI/Fallback (`mocinha/frontends/cli`):**
-   - Permite executar e validar a instalação mesmo sem servidor gráfico X11/Wayland ou GTK.
-4. **Verificação de Portabilidade:**
-   - Garante que qualquer remaster com Python 3.11+ e utilitários nativos da plataforma consegue executar o Mocinha.
+---
+
+### Candidate C: C (C99 / C11)
+
+- **Availability on the targets:**
+  - A C compiler (`gcc` or `clang`) exists on all three systems.
+- **Technical advantages:**
+  - No runtime overhead.
+- **Challenges / mitigations:**
+  - Manual memory management, with a higher risk of corruption or leaks while handling disks and strings.
+  - No standard library for TOML/JSON (would require embedding or linking `libtoml`, `cJSON`, etc.).
+  - Very verbose for data structures, service dependency graphs and asynchronous pipelines.
+
+---
+
+## 2. Decision and architectural recommendation
+
+**Adopt Python 3 (>= 3.11) for the core and the initial GTK3 frontend:**
+
+1. **Pure Python core (`mocinha/core` and `mocinha/providers`):**
+   - **No third-party libraries** in the core (no `pip`). Standard library only (`tomllib`, `subprocess`, `dataclasses`, `pathlib`, `enum`, `logging`).
+   - Does not import or touch graphical libraries.
+2. **GTK3 frontend in a separate module (`mocinha/frontends/gtk3`):**
+   - Uses `PyGObject` (`gi.repository.Gtk`).
+   - Consumes the engine strictly through its public API.
+3. **CLI/fallback frontend (`mocinha/frontends/cli`):**
+   - Runs and validates the installation without an X11/Wayland server or GTK.
+4. **Portability check:**
+   - Any remaster with Python 3.11+ and the platform's native utilities can run Mocinha.

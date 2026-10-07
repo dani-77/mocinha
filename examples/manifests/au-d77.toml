@@ -19,7 +19,12 @@ source = "/"
 min_disk_size_bytes = 10737418240
 # au-d77-install: GPT (BIOS bootcode + ESP) for both firmwares, UFS2 SU+J root
 partition_table = "gpt"
+root_filesystem = "ufs"
 root_label = "AU_D77_ROOT"
+root_mount_options = "rw,noatime"
+esp_size = "200m"
+esp_mountpoint = "/boot/efi"
+esp_mount_options = "rw"
 # au-d77-install scales swap with disk size (1g <16 GB, 2g <35 GB, else 4g)
 swap_size = "2g"
 exclude = ["./var/cache/pkg/*"]
@@ -34,7 +39,6 @@ storage = "freebsd-gpart"
 filesystem = "freebsd-newfs"
 deployment = "tree-copy"
 users = "pw"
-administrator = "sudo"
 initramfs = "none"
 services = "freebsd-rc"
 
@@ -47,8 +51,9 @@ default = "freebsd-loader"
 required = ['devd', 'devmatch', 'powerd', 'seatd', 'dbus', 'wpa_supplicant', 'clear_tmp', 'ntpd']
 
 [users]
-# au-d77-install: pw useradd -G wheel,operator,video
-groups = ["operator", "video"]
+# au-d77-install: pw useradd -s /bin/sh -G wheel,operator,video
+groups = ["wheel", "operator", "video"]
+shell = "/bin/sh"
 
 [live_only]
 # Live session account (autologin on ttyv0 into Wasp)

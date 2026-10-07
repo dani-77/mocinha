@@ -170,7 +170,7 @@ class SystemProbe:
                             dev_node, mnt_point = parts[0], parts[1]
                             if dev_node.startswith("/dev/"):
                                 mount_map.setdefault(dev_node, []).append(mnt_point)
-                                if mnt_point in ("/run/archiso/bootmnt", "/run/live", "/live/boot", "/cdrom") or "/archiso" in mnt_point:
+                                if mnt_point == "/":
                                     live_nodes.add(dev_node)
                 except Exception:
                     pass

@@ -90,7 +90,7 @@ class FreeBSDStorageProvider(ProviderContract):
         # Labels are prefixed with the system id: generic names such as "efiboot"
         # may already exist on the live medium, and duplicate GPT labels make
         # /dev/gpt/<label> ambiguous while both disks are attached.
-        prefix = context.metadata.get("system_id") or "mocinha"
+        prefix = context.metadata["system_id"]
         labels = {role: f"{prefix}-{role}" for role in ("boot", "efi", "swap", "root")}
         context.metadata["partition_labels"] = {role: f"gpt/{label}" for role, label in labels.items()}
 
@@ -100,7 +100,7 @@ class FreeBSDStorageProvider(ProviderContract):
             phase=EventPhase.PREPARE,
             check=True,
         )
-        add("-t", "efi", "-s", "200m", "-l", labels["efi"])
+        add("-t", "efi", "-s", context.metadata["esp_size"], "-l", labels["efi"])
         index = 3
         partitions: Dict[str, str] = {"esp": f"/dev/{disk_name}p2"}
         if swap_size:

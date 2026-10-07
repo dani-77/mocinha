@@ -18,7 +18,7 @@ def resolve(manifest_name: str, bootloader: str, firmware: FirmwareType, platfor
     facts = SystemFacts(platform, "x86_64", firmware, [DiskDevice("/dev/vda", 20 * 1024**3)], [])
     registry = create_default_registry()
     plan = InstallationResolver(facts, manifest, registry).resolve(
-        UserChoices(target_disk="/dev/vda", bootloader=bootloader, username="dani", password="x")
+        UserChoices(hostname="test-host", target_disk="/dev/vda", bootloader=bootloader, username="dani", password="x")
     )
     return plan, registry, manifest
 

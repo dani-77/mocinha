@@ -1,74 +1,74 @@
-# Mocinha --- plano inicial
+# Mocinha --- initial plan
 
-> **Uma instaladora modular para sistemas live que instala o que já está
-> ali.**
+> **A modular installer for live systems that installs what is already
+> there.**
 >
 > *Knowledgeable, not opinionated.*
 
-## 1. Ideia
+## 1. Idea
 
-Mocinha é uma instaladora gráfica, simples e modular, pensada sobretudo
-para distribuições, remasters e sistemas live.
+Mocinha is a simple, modular graphical installer, designed primarily for
+distributions, remasters and live systems.
 
-O objetivo **não** é reconstruir o sistema instalado a partir da
-Internet, nem fazer `debootstrap`, `pacstrap`, `xbps-install` ou
-equivalentes para obter uma instalação nova.
+The goal is **not** to rebuild the installed system from the Internet,
+nor to run `debootstrap`, `pacstrap`, `xbps-install` or equivalents to
+obtain a fresh installation.
 
-O princípio base é:
+The base principle is:
 
-**LIVE BOOTADA → SISTEMA DA LIVE → DISCO**
+**BOOTED LIVE → THE LIVE'S SYSTEM → DISK**
 
-A instalação normal deve funcionar completamente offline. O sistema
-instalado deve corresponder ao sistema fornecido pela live, com apenas
-as alterações necessárias para o transformar numa instalação persistente
-e adequada à máquina de destino.
+A normal installation must work completely offline. The installed system
+must correspond to the system provided by the live, with only the changes
+needed to turn it into a persistent installation suited to the target
+machine.
 
-A inspiração funcional vem de Calamares, Anaconda, YaST e Debian
-Installer, mas Mocinha pretende uma interface e base de código menores,
-com forte separação entre frontend, motor, módulos e providers.
+The functional inspiration comes from Calamares, Anaconda, YaST and the
+Debian Installer, but Mocinha aims for a smaller interface and code base,
+with a strong separation between frontend, engine, modules and providers.
 
-## 2. Princípios fundamentais
+## 2. Fundamental principles
 
-### Instalar a live, não reconstruí-la
+### Install the live, do not rebuild it
 
-Se a live contém determinado desktop, aplicações, configurações,
-artwork, serviços e alterações do remaster, é esse sistema que deve
-chegar ao disco.
+If the live contains a given desktop, applications, settings, artwork,
+services and remaster changes, that is the system that must reach the
+disk.
 
 > **Network access MUST NOT be required for a normal installation.**
 
 ### Knowledgeable, not opinionated
 
-Mocinha deve conhecer possibilidades e limitações, mas não escolher
-arbitrariamente políticas pelo utilizador.
+Mocinha must know possibilities and limitations, but not arbitrarily
+choose policies on the user's behalf.
 
--   Detetar UEFI não significa escolher GRUB.
--   Detetar runit não significa saber como aquela distribuição ativa
-    serviços.
--   Encontrar `sudo` não significa assumir que existe `wheel`.
--   Detetar uma opção comum não lhe dá o direito de substituir
-    silenciosamente a opção pedida.
+-   Detecting UEFI does not mean choosing GRUB.
+-   Detecting runit does not mean knowing how that distribution enables
+    services.
+-   Finding `sudo` does not mean assuming `wheel` exists.
+-   Detecting a common option does not give it the right to silently
+    replace the requested option.
 
-O motor deve detetar factos, carregar providers, validar combinações,
-apresentar escolhas válidas e respeitar a decisão do utilizador.
+The engine must detect facts, load providers, validate combinations,
+present valid choices and respect the user's decision.
 
-### Nada escondido
+### Nothing hidden
 
-A GUI pode mostrar simplesmente progresso, mas uma vista **Details**
-deve mostrar as operações reais e respetivos resultados.
+The GUI may simply show progress, but a **Details** view must show the
+real operations and their results.
 
     [21:47:02] Mounting /dev/nvme0n1p2 -> /mnt
     $ mount /dev/nvme0n1p2 /mnt
     ✓ exit 0
 
-Tudo deve ficar registado em log.
+Everything must be logged.
 
-### Plano antes de execução
+### Plan before execution
 
-Percorrer os ecrãs nunca deve alterar o disco. As escolhas constroem
-estado; o estado é validado; só então nasce um plano executável.
+Going through the screens must never change the disk. Choices build
+state; the state is validated; only then is an executable plan born.
 
-Exemplo:
+Example:
 
     Disk:        /dev/nvme0n1
     Firmware:    UEFI
@@ -96,11 +96,11 @@ Exemplo:
 
     Nothing has been changed yet.
 
-Só após confirmação explícita começa a fase destrutiva.
+The destructive phase only starts after explicit confirmation.
 
-## 3. Arquitetura
+## 3. Architecture
 
-Separar pelo menos estes conceitos:
+Separate at least these concepts:
 
     +-------------------------------+
     |           FRONTEND            |
@@ -125,19 +125,18 @@ Separar pelo menos estes conceitos:
     | grub / limine / lilo ...      |
     +-------------------------------+
 
-O frontend inicial será **GTK3**. GTK4 ou outros frontends poderão ser
-adicionados no futuro sem alterar o engine. Nenhum módulo do instalador
-deve depender de GTK; tipos e objetos GTK não atravessam a fronteira do
-frontend.
+The initial frontend will be **GTK3**. GTK4 or other frontends may be
+added in the future without changing the engine. No installer module may
+depend on GTK; GTK types and objects do not cross the frontend boundary.
 
-O frontend não conhece comandos específicos de distribuições.
+The frontend does not know distribution-specific commands.
 
-O core deve evitar lógica do género `if distro == "void"`. As diferenças
-devem viver, tanto quanto possível, nos providers.
+The core must avoid logic like `if distro == "void"`. Differences must
+live, as far as possible, in the providers.
 
 ## 4. Probe
 
-Antes de criar o plano, Mocinha inspeciona a live e a máquina.
+Before creating the plan, Mocinha inspects the live and the machine.
 
     MOCINHA — SYSTEM PROBE
 
@@ -152,9 +151,9 @@ Antes de criar o plano, Mocinha inspeciona a live e a máquina.
     Initramfs ............. dracut
     Network ............... NetworkManager
 
-A deteção automática não é infalível. Uma distribuição/remaster deve
-poder fornecer configuração explícita e o probe deve validar essa
-configuração.
+Automatic detection is not infallible. A distribution/remaster must be
+able to provide explicit configuration, and the probe must validate that
+configuration.
 
     Config says ........... runit
     Detected .............. runit
@@ -164,15 +163,14 @@ configuração.
     Detected group ........ NOT FOUND
     Result ................ ERROR
 
-Se requisitos obrigatórios não forem satisfeitos, a instalação não
-começa.
+If mandatory requirements are not satisfied, the installation does not
+start.
 
-## 5. Capabilities e providers
+## 5. Capabilities and providers
 
-O motor trabalha sobretudo com **capacidades**, não nomes de
-distribuições.
+The engine works mainly with **capabilities**, not distribution names.
 
-Capabilities possíveis:
+Possible capabilities:
 
 -   storage
 -   filesystem
@@ -192,12 +190,12 @@ Capabilities possíveis:
 -   cleanup
 -   validation
 
-Um módulo pede uma capacidade; um provider fornece a implementação.
+A module asks for a capability; a provider supplies the implementation.
 
-### Serviços
+### Services
 
-`init = runit` não chega. Void e Artix podem usar runit com políticas de
-serviços diferentes.
+`init = runit` is not enough. Void and Artix can use runit with
+different service policies.
 
     capability: service-management
 
@@ -210,70 +208,71 @@ serviços diferentes.
       chimera-dinit
       sysvinit
 
-A intenção `enable_service("NetworkManager")` é independente da
-implementação. O provider decide como ativar e, depois, como verificar
-que ficou efetivamente ativo/configurado para o próximo boot.
+The intention `enable_service("NetworkManager")` is independent of the
+implementation. The provider decides how to enable it and, afterwards,
+how to verify that it really ended up enabled/configured for the next
+boot.
 
-### Serviços como subsistema real
+### Services as a real subsystem
 
-Serviços não são apenas checkboxes e `enable_service(name)` é uma
-abstração insuficiente.
+Services are not just checkboxes, and `enable_service(name)` is an
+insufficient abstraction.
 
-Mocinha deve distinguir pelo menos:
+Mocinha must distinguish at least:
 
--   **available** --- o serviço existe no sistema/live;
--   **running** --- está a correr nesta sessão;
--   **enabled/persistent** --- arrancará no sistema instalado;
--   **required** --- necessário e não desativável pelo utilizador;
--   **default-enabled** --- intenção padrão do remaster, mas
-    eventualmente alterável;
--   **optional** --- disponível para ativação;
--   **live-only** --- pode estar ativo na live e deve desaparecer/não
-    persistir no target.
+-   **available** --- the service exists in the system/live;
+-   **running** --- it is running in this session;
+-   **enabled/persistent** --- it will start on the installed system;
+-   **required** --- needed and not disableable by the user;
+-   **default-enabled** --- the remaster's default intention, possibly
+    changeable;
+-   **optional** --- available for enabling;
+-   **live-only** --- may be active on the live and must disappear/not
+    persist on the target.
 
-Quando a live já contém os mesmos serviços pretendidos para o sistema
-instalado, a GUI deve mostrá-los pré-selecionados. Serviços adicionais
-só podem ser selecionados se existirem realmente.
+When the live already contains the same services intended for the
+installed system, the GUI must show them pre-selected. Additional
+services can only be selected if they really exist.
 
-Exemplo conceptual:
+Conceptual example:
 
     ☑ dbus             required        🔒
     ☑ NetworkManager   default-enabled
     ☐ sshd             optional
 
-**Manifest = intenção do remaster. Probe = realidade observada. Resolver
-= árbitro.**
+**Manifest = the remaster's intention. Probe = observed reality.
+Resolver = the referee.**
 
-#### Init não é service policy
+#### Init is not service policy
 
-`init = runit` não identifica a política de serviços. Void+runit e
-Artix+runit podem ativar/persistir serviços de formas diferentes. Artix
-e Devuan podem oferecer múltiplos init systems.
+`init = runit` does not identify the service policy. Void+runit and
+Artix+runit may enable/persist services in different ways. Artix and
+Devuan may offer multiple init systems.
 
-Logo:
+Therefore:
 
     distribution: void
     init: runit
     service-policy: void-runit
 
-não é equivalente a:
+is not equivalent to:
 
     distribution: artix
     init: runit
     service-policy: artix-runit
 
-Regra:
+Rule:
 
 > **No provider should be selected exclusively by distribution ID.**
 
-A distro é contexto/hint; mecanismos e capacidades observados têm
-prioridade.
+The distro is context/a hint; observed mechanisms and capabilities take
+priority.
 
-#### Dependências, ordering e conflitos
+#### Dependencies, ordering and conflicts
 
-Alguns sistemas parecem ter ativação simples mas carregam semântica de
-ordem, dependências ou metadata. O modelo interno deve conseguir
-representar, quando aplicável:
+Some systems seem to have simple enabling but carry ordering, dependency
+or metadata semantics. The internal model must be able to represent,
+when applicable:
 
     service:
       id: foo
@@ -284,86 +283,85 @@ representar, quando aplicável:
       before: [bar]
       conflicts: []
 
-Nem todos os providers têm de suportar todas as relações. Cada provider
-declara as suas capacidades e traduz o grafo validado para o mecanismo
-nativo.
+Not every provider has to support every relation. Each provider declares
+its capabilities and translates the validated graph into the native
+mechanism.
 
-O resolver deve ter uma operação conceptual equivalente a
-`resolve_service_graph()` capaz de:
+The resolver must have a conceptual operation equivalent to
+`resolve_service_graph()` able to:
 
--   acrescentar dependências necessárias;
--   explicar alterações automáticas no plano;
--   impedir estados impossíveis;
--   detetar conflitos;
--   detetar ciclos quando o modelo/provider os torna relevantes;
--   preservar ordering quando a plataforma o exige;
--   verificar no target que o resultado persistente corresponde ao
-    plano.
+-   add required dependencies;
+-   explain automatic changes in the plan;
+-   prevent impossible states;
+-   detect conflicts;
+-   detect cycles when the model/provider makes them relevant;
+-   preserve ordering when the platform requires it;
+-   verify on the target that the persistent result matches the plan.
 
-A GUI nunca ativa diretamente um serviço:
+The GUI never enables a service directly:
 
     checkbox
        ↓
-    intenção
+    intention
        ↓
     resolver
        ↓
-    grafo válido
+    valid graph
        ↓
-    plano
+    plan
        ↓
     provider
        ↓
-    configuração nativa
+    native configuration
        ↓
     verify()
 
-Conceitualmente, `service-management` pode envolver preocupações
-separadas: service discovery, enable policy, dependency/order policy e
-runtime control. Não precisam de ser quatro plugins, mas o modelo não
-pode fingir que são a mesma coisa.
+Conceptually, `service-management` may involve separate concerns:
+service discovery, enable policy, dependency/order policy and runtime
+control. They do not need to be four plugins, but the model cannot
+pretend they are the same thing.
 
-#### Sistemas de stress futuros
+#### Future stress systems
 
-Depois dos três alvos iniciais, **d77void/Void+runit**, **Artix** e
-**Devuan** são testes particularmente úteis. Artix/Devuan devem provar
-que o provider não é inferido apenas pelo nome da distro; Void vs Artix
-deve provar que partilhar runit não implica partilhar service policy.
-Chimera/dinit é outro alvo útil para testar dependências, ordering e
-defaults de serviços.
+After the three initial targets, **d77void/Void+runit**, **Artix** and
+**Devuan** are particularly useful tests. Artix/Devuan must prove that
+the provider is not inferred from the distro name alone; Void vs Artix
+must prove that sharing runit does not imply sharing service policy.
+Chimera/dinit is another useful target to test dependencies, ordering
+and service defaults.
 
-### Administrador
+### Administrator
 
-A configuração deve poder expressar intenção:
+The configuration must be able to express intention:
 
     user = dani
     capabilities = administrator
 
-em vez de hardcode:
+instead of hard-coding:
 
     groups = wheel
 
-O provider resolve a forma adequada de conceder essa capacidade. Se não
-existir solução conhecida, falha explicitamente.
+The provider resolves the appropriate way to grant that capability. If
+no known solution exists, it fails explicitly.
 
 ## 6. Boot
 
-Boot é uma combinação de factos, constraints e política escolhida.
+Boot is a combination of facts, constraints and chosen policy.
 
-Factos:
+Facts:
 
 -   UEFI / Legacy BIOS;
 -   GPT / MBR;
--   arquitetura;
--   ESP existente ou a criar;
--   bootloaders/providers disponíveis na live.
+-   architecture;
+-   existing ESP or one to be created;
+-   bootloaders/providers available in the live.
 
-Escolhas possíveis incluem GRUB, Limine, LILO, systemd-boot e providers
-futuros.
+Possible choices include GRUB, Limine, LILO, systemd-boot and future
+providers.
 
-> **UEFI/BIOS não escolhe o bootloader.**
+> **UEFI/BIOS does not choose the bootloader.**
 
-Exemplo:
+Example:
 
     requested: limine
     firmware:  uefi
@@ -372,7 +370,7 @@ Exemplo:
 
     limine.validate(environment) -> OK
 
-Combinação impossível:
+Impossible combination:
 
     Requested bootloader: LILO
     Environment: UEFI-only
@@ -380,18 +378,18 @@ Combinação impossível:
     Selected provider cannot satisfy this configuration.
     Mocinha will NOT silently substitute GRUB.
 
-## 7. Deploy da live
+## 7. Live deployment
 
-A forma de transportar o sistema da live para o target deve ser
-independente da distribuição.
+The way the live's system is carried to the target must be independent
+of the distribution.
 
-Providers possíveis:
+Possible providers:
 
 -   squashfs extraction/copy;
 -   rsync/filesystem copy;
 -   tar extraction.
 
-Fluxo genérico:
+Generic flow:
 
     prepare storage
           |
@@ -409,17 +407,17 @@ Fluxo genérico:
           |
     unmount
 
-Um remaster pode declarar conceptualmente:
+A remaster may conceptually declare:
 
     [install]
     method = "squashfs"
     source = "/run/live/rootfs.squashfs"
 
-Nada disto deve estar hardcoded no core.
+None of this may be hard-coded in the core.
 
 ## 8. Frontend
 
-Objetivo: GUI substancialmente mais simples que Calamares.
+Goal: a GUI substantially simpler than Calamares.
 
     Welcome
        ↓
@@ -443,42 +441,42 @@ Objetivo: GUI substancialmente mais simples que Calamares.
        ↓
     Finished
 
-### GTK3 é a primeira implementação
+### GTK3 is the first implementation
 
-A decisão inicial está tomada: **GTK3** será o primeiro frontend.
+The initial decision is made: **GTK3** will be the first frontend.
 
-Razões:
+Reasons:
 
--   API madura e estável;
--   suficientemente moderna para uma UI limpa;
--   ampla disponibilidade em lives Linux e viabilidade em FreeBSD;
--   CSS suficiente para branding sem introduzir uma stack Qt/QML;
--   adequada a listas, árvores, progresso, diálogos e operações
-    assíncronas.
+-   mature and stable API;
+-   modern enough for a clean UI;
+-   widely available on Linux lives and viable on FreeBSD;
+-   enough CSS for branding without introducing a Qt/QML stack;
+-   suited to lists, trees, progress, dialogs and asynchronous
+    operations.
 
-GTK4 pode existir no futuro. CLI/TUI também. A arquitetura não pode
-tornar GTK3 uma dependência do engine.
+GTK4 may exist in the future. CLI/TUI too. The architecture cannot make
+GTK3 an engine dependency.
 
 > **No installer module may depend on GTK.**
 
-Tipos/objetos GTK não atravessam a fronteira do frontend.
+GTK types/objects do not cross the frontend boundary.
 
-## 9. Frontend separado do motor
+## 9. Frontend separate from the engine
 
-Objetivo possível:
+Possible goal:
 
     mocinha-gtk
-    mocinha-tk       # eventual
-    mocinha-cli      # eventual
+    mocinha-tk       # eventually
+    mocinha-cli      # eventually
 
-todos usando o mesmo engine.
+all using the same engine.
 
-Biblioteca local vs processo separado/daemon/IPC fica em aberto. Não
-introduzir IPC só porque fica bonito num diagrama.
+Local library vs separate process/daemon/IPC remains open. Do not
+introduce IPC just because it looks nice in a diagram.
 
-## 10. Manifest da live/remaster
+## 10. Live/remaster manifest
 
-Cada projeto deve poder fornecer um manifest declarativo.
+Each project must be able to provide a declarative manifest.
 
     [system]
     name = "d77void"
@@ -499,17 +497,17 @@ Cada projeto deve poder fornecer um manifest declarativo.
     [services]
     enable = ["NetworkManager", "dbus"]
 
-Manifest não substitui probe:
+The manifest does not replace the probe:
 
-**Manifest = intenção/conhecimento do remaster.**\
-**Probe = realidade observada.**\
-**Resolver = verifica se ambos são compatíveis.**
+**Manifest = the remaster's intention/knowledge.**\
+**Probe = observed reality.**\
+**Resolver = checks that both are compatible.**
 
 ## 11. Resolver
 
-Provavelmente uma das peças centrais.
+Probably one of the central pieces.
 
-Entradas:
+Inputs:
 
     machine facts
         +
@@ -521,16 +519,16 @@ Entradas:
         +
     provider capabilities/constraints
 
-Saída:
+Output:
 
     validated installation plan
 
-Nenhuma operação destrutiva ocorre durante resolução. O resolver deve
-explicar por que uma escolha não é possível.
+No destructive operation happens during resolution. The resolver must
+explain why a choice is not possible.
 
-## 12. Interface conceptual de providers
+## 12. Conceptual provider interface
 
-Sem escolher ainda linguagem ou ABI:
+Without choosing a language or ABI yet:
 
     probe()
     capabilities()
@@ -540,143 +538,143 @@ Sem escolher ainda linguagem ou ABI:
     verify(context)
     cleanup(context)
 
-Nem todos precisarão de todas as fases.
+Not every provider will need every phase.
 
-`verify()` deve existir cedo: um comando terminar com exit 0 não prova
-que o target ficou corretamente configurado.
+`verify()` must exist early: a command ending with exit 0 does not prove
+that the target was configured correctly.
 
-## 12.1. Disciplina arquitetónica: SCOFS e testes de regressão
+## 12.1. Architectural discipline: SCOFS and regression tests
 
-Durante o desenvolvimento, uma exceção específica que exista apenas
-porque uma abstração não acomoda corretamente uma plataforma pode ser
-marcada como **SCOFS --- Special Case Oh Foda-Se**.
+During development, a specific exception that exists only because an
+abstraction does not correctly accommodate a platform may be labelled
+**SCOFS --- Special Case Oh Foda-Se**.
 
-SCOFS é vocabulário interno de desenvolvimento, não uma desculpa para
-acumular hacks.
+SCOFS is internal development vocabulary, not an excuse to pile up
+hacks.
 
-Regras:
+Rules:
 
--   SCOFS temporário deve ser identificado e justificado;
--   se vários SCOFS aparecem na mesma fronteira, assumir primeiro que a
-    abstração pode estar errada;
--   uma exceção genuinamente nativa pertence ao provider correto;
--   uma exceção que atravessa providers é sinal de revisão
-    arquitetónica;
--   o objetivo após absorver as lições de cada sistema de referência é
-    voltar, idealmente, a **SCOFS = 0** no core;
--   não aumentar o número de sistemas suportados à custa de dezenas de
-    exceções.
+-   a temporary SCOFS must be identified and justified;
+-   if several SCOFS appear at the same boundary, first assume the
+    abstraction may be wrong;
+-   a genuinely native exception belongs in the correct provider;
+-   an exception crossing providers is a sign that the architecture
+    needs review;
+-   after absorbing the lessons of each reference system, the goal is
+    to return, ideally, to **SCOFS = 0** in the core;
+-   do not increase the number of supported systems at the cost of
+    dozens of exceptions.
 
-Heurística:
+Heuristic:
 
-    SCOFS 0  -> saudável
-    SCOFS 1  -> justificar
-    SCOFS 3  -> investigar a abstração
-    SCOFS 7+ -> parar e redesenhar antes de continuar
+    SCOFS 0  -> healthy
+    SCOFS 1  -> justify
+    SCOFS 3  -> investigate the abstraction
+    SCOFS 7+ -> stop and redesign before continuing
 
-Cada forma nova e reproduzível de partir Mocinha deve transformar-se num
-teste de regressão sempre que razoável:
+Every new, reproducible way of breaking Mocinha must become a regression
+test whenever reasonable:
 
-> **partir uma vez; não partir duas vezes da mesma maneira.**
+> **break it once; do not let it break the same way twice.**
 
-Os três primeiros targets funcionam como ondas deliberadas de
-falsificação:
+The first three targets work as deliberate waves of falsification:
 
-    btw-d77  -> fazer funcionar -> absorver SCOFS -> voltar a 0
-    au-d77   -> partir pressupostos Linux -> redesenhar -> voltar a 0
-    sysvd77  -> partir pressupostos Arch/systemd -> redesenhar -> voltar a 0
+    btw-d77  -> make it work -> absorb SCOFS -> back to 0
+    au-d77   -> break Linux assumptions -> redesign -> back to 0
+    sysvd77  -> break Arch/systemd assumptions -> redesign -> back to 0
 
-Se um target exigir demasiados SCOFS, há três resultados aceitáveis:
+If a target requires too many SCOFS, there are three acceptable
+outcomes:
 
-1.  melhorar a abstração;
-2.  criar uma fronteira/provider próprio que represente uma diferença
-    real;
-3.  declarar a combinação fora do âmbito.
+1.  improve the abstraction;
+2.  create a dedicated boundary/provider representing a real
+    difference;
+3.  declare the combination out of scope.
 
-**Suportar tudo a qualquer custo não é objetivo.**
+**Supporting everything at any cost is not a goal.**
 
-## 13. Segurança e erros
+## 13. Safety and errors
 
-Mocinha mexe em discos; logo:
+Mocinha touches disks; therefore:
 
--   operações destrutivas só depois de plano + confirmação;
--   mostrar inequivocamente o disco que será destruído;
--   nunca formatar durante probe/planning;
--   validar mounts antes do deploy;
--   parar perante inconsistências;
--   nenhum fallback destrutivo silencioso;
--   logs completos;
--   cleanup previsível após erro;
--   distinguir ações reversíveis e irreversíveis;
--   tentar deixar o target diagnosticável após falha;
--   validar o resultado final.
+-   destructive operations only after plan + confirmation;
+-   show unambiguously the disk that will be destroyed;
+-   never format during probe/planning;
+-   validate mounts before deployment;
+-   stop on inconsistencies;
+-   no silent destructive fallback;
+-   complete logs;
+-   predictable cleanup after an error;
+-   distinguish reversible and irreversible actions;
+-   try to leave the target diagnosable after a failure;
+-   validate the final result.
 
-Rollback total de particionamento não pode ser prometido. A interface
-não deve fingir que pode desfazer tudo.
+A full partitioning rollback cannot be promised. The interface must not
+pretend it can undo everything.
 
-## 14. Configuração pós-deploy
+## 14. Post-deployment configuration
 
-Possíveis operações:
+Possible operations:
 
--   remover utilizador/autologin live;
--   remover hooks/scripts exclusivamente live;
--   criar utilizador final;
--   configurar grupos/capabilities;
+-   remove the live user/autologin;
+-   remove live-only hooks/scripts;
+-   create the final user;
+-   configure groups/capabilities;
 -   hostname;
 -   locale;
--   teclado;
+-   keyboard;
 -   timezone;
 -   `/etc/fstab`;
 -   initramfs;
--   serviços;
--   rede;
+-   services;
+-   network;
 -   bootloader;
--   regenerar identificadores que não devam ser clonados;
--   limpar caches/estado temporário;
--   permissões;
--   validação final.
+-   regenerate identifiers that must not be cloned;
+-   clean caches/temporary state;
+-   permissions;
+-   final validation.
 
-Isto deve ser composto por módulos/providers, não uma função monstruosa
-`post_install()`.
+This must be composed of modules/providers, not one monstrous
+`post_install()` function.
 
-## 15. O que Mocinha NÃO é
+## 15. What Mocinha is NOT
 
-Inicialmente:
+Initially:
 
--   não é package manager;
--   não é distro builder;
--   não é criador de ISO;
--   não substitui xbps/pacman/apt/pkgtools;
--   não instala a base pela Internet;
--   não tenta suportar todas as distribuições;
--   não é framework geral de configuração;
--   não incorpora políticas específicas de uma distro no core.
+-   not a package manager;
+-   not a distro builder;
+-   not an ISO builder;
+-   not a replacement for xbps/pacman/apt/pkgtools;
+-   does not install the base from the Internet;
+-   does not try to support every distribution;
+-   not a general configuration framework;
+-   does not embed distro-specific policies in the core.
 
-**Fazer pouco, mas permitir extensão.**
+**Do little, but allow extension.**
 
-## 16. Estratégia de desenvolvimento
+## 16. Development strategy
 
-### Regra de validação arquitetónica
+### Architectural validation rule
 
-Os três primeiros sistemas de referência são deliberadamente muito
-diferentes. A ordem não é uma lista de popularidade: é uma sequência
-para destruir abstrações falsas cedo.
+The first three reference systems are deliberately very different. The
+order is not a popularity list: it is a sequence designed to destroy
+false abstractions early.
 
-1.  **btw-d77 --- Arch Linux + systemd**: provar o fluxo completo num
-    Linux moderno e relativamente consensual.
-2.  **au-d77 --- FreeBSD + rc.d/rc.conf**: provar que o core não é
-    secretamente um instalador Linux.
-3.  **sysvd77 --- CRUX + sysvinit**: voltar a Linux sem as comodidades
-    de Arch/systemd e separar aquilo que é Linux daquilo que era apenas
-    Arch/systemd.
+1.  **btw-d77 --- Arch Linux + systemd**: prove the complete flow on a
+    modern and relatively mainstream Linux.
+2.  **au-d77 --- FreeBSD + rc.d/rc.conf**: prove that the core is not
+    secretly a Linux installer.
+3.  **sysvd77 --- CRUX + sysvinit**: return to Linux without the
+    conveniences of Arch/systemd and separate what is Linux from what
+    was only Arch/systemd.
 
-> O btw-d77 prova que o instalador funciona. O au-d77 prova que a
-> arquitetura funciona. O sysvd77 prova que não dependemos
-> acidentalmente das comodidades do primeiro alvo.
+> btw-d77 proves the installer works. au-d77 proves the architecture
+> works. sysvd77 proves we do not accidentally depend on the first
+> target's conveniences.
 
-FreeBSD é, portanto, requisito arquitetónico **desde o início**, mesmo
-que o suporte completo chegue apenas após o primeiro alvo. O core deve
-distinguir plataforma de distribuição/política.
+FreeBSD is therefore an architectural requirement **from the start**,
+even if full support only arrives after the first target. The core must
+distinguish platform from distribution/policy.
 
     platform providers:
       linux
@@ -688,51 +686,52 @@ distinguir plataforma de distribuição/política.
       crux-sysvinit
       ...
 
-Evitar pressupostos Linux no core: `/proc`, `/sys`, udev, `lsblk`, nomes
-`/dev/sd*`, `fstab` com semântica assumida, ferramentas de
-particionamento Linux ou um modelo único de boot. Em FreeBSD, storage,
-devices, UFS/ZFS, `gpart`, loader/boot e rc.d/`rc.conf` devem poder ser
-representados por providers próprios.
+Avoid Linux assumptions in the core: `/proc`, `/sys`, udev, `lsblk`,
+`/dev/sd*` names, `fstab` with assumed semantics, Linux partitioning
+tools or a single boot model. On FreeBSD, storage, devices, UFS/ZFS,
+`gpart`, loader/boot and rc.d/`rc.conf` must be representable by their
+own providers.
 
-### Fase 0 --- investigação e mapa de variabilidade
+### Phase 0 --- research and variability map
 
-Antes de código sério:
+Before serious code:
 
--   estudar Calamares, Anaconda, YaST/libstorage-ng e Debian Installer;
--   estudar mecanismos nativos de instalação/live deployment de Arch e
+-   study Calamares, Anaconda, YaST/libstorage-ng and the Debian
+    Installer;
+-   study the native installation/live-deployment mechanisms of Arch and
     FreeBSD;
--   estudar o fluxo real já usado em au-d77;
--   estudar o fluxo de instalação do sysvd77/CRUX;
--   distinguir live-copy/squashfs extraction de reconstrução via package
-    manager;
--   criar `docs/variability-map.md`;
--   identificar explicitamente pressupostos Linux vs Unix/plataforma.
+-   study the real flow already used in au-d77;
+-   study the sysvd77/CRUX installation flow;
+-   distinguish live-copy/squashfs extraction from rebuilding through a
+    package manager;
+-   create `docs/variability-map.md`;
+-   explicitly identify Linux vs Unix/platform assumptions.
 
-### Fase 1 --- engine mínimo + btw-d77
+### Phase 1 --- minimal engine + btw-d77
 
-Sem depender da GUI, implementar:
+Without depending on the GUI, implement:
 
-1.  probe básico;
-2.  leitura de manifest;
-3.  resolver de capabilities/providers;
-4.  geração e apresentação do plano;
-5.  execução em VM/disco descartável;
-6.  deploy da live para target;
-7.  configuração persistente necessária;
-8.  provider de boot;
-9.  provider de serviços systemd;
-10. validação final.
+1.  basic probe;
+2.  manifest reading;
+3.  capability/provider resolver;
+4.  plan generation and presentation;
+5.  execution on a VM/disposable disk;
+6.  live deployment to the target;
+7.  required persistent configuration;
+8.  boot provider;
+9.  systemd service provider;
+10. final validation.
 
-Primeiro milestone real: instalar **btw-d77 (Arch + systemd)** offline a
-partir da própria live e arrancar o sistema instalado.
+First real milestone: install **btw-d77 (Arch + systemd)** offline from
+its own live and boot the installed system.
 
-### Fase 2 --- frontend GTK3
+### Phase 2 --- GTK3 frontend
 
-Frontend inicial deliberadamente conservador: **GTK3**, usando um
-subconjunto pequeno e estável da API e evitando dependências gráficas
-desnecessárias.
+A deliberately conservative initial frontend: **GTK3**, using a small and
+stable subset of the API and avoiding unnecessary graphical
+dependencies.
 
-Páginas mínimas:
+Minimal pages:
 
     Welcome
     Location / Keyboard
@@ -743,49 +742,48 @@ Páginas mínimas:
     Progress / Details
     Finish
 
-A GUI é descartável relativamente ao engine: deve consumir apenas
-estado, escolhas, validação, plano, progresso, log e resultado. Nenhum
-provider conhece GTK.
+The GUI is disposable relative to the engine: it must only consume
+state, choices, validation, plan, progress, log and result. No provider
+knows GTK.
 
-Durante o deploy pode existir um **mini slideshow opcional**, fornecido
-pelo remaster (por exemplo em `/usr/share/mocinha/slideshow/`). Sem
-slideshow, mostrar branding + progresso + detalhes. O slideshow nunca
-contém lógica de instalação.
+During deployment there may be an **optional mini slideshow**, provided
+by the remaster (for example in `/usr/share/mocinha/slideshow/`).
+Without a slideshow, show branding + progress + details. The slideshow
+never contains installation logic.
 
-### Fase 3 --- au-d77 / FreeBSD
+### Phase 3 --- au-d77 / FreeBSD
 
-Adicionar **au-d77** como segundo alvo. Objetivo principal: validar
-independência de plataforma.
+Add **au-d77** as the second target. Main goal: validate platform
+independence.
 
-O trabalho deve entrar sobretudo através de providers FreeBSD para
-probe, storage, filesystem, deployment, users/admin, serviços
-rc.d/`rc.conf`, boot e validação. Se a implementação exigir condicionais
-FreeBSD espalhadas pelo engine, parar e rever a arquitetura.
+The work must enter mainly through FreeBSD providers for probe, storage,
+filesystem, deployment, users/admin, rc.d/`rc.conf` services, boot and
+validation. If the implementation requires FreeBSD conditionals spread
+across the engine, stop and review the architecture.
 
-O frontend GTK3 é desejável também em FreeBSD, mas não é requisito do
-core. Um CLI/TUI deve poder conduzir o mesmo engine se uma live não
-quiser carregar GTK.
+The GTK3 frontend is also desirable on FreeBSD, but it is not a core
+requirement. A CLI/TUI must be able to drive the same engine if a live
+does not want to carry GTK.
 
-### Fase 4 --- sysvd77 / CRUX
+### Phase 4 --- sysvd77 / CRUX
 
-Adicionar **sysvd77 (CRUX + sysvinit)** como terceiro alvo. Objetivo:
-descobrir dependências acidentais de Arch/systemd e validar um Linux
-mais minimalista.
+Add **sysvd77 (CRUX + sysvinit)** as the third target. Goal: discover
+accidental dependencies on Arch/systemd and validate a more minimalist
+Linux.
 
-Se algo é comum a btw-d77 e sysvd77, pode legitimamente pertencer à
-camada Linux. Se só funciona no btw-d77, investigar se é uma propriedade
-de Arch/systemd e não de Linux.
+If something is common to btw-d77 and sysvd77, it may legitimately
+belong to the Linux layer. If it only works on btw-d77, investigate
+whether it is a property of Arch/systemd rather than of Linux.
 
-### Fase 5 --- restantes sistemas
+### Phase 5 --- remaining systems
 
-Só depois do trio de referência expandir para d77void/Void-runit,
-Artix-runit, Chimera/dinit, Slackware e outros. O objetivo continua a
-ser adicionar providers/policies, não aumentar `if distro == ...` no
-core.
+Only after the reference trio, expand to d77void/Void-runit,
+Artix-runit, Chimera/dinit, Slackware and others. The goal remains to
+add providers/policies, not to grow `if distro == ...` in the core.
 
-## 17. Matriz de testes
+## 17. Test matrix
 
-Dimensões independentes:
+Independent dimensions:
 
     firmware:
       UEFI
@@ -806,77 +804,77 @@ Dimensões independentes:
     filesystem:
       ext4
       UFS
-      ZFS (quando suportado)
-      outro suportado
+      ZFS (when supported)
+      other supported
 
     service policy:
       provider 1
       provider 2
 
-"Testámos uma distro" não significa "testámos todas as combinações".
+"We tested a distro" does not mean "we tested every combination".
 
-VMs para testes destrutivos; bare metal para validação real.
+VMs for destructive tests; bare metal for real validation.
 
-## 18. Testes adversariais
+## 18. Adversarial tests
 
-Tentar deliberadamente partir:
+Deliberately try to break:
 
--   manifest errado;
--   provider ausente;
--   grupo pedido inexistente;
--   serviço inexistente;
--   ESP inadequada;
--   disco desaparece;
--   mount falha;
--   deploy interrompido;
--   bootloader falha;
--   initramfs falha;
--   pouco espaço;
--   source live inesperado;
--   combinação firmware/bootloader incompatível.
--   serviço disponível mas não persistível pelo provider;
--   serviço running na live mas marcado live-only;
--   dependência de serviço ausente;
--   conflito entre serviços;
--   ciclo de ordering/dependências;
--   distro com múltiplos init systems em que `/etc/os-release` induziria
-    o provider errado;
--   dois sistemas com o mesmo init mas políticas de enable diferentes;
+-   wrong manifest;
+-   missing provider;
+-   requested group does not exist;
+-   service does not exist;
+-   unsuitable ESP;
+-   disk disappears;
+-   mount fails;
+-   interrupted deployment;
+-   bootloader fails;
+-   initramfs fails;
+-   little space;
+-   unexpected live source;
+-   incompatible firmware/bootloader combination;
+-   service available but not persistable by the provider;
+-   service running on the live but marked live-only;
+-   missing service dependency;
+-   conflict between services;
+-   ordering/dependency cycle;
+-   distro with multiple init systems where `/etc/os-release` would
+    lead to the wrong provider;
+-   two systems with the same init but different enable policies.
 
-Um erro deve preferencialmente dizer:
+An error should preferably say:
 
     ERROR
-    causa
-    operação que falhou
-    comando/ação realizada
-    estado atual
-    possível recuperação
+    cause
+    failed operation
+    command/action performed
+    current state
+    possible recovery
 
-e nunca apenas:
+and never just:
 
     Installation failed :(
 
-## 19. Linguagem
+## 19. Language
 
-**Não escolher ainda por entusiasmo.**
+**Do not choose out of enthusiasm yet.**
 
-Avaliar:
+Evaluate:
 
--   manipulação segura de processos;
+-   safe process handling;
 -   filesystem/mounts;
--   modelação de erros;
+-   error modelling;
 -   plugins/providers;
--   bindings GTK/Tk;
+-   GTK/Tk bindings;
 -   packaging;
--   tamanho/dependências;
--   facilidade de contribuição;
--   execução em lives modestas.
+-   size/dependencies;
+-   ease of contribution;
+-   running on modest lives.
 
-C, Rust, Python e outras opções devem ser avaliadas pelos requisitos.
-Uma implementação pequena e compreensível vale mais que uma escolha
-"moderna" por vaidade.
+C, Rust, Python and other options must be evaluated against the
+requirements. A small and understandable implementation is worth more
+than a "modern" choice made out of vanity.
 
-## 20. Estrutura possível
+## 20. Possible structure
 
     mocinha/
     ├── docs/
@@ -906,103 +904,130 @@ Uma implementação pequena e compreensível vale mais que uma escolha
     │   └── privilege/
     ├── frontends/
     │   ├── gtk3/
-    │   └── cli/       # opcional / fallback
+    │   └── cli/       # optional / fallback
     ├── examples/
     │   └── manifests/
     └── tests/
 
-Não congelar esta árvore antes do protótipo.
+Do not freeze this tree before the prototype.
 
-## 21. Primeira milestone útil
+## 21. First useful milestone
 
-**Mocinha 0.0.1 não precisa de ser universal.**
+**Mocinha 0.0.1 does not need to be universal.**
 
-Sucesso:
+Success:
 
-> Arrancar uma live **btw-d77 (Arch + systemd)** numa VM, abrir Mocinha,
-> escolher um disco vazio, criar utilizador, escolher uma opção de boot
-> suportada, confirmar o plano, instalar offline e arrancar no sistema
-> instalado com os serviços pretendidos ativos.
+> Boot a **btw-d77 (Arch + systemd)** live in a VM, open Mocinha, choose
+> an empty disk, create a user, choose a supported boot option, confirm
+> the plan, install offline and boot the installed system with the
+> intended services enabled.
 
-A milestone arquitetónica seguinte é repetir o princípio com
-**au-d77/FreeBSD** sem reescrever o engine. A terceira validação é
+The next architectural milestone is to repeat the principle with
+**au-d77/FreeBSD** without rewriting the engine. The third validation is
 **sysvd77/CRUX + sysvinit**.
 
-Se os três funcionarem através de providers/capabilities limpos, temos
-arquitetura. Se aparecerem condicionais de plataforma/distribuição
-espalhadas pelo core, temos trabalho a refazer.
+If all three work through clean providers/capabilities, we have an
+architecture. If platform/distribution conditionals appear spread across
+the core, we have work to redo.
 
-## 22. Perguntas em aberto
+## 22. Open questions
 
--   linguagem do engine;
--   GTK3 é o frontend inicial; avaliar apenas detalhes de
-    bindings/linguagem e eventual frontend futuro GTK4;
--   biblioteca local vs processo separado;
--   formato final do manifest (TOML é candidato natural);
--   descoberta/carregamento de providers;
--   providers compilados vs scripts/executáveis;
--   privilégios do frontend/engine;
--   modelo de progresso;
--   formato dos logs;
--   chroot vs outras formas de configurar o target;
--   identificação robusta do source da live;
+-   engine language;
+-   GTK3 is the initial frontend; only evaluate binding/language details
+    and a possible future GTK4 frontend;
+-   local library vs separate process;
+-   final manifest format (TOML is a natural candidate);
+-   provider discovery/loading;
+-   compiled providers vs scripts/executables;
+-   frontend/engine privileges;
+-   progress model;
+-   log format;
+-   chroot vs other ways of configuring the target;
+-   robust identification of the live source;
 -   cleanup;
--   API/ABI dos providers;
--   limites da autodetection;
--   versionamento de manifests/providers;
--   customização por remasters sem forks da Mocinha.
+-   provider API/ABI;
+-   limits of autodetection;
+-   manifest/provider versioning;
+-   customization by remasters without forking Mocinha.
 
-Responder com protótipos e casos reais, não apenas arquitetura no papel.
+Answer with prototypes and real cases, not just architecture on paper.
 
-## 23. Filosofia resumida
+## 22.1. Future ideas (not planned for implementation)
 
-Mocinha deve conseguir dizer:
+### Optional online components (e.g. a bootloader missing from the live)
 
-> **Eu sei onde estou.**
+*Context:* a user may want a bootloader the live image does not ship (e.g.
+Limine on btw-d77, whose live only has GRUB). The preferred answer is for the
+remaster to include it in the live image, keeping installation offline.
+
+*Idea:* let a manifest declare components that may be fetched online when
+absent from the live, e.g. a bootloader package installed into the target
+with the target's own package manager (pacman, pkg, prt-get).
+
+Constraints if it is ever implemented:
+
+-   strictly opt-in and never part of the normal, offline install path;
+-   the plan states it explicitly ("requires network: installs `limine`
+    on the target via pacman") and validation fails before any disk is
+    touched if the network or the package is unavailable;
+-   native package manager with signature verification only; no raw
+    binary downloads;
+-   one mechanism per distribution family, inside the right provider;
+    it must not turn Mocinha into a package manager or bootstrap installer.
+
+Open question before any code: does more than one reference target
+need it, and is it cheaper than adding the package to the live image?
+
+## 23. Philosophy in short
+
+Mocinha must be able to say:
+
+> **I know where I am.**
 >
-> **Sei o que esta live contém.**
+> **I know what this live contains.**
 >
-> **Sei o que esta máquina permite.**
+> **I know what this machine allows.**
 >
-> **Sei o que me pediste.**
+> **I know what you asked me.**
 >
-> **Sei se consigo fazê-lo.**
+> **I know whether I can do it.**
 >
-> **Antes de tocar no disco, vou mostrar-te exatamente o que vou
-> fazer.**
+> **Before touching the disk, I will show you exactly what I am going
+> to do.**
 >
-> **E não vou instalar GRUB só porque me apetece, caralho.**
+> **And I am not installing GRUB just because I feel like it,
+> caralho.**
 
-## Nome
+## Name
 
-**Mocinha** é provisoriamente o nome natural do projeto.
+**Mocinha** is provisionally the project's natural name.
 
-Não é necessário fabricar um acrónimo. Se algum dia aparecer um
-significado técnico elegante, ótimo. Caso contrário:
+There is no need to invent an acronym. If an elegant technical meaning
+ever comes along, great. Otherwise:
 
     mocinha(8)
 
-já chega.
+is enough.
 
-A origem pessoal do nome pode ser documentada quando e como fizer
-sentido.
+The personal origin of the name may be documented when and how it makes
+sense.
 
 ------------------------------------------------------------------------
 
-**Estado:** arquitetura definida / arranque de implementação ---
+**Status:** architecture defined / implementation kick-off ---
 2026-10-07.
 
-**Próximos passos imediatos:**
+**Immediate next steps:**
 
-1.  criar o repositório e manter `plano.md` + `AGENTS.md` na raiz;
-2.  criar `docs/variability-map.md`;
-3.  investigar/decidir linguagem do engine com um spike pequeno, não por
-    entusiasmo;
-4.  modelar `probe -> resolver -> plan -> execute -> verify` sem GTK;
-5.  definir schema inicial do manifest;
-6.  modelar serviços antes de implementar `enable_service()`;
-7.  começar pelo milestone **btw-d77 / Arch + systemd**;
-8.  converter cada falha reproduzível encontrada pelo "Dani test" num
-    teste de regressão.
+1.  create the repository and keep `plano.md` + `AGENTS.md` at the root;
+2.  create `docs/variability-map.md`;
+3.  research/decide the engine language with a small spike, not out of
+    enthusiasm;
+4.  model `probe -> resolver -> plan -> execute -> verify` without GTK;
+5.  define the initial manifest schema;
+6.  model services before implementing `enable_service()`;
+7.  start with the **btw-d77 / Arch + systemd** milestone;
+8.  turn every reproducible failure found by the "Dani test" into a
+    regression test.
 
-> **Hoje ganha vida o Mocinha Installer.**
+> **Today Mocinha Installer comes to life.**

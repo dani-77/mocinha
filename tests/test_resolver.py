@@ -78,7 +78,7 @@ class TestResolver(unittest.TestCase):
         self.assertIn("NOTHING HAS BEEN CHANGED YET", summary_str)
 
     def test_reject_nonexistent_disk(self) -> None:
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/nonexistent",
             bootloader="grub",
             username="dani",
@@ -89,7 +89,7 @@ class TestResolver(unittest.TestCase):
         self.assertIn("was not detected on this system", str(ctx.exception))
 
     def test_reject_readonly_disk(self) -> None:
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/ro0",
             bootloader="grub",
             username="dani",
@@ -100,7 +100,7 @@ class TestResolver(unittest.TestCase):
         self.assertIn("read-only", str(ctx.exception))
 
     def test_reject_undersized_disk(self) -> None:
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/sda",  # 4 GiB, manifest requires 10 GiB
             bootloader="grub",
             username="dani",
@@ -111,7 +111,7 @@ class TestResolver(unittest.TestCase):
         self.assertIn("too small", str(ctx.exception))
 
     def test_reject_unsupported_bootloader(self) -> None:
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/nvme0n1",
             bootloader="unknown-bootloader",
             username="dani",
@@ -131,7 +131,7 @@ class TestResolver(unittest.TestCase):
             running_services=[],
         )
         resolver = InstallationResolver(foreign_facts, self.manifest, self.registry)
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/nvme0n1",
             bootloader="grub",
             username="dani",
@@ -162,7 +162,7 @@ class TestResolver(unittest.TestCase):
             running_services=[],
         )
         resolver = InstallationResolver(facts, self.manifest, self.registry)
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/sdb",
             bootloader="grub",
             username="dani",
@@ -191,7 +191,7 @@ class TestResolver(unittest.TestCase):
             running_services=[],
         )
         resolver = InstallationResolver(facts, self.manifest, self.registry)
-        choices = UserChoices(
+        choices = UserChoices(hostname="test-host", 
             target_disk="/dev/sdc",
             bootloader="grub",
             username="dani",
@@ -210,7 +210,7 @@ class TestResolver(unittest.TestCase):
                 self.resolver.resolve(choices)
 
     def test_root_password_choice_reflected_in_plan(self) -> None:
-        choices = UserChoices(target_disk="/dev/nvme0n1", bootloader="grub", username="dani",
+        choices = UserChoices(hostname="test-host", target_disk="/dev/nvme0n1", bootloader="grub", username="dani",
                               password="x", root_password="r00t")
         plan = self.resolver.resolve(choices)
         self.assertEqual(plan.summary.root_account, "password set")

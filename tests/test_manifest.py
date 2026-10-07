@@ -62,15 +62,39 @@ class TestManifest(unittest.TestCase):
         }
         with self.assertRaises(ManifestError) as ctx:
             Manifest.from_dict(bad_data)
-        self.assertIn("Missing mandatory manifest section", str(ctx.exception))
+        self.assertIn("missing ['install', 'providers', 'boot']", str(ctx.exception))
 
     def _base(self) -> dict:
         return {
-            "system": {"platform": "linux"},
-            "install": {},
-            "providers": {"platform": "linux", "services": "arch-systemd"},
+            "system": {"id": "t", "name": "T", "platform": "linux"},
+            "install": {
+                "method": "squashfs", "source": "/run/x.sfs", "min_disk_size_bytes": 1,
+                "root_filesystem": "ext4", "root_mount_options": "rw", "esp_size": "512m",
+                "esp_mountpoint": "/boot", "esp_mount_options": "rw",
+            },
+            "providers": {k: v for k, v in (
+                ("platform", "linux"), ("storage", "linux-sfdisk"), ("filesystem", "linux-mkfs"),
+                ("deployment", "squashfs-extract"), ("users", "shadow"), ("services", "arch-systemd"),
+                ("initramfs", "none"))},
             "boot": {"available": ["grub"], "default": "grub"},
         }
+
+    def test_no_invented_defaults(self) -> None:
+        """Regression (agy): missing keys were silently filled (platform linux, services systemd...)."""
+        for section, key in (("system", "platform"), ("install", "root_filesystem"), ("providers", "services"),
+                             ("install", "esp_mountpoint"), ("providers", "initramfs")):
+            data = self._base()
+            del data[section][key]
+            with self.assertRaises(ManifestError, msg=f"{section}.{key}"):
+                Manifest.from_dict(data)
+
+    def test_unknown_keys_and_sections_rejected(self) -> None:
+        for mutate in (lambda d: d.update(extra={}), lambda d: d["install"].update(sorce="/typo"),
+                       lambda d: d["boot"].update(timeout="3"), lambda d: d["providers"].update(administrator="sudo")):
+            data = self._base()
+            mutate(data)
+            with self.assertRaises(ManifestError):
+                Manifest.from_dict(data)
 
     def test_live_only_and_target_files_parsed(self) -> None:
         data = self._base()

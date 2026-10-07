@@ -1,7 +1,4 @@
-"""Deployment provider for SquashFS extraction (Arch Linux / btw-d77).
-
-Extracts the live airootfs.sfs image into the target mountpoint.
-"""
+"""Deployment provider extracting the live root squashfs image ([install].source)."""
 
 from pathlib import Path
 from typing import List, Optional
@@ -34,40 +31,16 @@ class SquashfsDeploymentProvider(ProviderContract):
 
         source_path = context.metadata.get("install_source")
         if not source_path or not Path(source_path).is_file():
-            candidates = [
-                Path("/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"),
-                Path("/run/archiso/airootfs.sfs"),
-                Path("/run/live/rootfs.squashfs"),
-            ]
-            for c in candidates:
-                if c.is_file():
-                    source_path = str(c)
-                    context.metadata["install_source"] = source_path
-                    break
-
-        if source_path and not Path(source_path).is_file():
             raise ExecutionError(
                 message=f"SquashFS live source not found at: {source_path}",
-                cause="The configured squashfs image file does not exist.",
+                cause="[install].source must name the live root image; Mocinha does not guess its location.",
                 failed_operation="Locate live squashfs source",
                 current_state=f"source={source_path}",
-                possible_recovery="Verify live boot mount or manifest source configuration.",
+                possible_recovery="Fix [install].source in the manifest.",
             )
 
     def apply(self, context: ExecutionContext) -> None:
-        source_path = context.metadata.get("install_source")
-        if not source_path or not Path(source_path).is_file():
-            candidates = [
-                Path("/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"),
-                Path("/run/archiso/airootfs.sfs"),
-                Path("/run/live/rootfs.squashfs"),
-            ]
-            for c in candidates:
-                if c.is_file():
-                    source_path = str(c)
-                    context.metadata["install_source"] = source_path
-                    break
-
+        source_path = context.metadata["install_source"]
         target_root = context.target_mount
         self.events.action(
             EventPhase.DEPLOY,

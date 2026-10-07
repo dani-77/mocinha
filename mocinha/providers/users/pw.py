@@ -84,7 +84,7 @@ class FreeBSDUsersProvider(ProviderContract):
             self.runner.run(["pw", "-R", target, "lock", "root"], phase=EventPhase.CONFIGURE, check=True)
 
         # 3. Primary user with administrator + remaster groups
-        groups = ["wheel"] + [g for g in context.metadata.get("extra_groups", []) if g != "wheel"]
+        groups = list(context.metadata.get("user_groups", []))
         missing = [g for g in groups if g not in _db(etc / "group")]
         if missing:
             raise ExecutionError(
@@ -102,7 +102,10 @@ class FreeBSDUsersProvider(ProviderContract):
             )
         self.events.action(EventPhase.CONFIGURE, f"Creating user '{username}' (groups {groups})")
         self.runner.run(
-            ["pw", "-R", target, "useradd", username, "-m", "-s", "/bin/sh", "-G", ",".join(groups), "-h", "0"],
+            ["pw", "-R", target, "useradd", username, "-m"]
+            + (["-s", context.metadata["user_shell"]] if context.metadata.get("user_shell") else [])
+            + (["-G", ",".join(groups)] if groups else [])
+            + ["-h", "0"],
             phase=EventPhase.CONFIGURE,
             check=True,
             input_text=f"{context.metadata['password']}\n",
@@ -126,7 +129,7 @@ class FreeBSDUsersProvider(ProviderContract):
             problems.append(f"'{username}' missing from master.passwd/passwd")
         elif master[username][1] in ("", "*") or master[username][1].startswith("*LOCKED*"):
             problems.append(f"'{username}' has no usable password")
-        for g in ["wheel"] + context.metadata.get("extra_groups", []):
+        for g in context.metadata.get("user_groups", []):
             if g not in group or username not in group[g][-1].split(","):
                 problems.append(f"'{username}' is not a member of group {g}")
 

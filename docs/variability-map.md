@@ -1,108 +1,110 @@
-# Mocinha --- Mapa de Variabilidade de Plataformas e Sistemas
+# Mocinha --- Platform and System Variability Map
 
-> **Fase 0 de Investigação Arquitetónica**
+> **Phase 0 architectural research**
 >
-> Este documento analisa as dimensões reais de variabilidade entre plataformas
-> e os três sistemas de referência do projeto Mocinha, documentando pressupostos,
-> mecanismos nativos e lições de instaladores anteriores.
+> This document analyses the real dimensions of variability between
+> platforms and the three reference systems of the Mocinha project,
+> documenting assumptions, native mechanisms and lessons from existing
+> installers. It reflects the research phase; the validated behaviour of
+> each target is recorded in `STATUS.md`.
 
 ---
 
-## 1. Princípio Arquitetónico Fundamental
+## 1. Fundamental architectural principle
 
-Mocinha opera sob a premissa:
+Mocinha works on the premise:
 
-$$\text{LIVE BOOTADA} \longrightarrow \text{SISTEMA DA LIVE} \longrightarrow \text{DISCO}$$
+$$\text{BOOTED LIVE} \longrightarrow \text{THE LIVE'S SYSTEM} \longrightarrow \text{DISK}$$
 
-- **Offline-first:** Sem download de pacotes ou chamadas a `pacstrap`/`debootstrap`.
-- **Knowledgeable, not opinionated:** Deteta factos e restrições, valida o plano e executa sem impor políticas arbitrárias.
-- **Isolamento de camadas:** O motor (`engine`) não conhece GTK nem sabe pormenores específicos de distros. O core lida com *capacidades*, e os *providers* fornecem as implementações nativas.
+- **Offline-first:** no package downloads or `pacstrap`/`debootstrap` calls.
+- **Knowledgeable, not opinionated:** detects facts and constraints, validates the plan and executes without imposing arbitrary policies.
+- **Layer isolation:** the engine knows neither GTK nor distribution-specific details. The core deals with *capabilities*; *providers* supply the native implementations.
 
 ---
 
-## 2. Ordem de Validação dos Sistemas de Referência
+## 2. Validation order of the reference systems
 
-A sequência de alvos foi desenhada para destruir pressupostos errados progressivamente:
+The sequence of targets is designed to destroy wrong assumptions progressively:
 
-| Ordem | Alvo | Plataforma / Init | Papel na Validação Arquitetónica |
+| Order | Target | Platform / Init | Role in architectural validation |
 | :--- | :--- | :--- | :--- |
-| **1** | **btw-d77** | Arch Linux + systemd | **Prova de Vida:** Prova o fluxo ponta a ponta num Linux moderno com live squashfs, UEFI/GPT e systemd. |
-| **2** | **au-d77** | FreeBSD + rc.d / rc.conf | **Prova de Plataforma:** Quebra pressupostos Linux no core (`/proc`, `/sys`, udev, `lsblk`, `/dev/sd*`, `chroot` Linux, etc.). |
-| **3** | **sysvd77** | CRUX + sysvinit | **Prova de Mecanismo:** Quebra pressupostos de comodidade de Arch e systemd; isola o que é genuinamente Linux do que era mero tooling do Arch. |
+| **1** | **btw-d77** | Arch Linux + systemd | **Proof of life:** proves the end-to-end flow on a modern Linux with a squashfs live, UEFI/GPT and systemd. |
+| **2** | **au-d77** | FreeBSD + rc.d / rc.conf | **Proof of platform:** breaks Linux assumptions in the core (`/proc`, `/sys`, udev, `lsblk`, `/dev/sd*`, Linux `chroot`, etc.). |
+| **3** | **sysvd77** | CRUX + sysvinit | **Proof of mechanism:** breaks Arch and systemd convenience assumptions; isolates what is genuinely Linux from what was mere Arch tooling. |
 
-*Sistemas de stress adicionais futuros:*
-- **d77void** (Void + runit) e **Artix** (Artix + runit): Prova que o mesmo init (`runit`) não partilha a mesma política de ativação de serviços (`service-policy`).
-- **Devuan** (sysvinit/runit/openrc) / **Chimera** (dinit): Validação de grafos de dependências e distros multi-init.
+*Additional future stress systems:*
+- **d77void** (Void + runit) and **Artix** (Artix + runit): prove that the same init (`runit`) does not share the same service enable policy (`service-policy`).
+- **Devuan** (sysvinit/runit/openrc) / **Chimera** (dinit): validation of dependency graphs and multi-init distributions.
 
 ---
 
-## 3. Lições de Instaladores Existentes (Prior Art)
+## 3. Lessons from existing installers (prior art)
 
-| Instalador | Arquitetura | Pontos Fortes | Limitações a Evitar no Mocinha |
+| Installer | Architecture | Strengths | Limitations to avoid in Mocinha |
 | :--- | :--- | :--- | :--- |
-| **Calamares** | C++ / Qt5-Qt6 / Python jobs | Modularidade em jobs; pipeline configurável via YAML. | Acoplamento excessivo à stack Qt/C++; módulos Python com dependências implícitas; difícil portabilidade para sistemas não-Linux mínimos. |
-| **Anaconda** | Python / GTK / `blivet` | Modelo Hub-and-Spoke; biblioteca de storage declarativa (`blivet`). | Excessivamente acoplado ao ecossistema Fedora/RHEL, NetworkManager, systemd e Linux-only. Pegada de memória elevada. |
-| **YaST / libstorage-ng** | C++ / Ruby | Grafo de ações de storage encenadas (*staged actions*) antes do commit; validação formal rigorosa. | Enorme complexidade e dependências pesadas (`libstorage-ng`, Ruby runtime). |
-| **Debian Installer (d-i)** | C / Shell / Debconf | Robusto, corre em memória muito reduzida; modularidade via `udeb`. | Focado em bootstrap de pacotes pela rede/CD (`debootstrap`), não em imagem de live clone/squashfs offline; UX arcaica. |
+| **Calamares** | C++ / Qt5-Qt6 / Python jobs | Modular jobs; pipeline configurable through YAML. | Strong coupling to the Qt/C++ stack; Python modules with implicit dependencies; hard to port to minimal non-Linux systems. |
+| **Anaconda** | Python / GTK / `blivet` | Hub-and-spoke model; declarative storage library (`blivet`). | Heavily coupled to the Fedora/RHEL ecosystem, NetworkManager, systemd and Linux only. Large memory footprint. |
+| **YaST / libstorage-ng** | C++ / Ruby | Graph of staged storage actions before commit; strict formal validation. | Huge complexity and heavy dependencies (`libstorage-ng`, Ruby runtime). |
+| **Debian Installer (d-i)** | C / Shell / Debconf | Robust, runs in very little memory; modular through `udeb`. | Focused on bootstrapping packages from network/CD (`debootstrap`), not on cloning an offline live/squashfs image; dated UX. |
 
-### Decisão de Síntese para o Mocinha
-Adotar o princípio de **ações encenadas não-destrutivas (Plan)** e **validação formal pré-execução** de YaST/Calamares, mantendo uma **base de código enxuta e desacoplada**, sem amarras a Qt ou distribuições específicas.
+### Synthesis for Mocinha
+Adopt the principle of **non-destructive staged actions (the plan)** and **formal pre-execution validation** from YaST/Calamares, while keeping a **small, decoupled code base** with no ties to Qt or specific distributions.
 
 ---
 
-## 4. Matriz Comparativa dos 3 Alvos de Referência
+## 4. Comparison matrix of the 3 reference targets
 
-A tabela seguinte detalha as diferenças concretas entre os três alvos de validação:
+The following table details the concrete differences between the three validation targets:
 
-| Dimensão | btw-d77 (Arch + systemd) | au-d77 (FreeBSD + rc.d) | sysvd77 (CRUX + sysvinit) |
+| Dimension | btw-d77 (Arch + systemd) | au-d77 (FreeBSD + rc.d) | sysvd77 (CRUX + sysvinit) |
 | :--- | :--- | :--- | :--- |
-| **Plataforma (Kernel/OS)** | Linux (kernel monolítico com módulos) | FreeBSD (kernel FreeBSD + userland BSD) | Linux (kernel tradicional, minimalista) |
-| **Identificação de Discos** | `/dev/sda`, `/dev/nvme0n1`, `/dev/vda` | `/dev/ada0` (SATA), `/dev/da0` (SCSI/USB), `/dev/nvd0` (NVMe) | `/dev/sda`, `/dev/nvme0n1` |
-| **Ferramenta de Particionamento** | `sfdisk`, `parted`, `sgdisk` | `gpart` | `sfdisk`, `fdisk` |
-| **Tabelas de Partição** | GPT (UEFI) ou MBR (BIOS) | GPT ou MBR (esquemas `gpart`) | GPT ou MBR |
-| **Filesystems Suportados** | ext4, btrfs, xfs | UFS2 (+ softupdates/journal), ZFS | ext4, xfs |
-| **Origem da Live (Deploy)** | Squashfs via loop (`/run/archiso/...`) ou rootfs | Imagem live UFS/ZFS, tarball ou squashfs | Rootfs montado em memória / squashfs / tarball |
-| **Mecanismo de Cópia** | `unsquashfs` / `rsync -aHAX` / `cp -a` | `tar -cpf - . \| tar -xpf -` / `rsync` | `rsync -aHAX` / `tar` / `cp -a` |
-| **Ponto de Montagem Alvo** | `/mnt`, `/mnt/boot` ou `/mnt/efi` | `/mnt`, `/mnt/boot/efi` (UEFI) | `/mnt`, `/mnt/boot` |
-| **Geração de Fstab** | `genfstab -U /mnt` (UUID/PARTUUID) | Edição de `/mnt/etc/fstab` (`/dev/gpt/...` ou UFS ID) | `/mnt/etc/fstab` com UUID (`blkid`) ou device |
-| **Gestão de Utilizadores** | Shadow utils: `useradd -R /mnt -m -G wheel ...` | `pw -R /mnt useradd ... -G wheel` | Shadow utils: `useradd -R /mnt ...` |
-| **Mecanismo de Admin** | `sudo` / grupo `wheel` / `wheel ALL=(ALL:ALL) ALL` | `doas` ou `sudo` / grupo `wheel` | `sudo` ou `doas` / grupo `wheel` |
-| **Init & Serviços** | **systemd**:<br>`systemctl --root=/mnt enable <serviço>` | **rc.d / rc.conf**:<br>`sysrc -R /mnt <srv>_enable="YES"` | **sysvinit / BSD-style rc**:<br>Edição de `/etc/rc.conf` (array `SERVICES`) ou `/etc/rc.d` |
-| **Bootloaders Suportados** | Limine, systemd-boot, GRUB | FreeBSD Boot Loader (`boot1.efi` / `loader.efi`), GRUB | Limine, LILO, GRUB |
-| **Initramfs / Kernel** | `mkinitcpio -P` (via chroot) | Sem initramfs padrão (módulos carregados pelo `loader`) | Kernel monolítico ou script initramfs local |
+| **Platform (kernel/OS)** | Linux (monolithic kernel with modules) | FreeBSD (FreeBSD kernel + BSD userland) | Linux (traditional, minimalist kernel) |
+| **Disk naming** | `/dev/sda`, `/dev/nvme0n1`, `/dev/vda` | `/dev/ada0` (SATA), `/dev/da0` (SCSI/USB), `/dev/nvd0` (NVMe), `/dev/vtbd0` (virtio) | `/dev/sda`, `/dev/nvme0n1` |
+| **Partitioning tool** | `sfdisk`, `parted`, `sgdisk` | `gpart` | `sfdisk`, `fdisk` |
+| **Partition tables** | GPT (UEFI) or MBR (BIOS) | GPT or MBR (`gpart` schemes) | GPT or MBR |
+| **Supported filesystems** | ext4, btrfs, xfs | UFS2 (+ soft updates/journal), ZFS | ext4, xfs |
+| **Live source (deployment)** | Squashfs through loop (`/run/archiso/...`) or rootfs | UFS/ZFS live image, tarball or squashfs | Root filesystem mounted in memory / squashfs / tarball |
+| **Copy mechanism** | `unsquashfs` / `rsync -aHAX` / `cp -a` | `tar -cpf - . \| tar -xpf -` / `rsync` | `rsync -aHAX` / `tar` / `cp -a` |
+| **Target mount points** | `/mnt`, `/mnt/boot` or `/mnt/efi` | `/mnt`, `/mnt/boot/efi` (UEFI) | `/mnt`, `/mnt/boot` |
+| **fstab generation** | `genfstab -U /mnt` (UUID/PARTUUID) | Editing `/mnt/etc/fstab` (`/dev/gpt/...` or UFS label) | `/mnt/etc/fstab` with UUID (`blkid`) or device |
+| **User management** | Shadow utils: `useradd -R /mnt -m -G wheel ...` | `pw -R /mnt useradd ... -G wheel` | Shadow utils: `useradd -R /mnt ...` |
+| **Admin mechanism** | `sudo` / group `wheel` / `wheel ALL=(ALL:ALL) ALL` | `doas` or `sudo` / group `wheel` | `sudo` or `doas` / group `wheel` |
+| **Init & services** | **systemd**:<br>`systemctl --root=/mnt enable <service>` | **rc.d / rc.conf**:<br>`sysrc -R /mnt <srv>_enable="YES"` | **sysvinit / BSD-style rc**:<br>editing `/etc/rc.conf` (`SERVICES` array) or `/etc/rc.d` |
+| **Bootloaders** | Limine, systemd-boot, GRUB (the btw-d77 live ships GRUB only) | FreeBSD boot loader (`gptboot` / `loader.efi`), GRUB | Limine, LILO, GRUB |
+| **Initramfs / kernel** | `mkinitcpio -P` (via chroot) | No initramfs by default (modules loaded by `loader`) | Monolithic kernel or local initramfs script |
 
 ---
 
-## 5. Inventário de Pressupostos Proibidos no Core
+## 5. Assumptions forbidden in the core
 
-Para garantir que o core não se torna acidentalmente um instalador Linux ou Arch-only, os seguintes elementos **NUNCA** podem ser invocados ou assumidos no motor central (`core/`):
+To make sure the core does not accidentally become a Linux-only or Arch-only installer, the following must **NEVER** be invoked or assumed in the central engine (`core/`):
 
-1. **Topologia de ficheiros pseudo-filesystem:**
-   - Proibido assumir `/proc/mounts`, `/sys/class/block`, `/sys/firmware/efi`.
-   - *Solução:* Abstrair no provider `platform` (ex.: Linux probe lê `/sys/firmware/efi`, FreeBSD probe usa `kenv` ou `sysctl machdep.bootmethod`).
+1. **Pseudo-filesystem layout:**
+   - Do not assume `/proc/mounts`, `/sys/class/block`, `/sys/firmware/efi`.
+   - *Solution:* abstract in the `platform` provider (e.g. the Linux probe reads `/sys/firmware/efi`, the FreeBSD probe uses `kenv` or `sysctl machdep.bootmethod`).
 
-2. **Nomenclatura de dispositivos:**
-   - Proibido usar expressões regulares que procurem apenas `/dev/sd[a-z]` ou `/dev/nvme[0-9]n[0-9]`.
-   - *Solução:* Descoberta de discos delegada no provider de storage da respetiva plataforma (`lsblk -J` no Linux, `geom disk list` / `sysctl kern.disks` no FreeBSD).
+2. **Device naming:**
+   - Do not use regular expressions that only look for `/dev/sd[a-z]` or `/dev/nvme[0-9]n[0-9]`.
+   - *Solution:* disk discovery delegated to the platform's storage provider (`lsblk -J` on Linux, `geom disk list` / `sysctl kern.disks` on FreeBSD).
 
-3. **Ferramentas de particionamento e formatação:**
-   - Proibido invocar `mkfs.ext4` ou `parted` no fluxo comum.
-   - *Solução:* Provider `storage` e `filesystem`.
+3. **Partitioning and formatting tools:**
+   - Do not call `mkfs.ext4` or `parted` in the common flow.
+   - *Solution:* `storage` and `filesystem` providers.
 
-4. **Semântica de ativação de serviços:**
-   - Proibido assumir `enable_service(name) == systemctl enable`.
-   - Proibido assumir que se o init é `runit`, basta criar um symlink em `/var/service` (Void usa um esquema, Artix pode usar outro, e durante instalação o target está em `/mnt`).
-   - *Solução:* Sub-sistema declarativo de serviços com resolução de grafo (Required, Default-enabled, Optional, Live-only) e tradução pelo provider nativo com passo de `verify()`.
+4. **Service enable semantics:**
+   - Do not assume `enable_service(name) == systemctl enable`.
+   - Do not assume that with `runit` as init a symlink in `/var/service` is enough (Void uses one scheme, Artix may use another, and during installation the target is under `/mnt`).
+   - *Solution:* declarative service subsystem with graph resolution (Required, Default-enabled, Optional, Live-only) and translation by the native provider, with a `verify()` step.
 
-5. **Assunção de ferramentas de chroot:**
-   - `arch-chroot` monta automaticamente `/dev`, `/proc`, `/sys`. No FreeBSD a preparação de jail/chroot requer `mount -t devfs devfs /mnt/dev`.
-   - *Solução:* Abstração de ambiente de execução no target (`TargetEnvironment` / `ExecutionContext`).
+5. **Chroot tooling:**
+   - `arch-chroot` mounts `/dev`, `/proc`, `/sys` automatically. On FreeBSD, preparing a jail/chroot requires `mount -t devfs devfs /mnt/dev`.
+   - *Solution:* abstraction of the execution environment on the target (`TargetEnvironment` / `ExecutionContext`).
 
 ---
 
-## 6. Ciclo de Vida Formal dos Providers
+## 6. Formal provider lifecycle
 
-Qualquer provider (seja de boot, storage, deployment, serviços ou plataforma) implementa o contrato:
+Every provider (boot, storage, deployment, services or platform) implements the contract:
 
 ```
 [probe]
@@ -120,7 +122,7 @@ Qualquer provider (seja de boot, storage, deployment, serviços ou plataforma) i
 [apply(context)]
    │
    ▼
-[verify(context)]  <--- Exit 0 NÃO é suficiente; prova-se o estado no disco.
+[verify(context)]  <--- Exit 0 is NOT enough; the state on disk is proven.
    │
    ▼
 [cleanup(context)]
@@ -128,15 +130,15 @@ Qualquer provider (seja de boot, storage, deployment, serviços ou plataforma) i
 
 ---
 
-## 7. Heurística de Deteção vs. Manifest
+## 7. Detection vs. manifest
 
-1. **Manifest da Live (`mocinha.toml`):**
-   - É a declaração de intenções e capacidades fornecida pelo criador do remaster/distro.
-   - Especifica métodos preferenciais, serviços padrão, bootloaders suportados e providers aplicáveis.
+1. **Live manifest (`mocinha.toml`):**
+   - The declaration of intentions and capabilities provided by the remaster/distribution author.
+   - Specifies preferred methods, default services, supported bootloaders and applicable providers.
 
 2. **Probe:**
-   - Observa factos em tempo de execução: arquitetura da CPU, modo de firmware (UEFI vs BIOS), memória, discos disponíveis, espaço livre, serviços atualmente em execução.
+   - Observes facts at runtime: CPU architecture, firmware mode (UEFI vs BIOS), memory, available disks, free space, currently running services.
 
 3. **Resolver:**
-   - Cruza os factos do Probe com o Manifest e com as escolhas do utilizador.
-   - Se houver inconsistência ou impossibilidade (exemplo: utilizador pede LILO em UEFI-only), o resolver recusa gerar o plano e emite um diagnóstico explícito.
+   - Crosses the probe's facts with the manifest and the user's choices.
+   - On inconsistency or impossibility (e.g. the user asks for LILO on UEFI-only firmware), the resolver refuses to produce a plan and emits an explicit diagnostic.

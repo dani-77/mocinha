@@ -20,6 +20,13 @@ class FreeBSDNewfsProvider(ProviderContract):
         return ["filesystem", "format"]
 
     def validate(self, context: ExecutionContext) -> None:
+        if context.metadata.get("root_filesystem") != "ufs":
+            raise ExecutionError(
+                message=f"The freebsd-newfs provider cannot create a {context.metadata.get('root_filesystem')!r} root filesystem.",
+                cause="Only UFS2 is implemented.",
+                failed_operation="Validate root filesystem",
+                possible_recovery="Use root_filesystem = \"ufs\" or implement the filesystem (e.g. ZFS).",
+            )
         for tool in ("newfs", "newfs_msdos", "fstyp"):
             if not shutil.which(tool):
                 raise ExecutionError(
@@ -33,15 +40,18 @@ class FreeBSDNewfsProvider(ProviderContract):
         if "esp" in context.target_partitions:
             esp_dev = context.target_partitions["esp"]
             self.events.action(EventPhase.PREPARE, f"Formatting EFI system partition {esp_dev} as FAT32")
-            self.runner.run(["newfs_msdos", "-F", "32", "-c", "1", esp_dev], phase=EventPhase.PREPARE, check=True)
+            esp_label = context.metadata.get("esp_label")
+            self.runner.run(["newfs_msdos", "-F", "32", "-c", "1"] + (["-L", esp_label] if esp_label else []) + [esp_dev],
+                            phase=EventPhase.PREPARE, check=True)
 
         root_dev = context.target_partitions["root"]
-        label = context.metadata.get("root_label") or "rootfs"
+        label = context.metadata.get("root_label")
         self.events.action(EventPhase.PREPARE, f"Formatting root partition {root_dev} as UFS2 (SU+J, TRIM, label {label})")
-        self.runner.run(["newfs", "-t", "-j", "-L", label, root_dev], phase=EventPhase.PREPARE, check=True)
+        self.runner.run(["newfs", "-t", "-j"] + (["-L", label] if label else []) + [root_dev],
+                        phase=EventPhase.PREPARE, check=True)
 
     def verify(self, context: ExecutionContext) -> None:
-        label = context.metadata.get("root_label") or "rootfs"
+        label = context.metadata.get("root_label")
         checks = {context.target_partitions["root"]: ("ufs", label)}
         if "esp" in context.target_partitions:
             checks[context.target_partitions["esp"]] = ("msdosfs", None)

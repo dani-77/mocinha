@@ -17,6 +17,15 @@ platform = "linux"
 method = "squashfs"
 source = "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
 min_disk_size_bytes = 10737418240
+# d77-install: mkfs.ext4 -L root, ESP 1 GiB mkfs.fat -n EFI mounted at /boot;
+# mount options as written by genfstab (archinstall)
+root_filesystem = "ext4"
+root_label = "root"
+root_mount_options = "rw,relatime"
+esp_size = "1g"
+esp_label = "EFI"
+esp_mountpoint = "/boot"
+esp_mount_options = "rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro"
 
 [providers]
 platform = "linux"
@@ -24,7 +33,6 @@ storage = "linux-sfdisk"
 filesystem = "linux-mkfs"
 deployment = "squashfs-extract"
 users = "shadow"
-administrator = "sudo"
 initramfs = "mkinitcpio"
 services = "arch-systemd"
 
@@ -53,8 +61,8 @@ live_only = [
 ]
 
 [users]
-# d77-archinstall.json custom-commands: usermod -aG storage
-groups = ["storage"]
+# wheel: sudo for the user (archinstall "sudo": true); storage: d77-archinstall.json custom-commands
+groups = ["wheel", "storage"]
 
 [services.metadata.NetworkManager]
 conflicts = ["systemd-networkd", "dhcpcd"]
@@ -86,6 +94,8 @@ files = [
     "/etc/systemd/network/20-wwan.network",
     "/etc/systemd/networkd.conf.d/ipv6-privacy-extensions.conf",
     "/etc/systemd/resolved.conf.d/archiso.conf",
+    # archiso initramfs drop-in (the stock preset is restored by the mkinitcpio provider)
+    "/etc/mkinitcpio.conf.d/archiso.conf",
     # archiso root session and live installer
     "/root/.automated_script.sh",
     "/root/.zlogin",
@@ -257,6 +267,13 @@ root ALL=(ALL:ALL) ALL
 ## Read drop-in files from /etc/sudoers.d
 @includedir /etc/sudoers.d
 '''
+
+# Administrator rule for group wheel (archinstall grants sudo to the user)
+[[target_files]]
+path = "/etc/sudoers.d/10-wheel"
+mode = "0440"
+content = """%wheel ALL=(ALL:ALL) ALL
+"""
 
 # The live links /etc/resolv.conf to the systemd-resolved stub (resolved is live-only).
 # A regular file, as shipped by Arch's filesystem package, lets NetworkManager manage it;

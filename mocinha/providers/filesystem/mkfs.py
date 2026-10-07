@@ -21,6 +21,14 @@ class LinuxMkfsProvider(ProviderContract):
         return ["filesystem", "format"]
 
     def validate(self, context: ExecutionContext) -> None:
+        fs = context.metadata.get("root_filesystem")
+        if fs != "ext4":
+            raise ExecutionError(
+                message=f"The linux-mkfs provider cannot create a {fs!r} root filesystem.",
+                cause="Only ext4 is implemented.",
+                failed_operation="Validate root filesystem",
+                possible_recovery="Use root_filesystem = \"ext4\" or implement the filesystem.",
+            )
         if not shutil.which("mkfs.ext4"):
             raise ExecutionError(
                 message="mkfs.ext4 utility not found.",
@@ -42,14 +50,17 @@ class LinuxMkfsProvider(ProviderContract):
             esp_dev = context.target_partitions["esp"]
             self.events.action(EventPhase.PREPARE, f"Formatting ESP partition {esp_dev} as FAT32")
             fat_tool = "mkfs.vfat" if shutil.which("mkfs.vfat") else "mkfs.fat"
-            self.runner.run([fat_tool, "-F32", "-n", "BOOT", esp_dev], phase=EventPhase.PREPARE, check=True)
+            esp_label = context.metadata.get("esp_label")
+            self.runner.run([fat_tool, "-F32"] + (["-n", esp_label] if esp_label else []) + [esp_dev],
+                            phase=EventPhase.PREPARE, check=True)
 
         # Format Root
         if "root" in context.target_partitions:
             root_dev = context.target_partitions["root"]
             self.events.action(EventPhase.PREPARE, f"Formatting root partition {root_dev} as ext4")
-            label = context.metadata.get("root_label") or "ROOT"
-            self.runner.run(["mkfs.ext4", "-F", "-L", label, root_dev], phase=EventPhase.PREPARE, check=True)
+            label = context.metadata.get("root_label")
+            self.runner.run(["mkfs.ext4", "-F"] + (["-L", label] if label else []) + [root_dev],
+                            phase=EventPhase.PREPARE, check=True)
 
     def verify(self, context: ExecutionContext) -> None:
         self.events.info(EventPhase.VERIFY, "Verifying filesystem superblocks via blkid...")
