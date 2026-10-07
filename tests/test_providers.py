@@ -1,0 +1,128 @@
+"""Unit tests for btw-d77 platform providers (systemd, shadow, limine, linux)."""
+
+from pathlib import Path
+import tempfile
+import unittest
+
+from mocinha.core.errors import VerificationError
+from mocinha.core.events import EventStream
+from mocinha.core.provider import ExecutionContext
+from mocinha.providers.boot.limine import LimineBootProvider
+from mocinha.providers.deployment.squashfs import SquashfsDeploymentProvider
+from mocinha.providers.platform.linux import LinuxPlatformProvider
+from mocinha.providers.services.systemd import SystemdServiceProvider
+from mocinha.providers.users.shadow import ShadowUsersProvider
+
+
+class TestProviders(unittest.TestCase):
+    def setUp(self) -> None:
+        self.stream = EventStream()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.target = Path(self.temp_dir.name)
+        self.context = ExecutionContext(
+            target_disk="/dev/mock0",
+            target_mount=str(self.target),
+            target_partitions={"esp": "/dev/mock0p1", "root": "/dev/mock0p2"},
+            metadata={
+                "username": "testuser",
+                "hostname": "testbox",
+                "enabled_services": ["dbus", "NetworkManager"],
+            },
+        )
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+
+    def test_systemd_provider_verification(self) -> None:
+        provider = SystemdServiceProvider("arch-systemd", self.stream)
+
+        # Before creating directories -> fails
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # Create systemd dir but without services -> fails
+        sys_dir = self.target / "etc" / "systemd" / "system"
+        sys_dir.mkdir(parents=True, exist_ok=True)
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # Create symlinks for enabled services -> succeeds
+        (sys_dir / "dbus.service").touch()
+        (sys_dir / "multi-user.target.wants").mkdir(parents=True, exist_ok=True)
+        (sys_dir / "multi-user.target.wants" / "NetworkManager.service").touch()
+
+        # Now verification must pass
+        provider.verify(self.context)
+
+    def test_shadow_users_provider_verification(self) -> None:
+        provider = ShadowUsersProvider("shadow", self.stream)
+
+        # Before /etc/passwd -> fails
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # With other user -> fails
+        etc = self.target / "etc"
+        etc.mkdir(parents=True, exist_ok=True)
+        (etc / "passwd").write_text("root:x:0:0:root:/root:/bin/bash\n")
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # With testuser added -> succeeds
+        (etc / "passwd").write_text("root:x:0:0:root:/root:/bin/bash\ntestuser:x:1000:1000::/home/testuser:/bin/bash\n")
+        provider.verify(self.context)
+
+    def test_limine_provider_verification(self) -> None:
+        provider = LimineBootProvider("limine", self.stream)
+
+        # Missing EFI binary -> fails
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        boot_dir = self.target / "boot"
+        esp_dir = boot_dir / "EFI" / "BOOT"
+        esp_dir.mkdir(parents=True, exist_ok=True)
+        (esp_dir / "BOOTX64.EFI").write_bytes(b"EFI_DATA")
+
+        # Missing limine.conf -> fails
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # With limine.conf -> succeeds
+        (boot_dir / "limine.conf").write_text("timeout: 5\n")
+        provider.verify(self.context)
+
+    def test_linux_platform_fstab_and_hostname(self) -> None:
+        provider = LinuxPlatformProvider("linux", self.stream)
+        provider.configure_hostname(self.context)
+        provider.generate_fstab(self.context)
+
+        # Verify hostname
+        hostname_file = self.target / "etc" / "hostname"
+        self.assertTrue(hostname_file.is_file())
+        self.assertIn("testbox", hostname_file.read_text())
+
+        # Verify fstab
+        fstab_file = self.target / "etc" / "fstab"
+        self.assertTrue(fstab_file.is_file())
+        content = fstab_file.read_text()
+        self.assertIn("/boot", content)
+        self.assertIn("ext4", content)
+
+    def test_squashfs_deployment_verification(self) -> None:
+        provider = SquashfsDeploymentProvider("squashfs-extract", self.stream)
+
+        # Missing essential dirs -> fails
+        with self.assertRaises(VerificationError):
+            provider.verify(self.context)
+
+        # Create essential dirs
+        (self.target / "usr").mkdir(parents=True, exist_ok=True)
+        (self.target / "etc").mkdir(parents=True, exist_ok=True)
+        (self.target / "var").mkdir(parents=True, exist_ok=True)
+
+        provider.verify(self.context)
+
+
+if __name__ == "__main__":
+    unittest.main()
