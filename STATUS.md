@@ -1,7 +1,7 @@
 # Mocinha Installer --- Estado Atual do Projeto
 
 **Data:** 2026-10-07  
-**Ramo Git:** `main` (limpo e comitido)
+**Ramo Git:** `main` (sincronizado com `origin/main` no GitHub privado `dani-77/mocinha`)
 
 ---
 
@@ -30,13 +30,15 @@ Localizado em `mocinha/core/` (estritamente desacoplado de qualquer biblioteca g
 Localizado em `mocinha/providers/`:
 
 #### 1. btw-d77 (Arch Linux + systemd)
-- `storage/sfdisk.py`: Particionamento GPT/MBR.
-- `filesystem/mkfs.py`: Formatação FAT32 (ESP) e ext4 (Root).
-- `deployment/squashfs.py`: Extração da live airootfs.
-- `services/systemd.py`: Ativação e verificação em `/etc/systemd/system/`.
+- `storage/sfdisk.py`: Particionamento GPT/MBR com stdin automático e suporte a nós particionados.
+- `filesystem/mkfs.py`: Formatação FAT32 (ESP) e ext4 (Root) com verificação `blkid`.
+- `deployment/squashfs.py`: Extração da live airootfs com auto-descoberta do caminho da imagem na live.
+- `initramfs/mkinitcpio.py`: Cópia do kernel para `/boot/vmlinuz-linux`, limpeza do drop-in de live `archiso.conf` e geração de ramdisk nativo de desktop/servidor via `mkinitcpio -P`.
+- `services/systemd.py`: Ativação, desativação de live-only e verificação robusta em `/etc/systemd/system/` e via `systemctl --root is-enabled`.
 - `boot/limine.py`: Instalação EFI e `limine.conf`.
-- `users/shadow.py`: Utilizador, palavra-passe e concessão de privilégios `wheel`/`sudo`.
-- `platform/linux.py`: Montagens, desmontagens recursivas, `/etc/fstab`, `/etc/hostname`.
+- `boot/grub.py`: Instalação no MBR (`i386-pc`) e UEFI (`x86_64-efi`), geração de `grub.cfg` com UUID raiz dinâmico e suporte simultâneo a console de vídeo e porta serial (`ttyS0`).
+- `users/shadow.py`: Utilizador, palavra-passe via stdin no `chpasswd` e concessão de privilégios `wheel`/`sudo`.
+- `platform/linux.py`: Montagens, desmontagens recursivas, sincronização de cache, `/etc/fstab` com UUIDs e `/etc/hostname`.
 
 #### 2. au-d77 (FreeBSD + rc.d / rc.conf)
 - `storage/gpart.py`: Esquema GPT com `efi` e `freebsd-ufs` via `gpart`.
@@ -52,24 +54,36 @@ Localizado em `mocinha/providers/`:
 - `deployment/rsync.py`: Cópia de filesystem via `rsync -aHAX` com exclusões de pseudo-diretórios.
 - Partilha limpa de providers Linux (`sfdisk`, `mkfs`, `shadow`, `limine`, `platform/linux`).
 
-### Fase 2 --- Frontend Gráfico GTK3 e Launcher
-- [`mocinha/frontends/gtk3/app.py`](mocinha/frontends/gtk3/app.py): Assistente multi-páginas (Welcome, Disk, User, Services, Boot, Summary, Progress/Details, Finish) com execução assíncrona multithread.
-- [`mocinha/frontends/cli/main.py`](mocinha/frontends/cli/main.py): Operação via terminal (`probe`, `check-manifest`, `plan`).
-- [`bin/mocinha`](bin/mocinha): Launcher automático (abre GTK3 se detetar ambiente gráfico, ou CLI caso contrário).
-
-### Testes Automatizados (31 testes a passar)
-- Executar com:
-  ```bash
-  python3 -m unittest discover -s tests -v
-  ```
+### Fase 2 --- Frontends e Launcher
+- [`mocinha/frontends/gtk3/app.py`](mocinha/frontends/gtk3/app.py): Assistente multi-páginas (Welcome, Disk, User, Services, Boot, Summary, Progress/Details, Finish) com execução assíncrona multithread e ligação unificada via `wire_plan_providers`.
+- [`mocinha/frontends/cli/main.py`](mocinha/frontends/cli/main.py): Operação via terminal (`probe`, `check-manifest`, `plan`, `install`).
+- [`bin/mocinha`](bin/mocinha): Launcher automático unificado.
 
 ---
 
-## 2. Histórico de Commits Git
+## 2. Validação End-to-End em VM QEMU (Alvo 1: btw-d77)
 
-1. `a029ef3` Initial commit: kickoff pack (plano.md, AGENTS.md, README.md, assets)
-2. `48bcf2e` feat(core): implement Phase 0 variability map and Phase 1 headless core engine
-3. `348a95c` feat(providers): implement native providers for btw-d77 milestone
-4. `19476bb` feat(frontend): implement GTK3 multi-step wizard and bin/mocinha launcher
-5. `d76adeb` docs: add STATUS.md tracking current progress and next steps
-6. *(próximo commit)* feat(targets): implement au-d77 (FreeBSD) and sysvd77 (CRUX) providers
+O objetivo imediato estabelecido em `AGENTS.md` foi 100% atingido e comprovado:
+
+1. **Boot da Live em VM:** ISO oficial do Arch Linux inicializada em QEMU com KVM.
+2. **Execução Headless do Mocinha:** Script de automação obteve o código via partilha 9p.
+3. **Probe do Sistema:** Detetou `/dev/vda` de 20 GiB, memória e firmware BIOS.
+4. **Resolução de Plano:** Gerou plano validado de 12 etapas com verificação prévia.
+5. **Execução Completa:**
+   - Limpeza e particionamento MBR com `sfdisk`;
+   - Formatação `ext4` com UUID persistente;
+   - Extração de 77.033 ficheiros do `airootfs.sfs` em ~10 segundos;
+   - Geração de `/etc/fstab` com UUID;
+   - Criação do utilizador `dani` com sudoers em `/etc/sudoers.d/10-wheel`;
+   - Limpeza de serviços live (`reflector`, `archiso-autologin`) e ativação do `dbus.service`;
+   - Geração do ramdisk do sistema com `mkinitcpio -P` (sem drop-in de live);
+   - Instalação e verificação do bootloader GRUB no MBR;
+   - Sincronização e desmontagem recursiva limpa.
+6. **Boot Direto do Sistema Instalado:** A máquina virtual reiniciou diretamente a partir de `test-disk.qcow2` (sem ISO nem kernel externo), o GRUB carregou o sistema e efetuou `Switch Root` com sucesso (`Welcome to Arch Linux!`).
+
+---
+
+## 3. Repositório Remoto e Testes Unitários
+
+- **Testes Unitários:** 33 testes a passar (`python3 -m unittest discover -s tests -v`).
+- **Repositório GitHub:** Privado em [https://github.com/dani-77/mocinha](https://github.com/dani-77/mocinha).
