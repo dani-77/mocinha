@@ -28,3 +28,8 @@ htmlcov/
 
 # Local logs
 *.log
+
+# Virtual disks and VM artifacts
+*.qcow2
+*.img
+*.raw

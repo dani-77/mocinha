@@ -101,6 +101,105 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_install(args: argparse.Namespace) -> int:
+    from mocinha.core.executor import InstallationExecutor
+    from mocinha.core.provider import ExecutionContext
+    from mocinha.providers import create_default_registry
+
+    manifest_path = Path(args.manifest)
+    try:
+        manifest = Manifest.load_from_file(manifest_path)
+    except Exception as e:
+        print(f"Error loading manifest: {e}", file=sys.stderr)
+        return 1
+
+    stream = EventStream()
+    stream.subscribe(print_event)
+
+    probe = SystemProbe(stream)
+    facts = probe.probe_facts()
+
+    registry = create_default_registry(stream)
+    resolver = InstallationResolver(facts, manifest, registry, stream)
+
+    choices = UserChoices(
+        target_disk=args.disk,
+        bootloader=args.bootloader or manifest.boot.default,
+        username=args.user,
+        password=args.password or "secret",
+        hostname=args.hostname,
+        selected_services=set(args.services.split(",")) if args.services else set(),
+    )
+
+    try:
+        plan = resolver.resolve(choices)
+        print("\n" + plan.to_human_readable() + "\n")
+    except Exception as e:
+        print(f"Resolution failed:\n{e}", file=sys.stderr)
+        return 1
+
+    if not args.confirm:
+        print("To proceed with destructive execution, pass --confirm.", file=sys.stderr)
+        return 1
+
+    context = ExecutionContext(
+        target_disk=plan.summary.disk,
+        target_mount=args.mount,
+        metadata={
+            "username": plan.summary.username,
+            "password": args.password or "secret",
+            "hostname": plan.summary.hostname,
+            "firmware": plan.summary.firmware,
+            "enabled_services": plan.summary.services,
+            "live_only_to_clean": plan.summary.live_only_removed,
+            "install_source": manifest.install.source,
+        },
+    )
+
+    storage_prov = registry.get("storage", manifest.providers.storage or "linux-sfdisk")
+    fs_prov = registry.get("filesystem", manifest.providers.filesystem or "linux-mkfs")
+    plat_prov = registry.get("platform", manifest.providers.platform)
+    deploy_prov = registry.get("deployment", manifest.providers.deployment or "squashfs-extract")
+    user_prov = registry.get("users", manifest.providers.users)
+    srv_prov = registry.get("services", manifest.providers.services)
+    boot_prov = registry.get("bootloader", plan.summary.bootloader)
+
+    for step in plan.steps:
+        if step.step_id == "storage_partition" and storage_prov:
+            step.execute_fn = storage_prov.apply
+            step.verify_fn = storage_prov.verify
+        elif step.step_id == "storage_format" and fs_prov:
+            step.execute_fn = fs_prov.apply
+            step.verify_fn = fs_prov.verify
+        elif step.step_id == "target_mount" and plat_prov and hasattr(plat_prov, "mount_target"):
+            step.execute_fn = plat_prov.mount_target
+        elif step.step_id == "deployment_copy" and deploy_prov:
+            step.execute_fn = deploy_prov.apply
+            step.verify_fn = deploy_prov.verify
+        elif step.step_id == "configure_fstab" and plat_prov and hasattr(plat_prov, "generate_fstab"):
+            step.execute_fn = plat_prov.generate_fstab
+        elif step.step_id == "configure_user" and user_prov:
+            step.execute_fn = user_prov.apply
+            step.verify_fn = user_prov.verify
+        elif step.step_id == "configure_services" and srv_prov:
+            step.execute_fn = srv_prov.apply
+            step.verify_fn = srv_prov.verify
+        elif step.step_id == "install_bootloader" and boot_prov:
+            step.execute_fn = boot_prov.apply
+            step.verify_fn = boot_prov.verify
+        elif step.step_id == "target_unmount" and plat_prov and hasattr(plat_prov, "unmount_target"):
+            step.execute_fn = plat_prov.unmount_target
+
+    executor = InstallationExecutor(stream)
+    try:
+        executor.execute_plan(plan, context, confirmed=True)
+        print("\n✓ Installation completed and verified successfully.\n")
+        return 0
+    except Exception as e:
+        print(f"\n✗ Installation failed:\n{e}\n", file=sys.stderr)
+        return 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mocinha",
@@ -128,6 +227,19 @@ def main() -> None:
     p_plan.add_argument("--hostname", default="mocinha", help="Target hostname")
     p_plan.add_argument("--services", help="Comma-separated requested services")
     p_plan.set_defaults(func=cmd_plan)
+
+    # install
+    p_inst = subparsers.add_parser("install", help="Execute approved installation plan")
+    p_inst.add_argument("--manifest", required=True, help="Path to manifest file")
+    p_inst.add_argument("--disk", required=True, help="Target disk path (e.g. /dev/vda)")
+    p_inst.add_argument("--bootloader", help="Requested bootloader (e.g. limine)")
+    p_inst.add_argument("--user", default="user", help="Primary user account name")
+    p_inst.add_argument("--password", default="secret", help="Password for user")
+    p_inst.add_argument("--hostname", default="mocinha", help="Target hostname")
+    p_inst.add_argument("--services", help="Comma-separated requested services")
+    p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
+    p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")
+    p_inst.set_defaults(func=cmd_install)
 
     args = parser.parse_args()
     sys.exit(args.func(args))
