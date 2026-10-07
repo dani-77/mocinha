@@ -27,6 +27,7 @@ class CommandRunner:
         check: bool = True,
         env: Optional[dict] = None,
         cwd: Optional[str] = None,
+        input_text: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
         cmd_str = " ".join(cmd)
         self.events.action(phase, f"Running: {cmd_str}", command=cmd_str)
@@ -38,6 +39,7 @@ class CommandRunner:
         try:
             proc = subprocess.run(
                 cmd,
+                input=input_text,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

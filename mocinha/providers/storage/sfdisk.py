@@ -71,6 +71,7 @@ class SfdiskStorageProvider(ProviderContract):
             ["sfdisk", "--wipe", "always", "--wipe-partitions", "always", disk],
             phase=EventPhase.PREPARE,
             check=True,
+            input_text=sfdisk_script,
         )
 
         # Allow kernel partition table re-read
@@ -82,7 +83,7 @@ class SfdiskStorageProvider(ProviderContract):
 
         # Determine partition device naming:
         # e.g. /dev/nvme0n1 -> /dev/nvme0n1p1, /dev/sda -> /dev/sda1
-        sep = "p" if (disk[-1].isdigit() and "nvme" in disk or "loop" in disk) else ""
+        sep = "p" if disk[-1].isdigit() else ""
         if is_uefi:
             context.target_partitions["esp"] = f"{disk}{sep}1"
             context.target_partitions["root"] = f"{disk}{sep}2"

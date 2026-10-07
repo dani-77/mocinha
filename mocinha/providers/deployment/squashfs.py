@@ -33,6 +33,18 @@ class SquashfsDeploymentProvider(ProviderContract):
             )
 
         source_path = context.metadata.get("install_source")
+        if not source_path or not Path(source_path).is_file():
+            candidates = [
+                Path("/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"),
+                Path("/run/archiso/airootfs.sfs"),
+                Path("/run/live/rootfs.squashfs"),
+            ]
+            for c in candidates:
+                if c.is_file():
+                    source_path = str(c)
+                    context.metadata["install_source"] = source_path
+                    break
+
         if source_path and not Path(source_path).is_file():
             raise ExecutionError(
                 message=f"SquashFS live source not found at: {source_path}",
@@ -44,6 +56,18 @@ class SquashfsDeploymentProvider(ProviderContract):
 
     def apply(self, context: ExecutionContext) -> None:
         source_path = context.metadata.get("install_source")
+        if not source_path or not Path(source_path).is_file():
+            candidates = [
+                Path("/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"),
+                Path("/run/archiso/airootfs.sfs"),
+                Path("/run/live/rootfs.squashfs"),
+            ]
+            for c in candidates:
+                if c.is_file():
+                    source_path = str(c)
+                    context.metadata["install_source"] = source_path
+                    break
+
         target_root = context.target_mount
         self.events.action(
             EventPhase.DEPLOY,

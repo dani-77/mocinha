@@ -36,34 +36,41 @@ class ShadowUsersProvider(ProviderContract):
 
         self.events.action(EventPhase.CONFIGURE, f"Creating persistent user '{username}' on target")
 
-        # 1. Create user with wheel group for sudo
-        self.runner.run(
-            ["useradd", "-R", target_root, "-m", "-s", "/bin/bash", "-G", "wheel", username],
-            phase=EventPhase.CONFIGURE,
-            check=True,
-        )
+        # 1. Create user with wheel group for sudo (check if already present)
+        passwd_path = Path(target_root) / "etc" / "passwd"
+        user_exists = False
+        if passwd_path.exists():
+            try:
+                for line in passwd_path.read_text().splitlines():
+                    if line.startswith(f"{username}:"):
+                        user_exists = True
+                        break
+            except Exception:
+                pass
+
+        if not user_exists:
+            self.runner.run(
+                ["useradd", "-R", target_root, "-m", "-s", "/bin/bash", "-G", "wheel", username],
+                phase=EventPhase.CONFIGURE,
+                check=True,
+            )
+        else:
+            self.events.info(EventPhase.CONFIGURE, f"User '{username}' already exists on target; ensuring wheel group")
+            self.runner.run(
+                ["usermod", "-R", target_root, "-aG", "wheel", username],
+                phase=EventPhase.CONFIGURE,
+                check=False,
+            )
 
         # 2. Set user password
         if password:
             self.events.action(EventPhase.CONFIGURE, f"Setting password for '{username}'")
-            # Feed "username:password" into chpasswd -R <target_root>
-            # Use chpasswd directly
-            import subprocess
-            proc = subprocess.run(
+            self.runner.run(
                 ["chpasswd", "-R", target_root],
-                input=f"{username}:{password}\n",
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                phase=EventPhase.CONFIGURE,
+                check=True,
+                input_text=f"{username}:{password}\n",
             )
-            if proc.returncode != 0:
-                raise ExecutionError(
-                    message=f"chpasswd failed for user '{username}'",
-                    cause=proc.stderr.strip() or "Password change exited with error",
-                    failed_operation="Set user password via chpasswd",
-                    current_state=f"Returncode={proc.returncode}",
-                    possible_recovery="Check shadow/passwd files on target.",
-                )
 
         # 3. Grant sudo admin privileges to wheel group
         sudoers_d = Path(target_root) / "etc" / "sudoers.d"

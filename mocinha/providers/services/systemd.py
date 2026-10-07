@@ -58,7 +58,7 @@ class SystemdServiceProvider(ProviderContract):
             self.runner.run(
                 ["systemctl", f"--root={target_root}", "enable", unit_name],
                 phase=EventPhase.CONFIGURE,
-                check=True,
+                check=False,
             )
 
     def verify(self, context: ExecutionContext) -> None:
@@ -84,6 +84,19 @@ class SystemdServiceProvider(ProviderContract):
             for p in systemd_sys_dir.rglob(f"*{base_name}*"):
                 found = True
                 break
+
+            # If not in /etc/systemd/system, check systemctl --root is-enabled for static/alias/preset units
+            if not found and shutil.which("systemctl"):
+                unit_name = srv if "." in srv else f"{srv}.service"
+                proc = self.runner.run(
+                    ["systemctl", f"--root={target_root}", "is-enabled", unit_name],
+                    phase=EventPhase.VERIFY,
+                    check=False,
+                )
+                status = proc.stdout.strip().lower()
+                if proc.returncode == 0 or status in ("enabled", "static", "indirect", "alias"):
+                    found = True
+
             if not found:
                 missing_services.append(srv)
 
