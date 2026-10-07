@@ -48,6 +48,16 @@ class InstallationResolver:
     def resolve(self, choices: UserChoices) -> InstallationPlan:
         self.events.info(EventPhase.RESOLVE, "Starting resolution of installation plan...")
 
+        # 0. Validate Platform Compatibility (Offline-first: BOOTED LIVE -> TARGET DISK)
+        if self.manifest.system.platform != self.facts.platform_name:
+            raise ResolutionError(
+                message=f"Platform mismatch: Manifest specifies '{self.manifest.system.platform}', but running host is '{self.facts.platform_name}'.",
+                cause=f"Mocinha is offline-first ('BOOTED LIVE -> TARGET DISK'). It cannot install a {self.manifest.system.platform} system from a {self.facts.platform_name} host environment.",
+                failed_operation="Validate host platform against manifest",
+                current_state=f"Host platform: {self.facts.platform_name}; Manifest: {self.manifest.system.platform}",
+                possible_recovery=f"Boot a native {self.manifest.system.platform} live system or use a manifest matching this platform.",
+            )
+
         # 1. Validate Target Disk
         disk = self.facts.find_disk(choices.target_disk)
         if not disk:
@@ -57,6 +67,26 @@ class InstallationResolver:
                 failed_operation=f"Verify disk {choices.target_disk}",
                 current_state=f"Available disks: {[d.path for d in self.facts.disks]}",
                 possible_recovery="Select a valid existing disk.",
+            )
+
+        if disk.is_live_medium:
+            raise ResolutionError(
+                message=f"Target disk '{choices.target_disk}' is the active booted live media.",
+                cause="The running live environment is booted from this physical storage device.",
+                failed_operation=f"Validate safety of target disk {choices.target_disk}",
+                current_state=f"Disk {disk.path} has is_live_medium=True",
+                possible_recovery="Select a different destination disk to install to.",
+            )
+
+        critical_mounts = {"/", "/usr", "/var", "/etc", "/run", "/boot", "/home"}
+        active_critical = [p.mountpoint for p in disk.partitions if p.mountpoint in critical_mounts]
+        if active_critical:
+            raise ResolutionError(
+                message=f"Target disk '{choices.target_disk}' contains active critical host mounts: {active_critical}",
+                cause="Partitions on this storage device are in active use by the host operating system.",
+                failed_operation=f"Verify disk mount safety for {choices.target_disk}",
+                current_state=f"Active mounts: {active_critical}",
+                possible_recovery="Select a dedicated, non-active installation disk.",
             )
 
         if disk.read_only:

@@ -25,20 +25,28 @@ class SystemdServiceProvider(ProviderContract):
         return ["services", "service-management"]
 
     def validate(self, context: ExecutionContext) -> None:
+        enabled_services: List[str] = context.metadata.get("enabled_services", [])
+        for srv in enabled_services:
+            if not isinstance(srv, str) or not srv.strip():
+                raise VerificationError(
+                    message=f"Invalid service identifier: '{srv}'",
+                    cause="Service names must be non-empty strings.",
+                    failed_operation="Validate systemd services",
+                )
+
+    def apply(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
         if not target_root.is_dir():
-            raise VerificationError(
+            raise ExecutionError(
                 message=f"Target root directory does not exist: {target_root}",
                 cause="Target filesystem is not mounted.",
-                failed_operation="Validate systemd provider context",
+                failed_operation="Apply systemd services",
                 current_state=f"Mount path {target_root} missing",
                 possible_recovery="Ensure target mount step succeeded before service configuration.",
             )
-
-    def apply(self, context: ExecutionContext) -> None:
-        target_root = context.target_mount
         enabled_services: List[str] = context.metadata.get("enabled_services", [])
         live_only: List[str] = context.metadata.get("live_only_to_clean", [])
+
 
         # 1. Clean live-only services from target if any exist
         for srv in live_only:

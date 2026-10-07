@@ -116,6 +116,87 @@ class TestResolver(unittest.TestCase):
             self.resolver.resolve(choices)
         self.assertIn("is not supported", str(ctx.exception))
 
+    def test_reject_platform_mismatch(self) -> None:
+        """Enforces offline-first rule: cannot install Linux manifest from FreeBSD host or vice-versa."""
+        foreign_facts = SystemFacts(
+            platform_name="freebsd",  # Host is FreeBSD
+            arch="x86_64",
+            firmware=FirmwareType.UEFI,
+            disks=self.disks,
+            running_services=[],
+        )
+        resolver = InstallationResolver(foreign_facts, self.manifest, self.registry)
+        choices = UserChoices(
+            target_disk="/dev/nvme0n1",
+            bootloader="limine",
+            username="dani",
+            password="secretpassword",
+        )
+        with self.assertRaises(ResolutionError) as ctx:
+            resolver.resolve(choices)
+        self.assertIn("Platform mismatch", str(ctx.exception))
+        self.assertIn("BOOTED LIVE -> TARGET DISK", ctx.exception.cause)
+
+    def test_reject_live_medium_target(self) -> None:
+        """Protect installation media: target disk must not be the active booted live media."""
+        from mocinha.core.probe import DiskPartition
+        live_disk = DiskDevice(
+            path="/dev/sdb",
+            size_bytes=32 * 1024 * 1024 * 1024,
+            model="Live USB Drive",
+            removable=True,
+            read_only=False,
+            is_live_medium=True,
+            partitions=[DiskPartition(path="/dev/sdb1", size_bytes=32 * 1024 * 1024 * 1024, mountpoint="/run/archiso/bootmnt")],
+        )
+        facts = SystemFacts(
+            platform_name="linux",
+            arch="x86_64",
+            firmware=FirmwareType.UEFI,
+            disks=self.disks + [live_disk],
+            running_services=[],
+        )
+        resolver = InstallationResolver(facts, self.manifest, self.registry)
+        choices = UserChoices(
+            target_disk="/dev/sdb",
+            bootloader="limine",
+            username="dani",
+            password="secretpassword",
+        )
+        with self.assertRaises(ResolutionError) as ctx:
+            resolver.resolve(choices)
+        self.assertIn("active booted live media", str(ctx.exception))
+
+    def test_reject_disk_with_critical_mounts(self) -> None:
+        """Protect user data: target disk must not hold active root/home/system mounts."""
+        from mocinha.core.probe import DiskPartition
+        sys_disk = DiskDevice(
+            path="/dev/sdc",
+            size_bytes=500 * 1024 * 1024 * 1024,
+            model="Existing OS Drive",
+            removable=False,
+            read_only=False,
+            partitions=[DiskPartition(path="/dev/sdc1", size_bytes=500 * 1024 * 1024 * 1024, mountpoint="/home")],
+        )
+        facts = SystemFacts(
+            platform_name="linux",
+            arch="x86_64",
+            firmware=FirmwareType.UEFI,
+            disks=self.disks + [sys_disk],
+            running_services=[],
+        )
+        resolver = InstallationResolver(facts, self.manifest, self.registry)
+        choices = UserChoices(
+            target_disk="/dev/sdc",
+            bootloader="limine",
+            username="dani",
+            password="secretpassword",
+        )
+        with self.assertRaises(ResolutionError) as ctx:
+            resolver.resolve(choices)
+        self.assertIn("critical host mounts", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
+

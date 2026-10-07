@@ -21,7 +21,41 @@ class LinuxPlatformProvider(ProviderContract):
         return ["platform", "linux"]
 
     def validate(self, context: ExecutionContext) -> None:
-        pass
+        if not shutil.which("mount"):
+            raise ExecutionError(
+                message="mount utility not found.",
+                cause="mount binary is required for platform operations.",
+                failed_operation="Validate mount utility",
+            )
+        if not shutil.which("umount"):
+            raise ExecutionError(
+                message="umount utility not found.",
+                cause="umount binary is required for platform operations.",
+                failed_operation="Validate umount utility",
+            )
+        # Protect host storage: ensure target_mount is not occupied by foreign filesystems
+        target_mnt = context.target_mount
+        try:
+            with open("/proc/mounts", "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        dev_node, mnt_point = parts[0], parts[1]
+                        if mnt_point == target_mnt:
+                            if not dev_node.startswith(context.target_disk):
+                                raise ExecutionError(
+                                    message=f"Target staging path '{target_mnt}' is already mounted by foreign device '{dev_node}'.",
+                                    cause="Target mount directory is occupied by unrelated storage.",
+                                    failed_operation="Validate target mount safety",
+                                    current_state=f"{target_mnt} -> {dev_node}",
+                                    possible_recovery="Unmount foreign storage before proceeding.",
+                                )
+        except FileNotFoundError:
+            pass
+
+    def prepare(self, context: ExecutionContext) -> None:
+        Path(context.target_mount).mkdir(parents=True, exist_ok=True)
+
 
     def mount_target(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -95,4 +129,27 @@ class LinuxPlatformProvider(ProviderContract):
         pass
 
     def verify(self, context: ExecutionContext) -> None:
-        pass
+        target_root = Path(context.target_mount)
+        fstab_file = target_root / "etc" / "fstab"
+        if not fstab_file.is_file():
+            raise VerificationError(
+                message=f"Target fstab file missing at {fstab_file}.",
+                cause="Platform configuration did not generate /etc/fstab.",
+                failed_operation="Verify target fstab",
+                current_state="Missing /etc/fstab",
+                possible_recovery="Re-run fstab generation step.",
+            )
+        passwd_file = target_root / "etc" / "passwd"
+        if not passwd_file.is_file():
+            raise VerificationError(
+                message=f"Target passwd file missing at {passwd_file}.",
+                cause="Essential user database not found on target root filesystem.",
+                failed_operation="Verify target user accounts",
+                current_state="Missing /etc/passwd",
+                possible_recovery="Re-run deployment step.",
+            )
+        self.events.info(EventPhase.VERIFY, "Target platform configuration verified (/etc/fstab, /etc/passwd).")
+
+    def cleanup(self, context: ExecutionContext) -> None:
+        self.unmount_target(context)
+

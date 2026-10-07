@@ -80,32 +80,55 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
         else None
     )
 
+    # Attach active providers to plan for complete lifecycle execution (validate -> prepare -> apply -> verify -> cleanup)
+    active = [p for p in [plat_prov, storage_prov, fs_prov, deploy_prov, user_prov, init_prov, srv_prov, boot_prov] if p is not None]
+    plan.providers = active
+
     for step in plan.steps:
         if step.step_id == "storage_partition" and storage_prov:
+            step.provider = storage_prov
             step.execute_fn = storage_prov.apply
             step.verify_fn = storage_prov.verify
         elif step.step_id == "storage_format" and fs_prov:
+            step.provider = fs_prov
             step.execute_fn = fs_prov.apply
             step.verify_fn = fs_prov.verify
-        elif step.step_id == "target_mount" and plat_prov and hasattr(plat_prov, "mount_target"):
-            step.execute_fn = plat_prov.mount_target
+        elif step.step_id == "target_mount" and plat_prov:
+            step.provider = plat_prov
+            if hasattr(plat_prov, "mount_target"):
+                step.execute_fn = plat_prov.mount_target
         elif step.step_id == "deployment_copy" and deploy_prov:
+            step.provider = deploy_prov
             step.execute_fn = deploy_prov.apply
             step.verify_fn = deploy_prov.verify
-        elif step.step_id == "configure_fstab" and plat_prov and hasattr(plat_prov, "generate_fstab"):
-            step.execute_fn = plat_prov.generate_fstab
+        elif step.step_id == "cleanup_live_only" and plat_prov:
+            step.provider = plat_prov
+        elif step.step_id == "configure_fstab" and plat_prov:
+            step.provider = plat_prov
+            if hasattr(plat_prov, "generate_fstab"):
+                step.execute_fn = plat_prov.generate_fstab
         elif step.step_id == "configure_user" and user_prov:
+            step.provider = user_prov
             step.execute_fn = user_prov.apply
             step.verify_fn = user_prov.verify
         elif step.step_id == "configure_initramfs" and init_prov:
+            step.provider = init_prov
             step.execute_fn = init_prov.apply
             step.verify_fn = init_prov.verify
         elif step.step_id == "configure_services" and srv_prov:
+            step.provider = srv_prov
             step.execute_fn = srv_prov.apply
             step.verify_fn = srv_prov.verify
         elif step.step_id == "install_bootloader" and boot_prov:
+            step.provider = boot_prov
             step.execute_fn = boot_prov.apply
             step.verify_fn = boot_prov.verify
-        elif step.step_id == "target_unmount" and plat_prov and hasattr(plat_prov, "unmount_target"):
-            step.execute_fn = plat_prov.unmount_target
+        elif step.step_id == "target_verify" and plat_prov:
+            step.provider = plat_prov
+            step.verify_fn = plat_prov.verify
+        elif step.step_id == "target_unmount" and plat_prov:
+            step.provider = plat_prov
+            if hasattr(plat_prov, "unmount_target"):
+                step.execute_fn = plat_prov.unmount_target
+
 

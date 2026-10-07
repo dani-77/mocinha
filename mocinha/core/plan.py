@@ -19,6 +19,7 @@ class PlanStep:
     description: str
     is_destructive: bool
     provider_name: str
+    provider: Optional[Any] = None
     execute_fn: Optional[Callable[[ExecutionContext], None]] = None
     verify_fn: Optional[Callable[[ExecutionContext], None]] = None
 
@@ -45,6 +46,7 @@ class InstallationPlan:
 
     summary: TargetSummary
     steps: List[PlanStep]
+    providers: List[Any] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_human_readable(self) -> str:

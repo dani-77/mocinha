@@ -100,6 +100,103 @@ class TestExecutor(unittest.TestCase):
         self.assertIn("Verification failed", str(ctx.exception))
         self.assertIn("Expected ESP file", str(ctx.exception))
 
+    def test_provider_full_lifecycle_sequence(self) -> None:
+        """Verifies strict adherence to probe -> validate -> prepare -> apply -> verify -> cleanup."""
+        from mocinha.core.provider import ProviderContract
+        from typing import List
+
+        lifecycle_events: List[str] = []
+
+        class MockLifecycleProvider(ProviderContract):
+            def capabilities(self) -> List[str]:
+                return ["mock"]
+
+            def validate(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("validate")
+
+            def prepare(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("prepare")
+
+            def apply(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("apply")
+
+            def verify(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("verify")
+
+            def cleanup(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("cleanup")
+
+        mock_prov = MockLifecycleProvider("mock-provider", self.stream)
+        step = PlanStep(
+            "mock_step",
+            "Mock Lifecycle Step",
+            "Desc",
+            True,
+            "mock-provider",
+            provider=mock_prov,
+        )
+        summary = TargetSummary(
+            disk="/dev/mock0",
+            firmware="UEFI",
+            partition_table="GPT",
+            filesystem="ext4",
+            bootloader="limine",
+            init="systemd",
+            services=[],
+        )
+        plan = InstallationPlan(summary=summary, steps=[step], providers=[mock_prov])
+
+        ok = self.executor.execute_plan(plan, self.context, confirmed=True)
+        self.assertTrue(ok)
+        self.assertEqual(lifecycle_events, ["validate", "prepare", "apply", "verify", "cleanup"])
+
+    def test_cleanup_runs_even_on_step_failure(self) -> None:
+        """Guarantees unmount and cleanup in finally block even if execution aborts."""
+        from mocinha.core.provider import ProviderContract
+        from typing import List
+
+        lifecycle_events: List[str] = []
+
+        class FailingProvider(ProviderContract):
+            def capabilities(self) -> List[str]:
+                return ["failing"]
+
+            def validate(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("validate")
+
+            def prepare(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("prepare")
+
+            def apply(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("apply")
+                raise RuntimeError("Disk write failed midway!")
+
+            def verify(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("verify")
+
+            def cleanup(self, context: ExecutionContext) -> None:
+                lifecycle_events.append("cleanup")
+
+        prov = FailingProvider("failing-provider", self.stream)
+        step = PlanStep("fail_step", "Failing Step", "Desc", True, "failing-provider", provider=prov)
+        summary = TargetSummary(
+            disk="/dev/mock0",
+            firmware="UEFI",
+            partition_table="GPT",
+            filesystem="ext4",
+            bootloader="limine",
+            init="systemd",
+            services=[],
+        )
+        plan = InstallationPlan(summary=summary, steps=[step], providers=[prov])
+
+        with self.assertRaises(ExecutionError):
+            self.executor.execute_plan(plan, self.context, confirmed=True)
+
+        # validate -> prepare -> apply (fails) -> cleanup (guaranteed in finally)
+        self.assertEqual(lifecycle_events, ["validate", "prepare", "apply", "cleanup"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

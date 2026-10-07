@@ -25,13 +25,14 @@ class CruxSysvServiceProvider(ProviderContract):
         return ["services", "service-management"]
 
     def validate(self, context: ExecutionContext) -> None:
-        target_root = Path(context.target_mount)
-        if not target_root.is_dir():
-            raise VerificationError(
-                message=f"Target mount {target_root} does not exist.",
-                cause="Target is not mounted.",
-                failed_operation="Validate CRUX sysvinit provider",
-            )
+        enabled_services: List[str] = context.metadata.get("enabled_services", [])
+        for srv in enabled_services:
+            if not isinstance(srv, str) or not srv.strip():
+                raise VerificationError(
+                    message=f"Invalid CRUX sysv service identifier: '{srv}'",
+                    cause="Service names must be non-empty strings.",
+                    failed_operation="Validate CRUX sysv services",
+                )
 
     def apply(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)

@@ -20,7 +20,23 @@ class FreeBSDPlatformProvider(ProviderContract):
         return ["platform", "freebsd"]
 
     def validate(self, context: ExecutionContext) -> None:
-        pass
+        import shutil
+        if not shutil.which("mount"):
+            raise ExecutionError(
+                message="FreeBSD mount utility not found.",
+                cause="mount binary is required for platform operations.",
+                failed_operation="Validate FreeBSD mount utility",
+            )
+        if not shutil.which("umount"):
+            raise ExecutionError(
+                message="FreeBSD umount utility not found.",
+                cause="umount binary is required for platform operations.",
+                failed_operation="Validate FreeBSD umount utility",
+            )
+
+    def prepare(self, context: ExecutionContext) -> None:
+        Path(context.target_mount).mkdir(parents=True, exist_ok=True)
+
 
     def mount_target(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -92,4 +108,18 @@ class FreeBSDPlatformProvider(ProviderContract):
         pass
 
     def verify(self, context: ExecutionContext) -> None:
-        pass
+        target_root = Path(context.target_mount)
+        fstab_file = target_root / "etc" / "fstab"
+        if not fstab_file.is_file():
+            raise VerificationError(
+                message=f"FreeBSD fstab file missing at {fstab_file}.",
+                cause="Platform configuration did not generate /etc/fstab.",
+                failed_operation="Verify FreeBSD target fstab",
+                current_state="Missing /etc/fstab",
+                possible_recovery="Re-run fstab generation step.",
+            )
+        self.events.info(EventPhase.VERIFY, "FreeBSD platform configuration verified (/etc/fstab).")
+
+    def cleanup(self, context: ExecutionContext) -> None:
+        self.unmount_target(context)
+

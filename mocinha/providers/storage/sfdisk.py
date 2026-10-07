@@ -40,8 +40,40 @@ class SfdiskStorageProvider(ProviderContract):
                 current_state=context.target_disk,
                 possible_recovery="Verify disk selection.",
             )
+        # Protect user host disks from destruction: verify no critical mountpoints on target disk
+        try:
+            with open("/proc/mounts", "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        dev, mnt = parts[0], parts[1]
+                        if dev.startswith(context.target_disk) and mnt in (
+                            "/", "/usr", "/var", "/etc", "/run", "/boot", "/home"
+                        ):
+                            raise ExecutionError(
+                                message=f"Target disk '{context.target_disk}' has active critical system mount '{mnt}' on '{dev}'.",
+                                cause="Target disk is actively in use by the running operating system.",
+                                failed_operation="Validate target disk safety",
+                                current_state=f"{dev} mounted on {mnt}",
+                                possible_recovery="Choose a dedicated target disk that does not host the active system.",
+                            )
+        except FileNotFoundError:
+            pass
+
+    def prepare(self, context: ExecutionContext) -> None:
+        # Safely unmount any stale mounts belonging strictly to target_disk
+        disk = context.target_disk
+        try:
+            with open("/proc/mounts", "r") as f:
+                stale_mounts = [line.split()[1] for line in f if line.split()[0].startswith(disk)]
+            for m in reversed(stale_mounts):
+                self.events.action(EventPhase.PREPARE, f"Unmounting stale partition on target disk: {m}")
+                self.runner.run(["umount", "-f", m], phase=EventPhase.PREPARE, check=False)
+        except Exception:
+            pass
 
     def apply(self, context: ExecutionContext) -> None:
+
         disk = context.target_disk
         is_uefi = context.metadata.get("firmware", "UEFI").upper() == "UEFI"
         self.events.action(

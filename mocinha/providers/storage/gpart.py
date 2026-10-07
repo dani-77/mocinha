@@ -31,8 +31,29 @@ class FreeBSDStorageProvider(ProviderContract):
                 failed_operation="Validate gpart binary",
                 possible_recovery="Ensure gpart is available in FreeBSD userland.",
             )
+        if not Path(context.target_disk).exists():
+            raise ExecutionError(
+                message=f"Target disk does not exist: {context.target_disk}",
+                cause="Disk path is invalid or disconnected.",
+                failed_operation="Validate FreeBSD target disk path",
+                current_state=context.target_disk,
+                possible_recovery="Verify disk selection.",
+            )
+
+    def prepare(self, context: ExecutionContext) -> None:
+        raw_disk = context.target_disk
+        try:
+            proc = self.runner.run(["mount"], phase=EventPhase.PREPARE, check=False)
+            for line in proc.stdout.splitlines():
+                if line.startswith(raw_disk) and " on " in line:
+                    mnt = line.split(" on ")[1].split(" (")[0].strip()
+                    self.events.action(EventPhase.PREPARE, f"Unmounting stale target mount: {mnt}")
+                    self.runner.run(["umount", "-f", mnt], phase=EventPhase.PREPARE, check=False)
+        except Exception:
+            pass
 
     def apply(self, context: ExecutionContext) -> None:
+
         raw_disk = context.target_disk
         # Strip /dev/ if passed to gpart
         disk_name = raw_disk.replace("/dev/", "")
