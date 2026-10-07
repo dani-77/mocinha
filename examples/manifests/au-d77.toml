@@ -1,0 +1,34 @@
+[system]
+id = "au-d77"
+name = "au-d77 FreeBSD Live"
+version = "14.2"
+arch = "x86_64"
+platform = "freebsd"
+
+[install]
+method = "tar"
+source = "/usr/freebsd-dist/base.txz"
+min_disk_size_bytes = 10737418240
+
+[providers]
+platform = "freebsd"
+storage = "freebsd-gpart"
+filesystem = "freebsd-newfs"
+deployment = "tar-extract"
+users = "pw"
+administrator = "doas"
+initramfs = "none"
+services = "freebsd-rc"
+
+[boot]
+available = ["freebsd-loader", "grub"]
+default = "freebsd-loader"
+
+[services]
+required = ["devd"]
+default_enabled = ["moused"]
+optional = ["sshd", "ntpd"]
+live_only = ["live-config"]
+
+[services.metadata.moused]
+requires = ["devd"]

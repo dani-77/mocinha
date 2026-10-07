@@ -1,0 +1,31 @@
+[system]
+id = "sysvd77"
+name = "sysvd77 CRUX Live"
+version = "3.7"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "rsync"
+source = "/"
+min_disk_size_bytes = 8589934592
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "rsync-copy"
+users = "shadow"
+administrator = "sudo"
+initramfs = "none"
+services = "crux-sysvinit"
+
+[boot]
+available = ["limine", "lilo", "grub"]
+default = "limine"
+
+[services]
+required = ["syslog"]
+default_enabled = ["net"]
+optional = ["sshd"]
+live_only = ["live-setup"]

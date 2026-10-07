@@ -1,0 +1,81 @@
+"""Installation plan data structures and formatting.
+
+The plan represents the complete set of staged, validated actions
+BEFORE any destructive work touches disks.
+"""
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional
+
+from mocinha.core.provider import ExecutionContext
+
+
+@dataclass
+class PlanStep:
+    """A single sequential step within an approved plan."""
+
+    step_id: str
+    title: str
+    description: str
+    is_destructive: bool
+    provider_name: str
+    execute_fn: Optional[Callable[[ExecutionContext], None]] = None
+    verify_fn: Optional[Callable[[ExecutionContext], None]] = None
+
+
+@dataclass
+class TargetSummary:
+    """High-level summary of the target configuration."""
+
+    disk: str
+    firmware: str
+    partition_table: str
+    filesystem: str
+    bootloader: str
+    init: str
+    services: List[str]
+    live_only_removed: List[str] = field(default_factory=list)
+    username: Optional[str] = None
+    hostname: Optional[str] = None
+
+
+@dataclass
+class InstallationPlan:
+    """The complete non-destructive plan produced by the Resolver."""
+
+    summary: TargetSummary
+    steps: List[PlanStep]
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_human_readable(self) -> str:
+        lines = [
+            "============================================================",
+            "                   MOCINHA INSTALLATION PLAN                ",
+            "============================================================",
+            f"Target Disk:      {self.summary.disk}",
+            f"Firmware:         {self.summary.firmware}",
+            f"Partition Table:  {self.summary.partition_table}",
+            f"Root Filesystem:  {self.summary.filesystem}",
+            f"Bootloader:       {self.summary.bootloader}",
+            f"Init System:      {self.summary.init}",
+            f"Services:         {', '.join(self.summary.services)}",
+        ]
+        if self.summary.username:
+            lines.append(f"Primary User:     {self.summary.username}")
+        if self.summary.hostname:
+            lines.append(f"Hostname:         {self.summary.hostname}")
+        if self.summary.live_only_removed:
+            lines.append(f"Live-only Clean:  {', '.join(self.summary.live_only_removed)}")
+
+        lines.append("\nSTAGED EXECUTION STEPS:")
+        lines.append("------------------------------------------------------------")
+        for idx, step in enumerate(self.steps, start=1):
+            destr_flag = "[DESTRUCTIVE]" if step.is_destructive else "             "
+            lines.append(f"{idx:02d}. {destr_flag} {step.title} ({step.provider_name})")
+            lines.append(f"    └─ {step.description}")
+
+        lines.append("------------------------------------------------------------")
+        lines.append("NOTHING HAS BEEN CHANGED YET.")
+        lines.append("Explicit confirmation is required before execution.")
+        lines.append("============================================================")
+        return "\n".join(lines)

@@ -1,0 +1,35 @@
+[system]
+id = "btw-d77"
+name = "btw-d77 Arch Linux Live"
+version = "2026.10"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "squashfs"
+source = "/run/archiso/bootmnt/arch/x86_64/airootfs.sfs"
+min_disk_size_bytes = 10737418240
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "squashfs-extract"
+users = "shadow"
+administrator = "sudo"
+initramfs = "mkinitcpio"
+services = "arch-systemd"
+
+[boot]
+available = ["limine", "systemd-boot", "grub"]
+default = "limine"
+
+[services]
+required = ["dbus"]
+default_enabled = ["NetworkManager"]
+optional = ["sshd", "cups", "bluetooth"]
+live_only = ["archiso-autologin", "reflector"]
+
+[services.metadata.NetworkManager]
+requires = ["dbus"]
+conflicts = ["systemd-networkd", "dhcpcd"]
