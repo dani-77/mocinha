@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / target directories
+target/
+build/
+dist/
+*.o
+*.a
+*.so
+
+# Environments
+.venv/
+env/
+venv/
+
+# Editor / OS files
+*~
+*.swp
+.DS_Store
+
+# Test / Coverage artifacts
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Local logs
+*.log
