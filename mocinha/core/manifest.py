@@ -52,6 +52,7 @@ class ProvidersConfig:
     sysconfig: str  # hostname/locale/keymap/timezone files
     initramfs: str  # "none" when the platform needs no initramfs step
     online: Optional[str] = None  # online components provider (e.g. "pacman"); required with [online]
+    packages: Optional[str] = None  # package manager on the target (e.g. "pacman"); required with [live_only].packages
 
 
 @dataclass
@@ -102,6 +103,9 @@ class LiveOnlyConfig:
 
     users: List[str] = field(default_factory=list)
     files: List[str] = field(default_factory=list)
+    # Packages installed only for the live session (e.g. Mocinha itself), removed from the
+    # target with its package manager ([providers].packages) so its database stays consistent
+    packages: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -150,7 +154,7 @@ def _reject_unknown_keys(table: Dict[str, Any], allowed: set, where: str) -> Non
 
 
 def _parse_live_only(data: Dict[str, Any]) -> LiveOnlyConfig:
-    _reject_unknown_keys(data, {"users", "files"}, "[live_only]")
+    _reject_unknown_keys(data, {"users", "files", "packages"}, "[live_only]")
     users = data.get("users", [])
     if not isinstance(users, list) or not all(isinstance(u, str) and u and u != "root" for u in users):
         raise ManifestError(
@@ -168,7 +172,16 @@ def _parse_live_only(data: Dict[str, Any]) -> LiveOnlyConfig:
             failed_operation="Validate [live_only].files",
             current_state=f"files={files!r}",
         )
-    return LiveOnlyConfig(users=users, files=[_validate_target_path(f, "[live_only].files") for f in files])
+    packages = data.get("packages", [])
+    if not isinstance(packages, list) or not all(isinstance(p, str) and PACKAGE_NAME.match(p) for p in packages):
+        raise ManifestError(
+            message="Invalid [live_only].packages",
+            cause="packages must be a list of package names.",
+            failed_operation="Validate [live_only].packages",
+            current_state=f"packages={packages!r}",
+        )
+    return LiveOnlyConfig(users=users, files=[_validate_target_path(f, "[live_only].files") for f in files],
+                          packages=list(packages))
 
 
 def _parse_target_files(entries: Any) -> List["TargetFile"]:
@@ -565,7 +578,7 @@ class Manifest:
 
         t = _Table(data["providers"], "[providers]",
                    {k: str for k in ("platform", "storage", "filesystem", "deployment", "users", "services", "sysconfig", "initramfs")},
-                   {"online": str})
+                   {"online": str, "packages": str})
         providers = ProvidersConfig(**t.data)
         if "online" in data and not providers.online:
             raise ManifestError(
@@ -617,6 +630,13 @@ class Manifest:
             )
         users = UsersConfig(groups=groups, shell=t.get("shell"))
 
+        live_only = _parse_live_only(data.get("live_only", {}))
+        if live_only.packages and not providers.packages:
+            raise ManifestError(
+                message="[live_only].packages needs [providers].packages",
+                cause="Live-only packages are removed with the target's package manager (e.g. \"pacman\").",
+                failed_operation="Validate [providers]",
+            )
         return cls(
             system=system,
             install=install,
@@ -624,7 +644,7 @@ class Manifest:
             boot=boot,
             services=services,
             users=users,
-            live_only=_parse_live_only(data.get("live_only", {})),
+            live_only=live_only,
             target_files=_parse_target_files(data.get("target_files", [])),
             live_files=_parse_live_files(data.get("live_files", [])),
             packages=_parse_packages(data["packages"]) if "packages" in data else None,

@@ -207,6 +207,16 @@ class InstallationResolver:
                 is_destructive=True,
                 provider_name=self.manifest.providers.deployment or "deployment",
             ),
+        ] + ([
+            PlanStep(
+                step_id="remove_live_only_packages",
+                title="Remove live-only packages from target",
+                description=f"Uninstall {live_only.packages} with the target's package manager "
+                            f"({self.manifest.providers.packages}), with their configuration and unneeded dependencies",
+                is_destructive=False,
+                provider_name=self.manifest.providers.packages,
+            ),
+        ] if live_only.packages else []) + [
             PlanStep(
                 step_id="remove_live_only_files",
                 title="Remove live-only files from target",
@@ -357,6 +367,7 @@ class InstallationResolver:
             "install_source": self.manifest.install.source,
             "live_only_users": list(live_only.users),
             "live_only_files": list(live_only.files),
+            "live_only_packages": list(live_only.packages),
             "target_files": list(target_files),
             "live_files": list(live_files),
             "packages": packages,

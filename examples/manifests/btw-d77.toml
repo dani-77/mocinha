@@ -37,6 +37,7 @@ initramfs = "mkinitcpio"
 services = "arch-systemd"
 sysconfig = "systemd"
 online = "pacman"
+packages = "pacman"
 
 [boot]
 # The live ships grub + efibootmgr only (packages.x86_64), as d77-install uses GRUB.
@@ -72,7 +73,11 @@ conflicts = ["systemd-networkd", "dhcpcd"]
 [live_only]
 # Live session account (autologin into Qtile via greetd [initial_session])
 users = ["live"]
+# The installer itself: uninstalled from the target with pacman (its package
+# and unneeded dependencies); its manifest is a live file, listed below.
+packages = ["mocinha"]
 files = [
+    "/etc/mocinha.toml",
     # root autologin on tty1 and archiso SSH root login
     "/etc/systemd/system/getty@tty1.service.d/autologin.conf",
     "/etc/ssh/sshd_config.d/10-archiso.conf",

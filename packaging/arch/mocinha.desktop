@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mocinha Installer
+GenericName=System Installer
+Comment=Install this live system to disk
+Exec=mocinha
+Icon=mocinha
+Terminal=false
+Categories=System;
+Keywords=install;installer;disk;

@@ -266,3 +266,39 @@ class TestNetworkProviders(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLiveOnlyPackages(unittest.TestCase):
+    """Mocinha removes itself (and other live-only packages) from the target with pacman."""
+
+    def test_manifest_needs_a_package_provider(self) -> None:
+        data = tomllib.loads(BTW.read_text())
+        data["live_only"]["packages"] = ["mocinha"]
+        data["providers"].pop("packages", None)
+        with self.assertRaises(ManifestError):
+            Manifest.from_dict(data)
+        data["providers"]["packages"] = "pacman"
+        data["live_only"]["packages"] = ["bad name"]
+        with self.assertRaises(ManifestError):
+            Manifest.from_dict(data)
+
+    def test_plan_and_removal(self) -> None:
+        from mocinha.providers.packages.pacman import PacmanPackagesProvider
+        data = tomllib.loads(BTW.read_text())
+        data["providers"]["packages"] = "pacman"
+        data["live_only"]["packages"] = ["mocinha", "never-installed"]
+        plan = resolve({}, Manifest.from_dict(data))
+        steps = [s.step_id for s in plan.steps]
+        self.assertLess(steps.index("deployment_copy"), steps.index("remove_live_only_packages"))
+        self.assertLess(steps.index("remove_live_only_packages"), steps.index("remove_live_only_files"))
+        provider = PacmanPackagesProvider("pacman", EventStream())
+        ctx = ExecutionContext(target_disk="/dev/vda", target_mount="/mnt", target_partitions={},
+                               metadata={"live_only_packages": ["mocinha", "never-installed"]})
+        answers = iter([ok("mocinha\n"), ok(), ok("")])
+        with mock.patch("mocinha.providers.packages.pacman.run_in_target", side_effect=lambda *a, **k: next(answers)) as run:
+            provider.remove_live_only_packages(ctx)
+            provider.verify_live_only_packages_removed(ctx)
+        self.assertEqual(run.call_args_list[1].args[2], ["pacman", "-Rns", "--noconfirm", "mocinha"])
+        with mock.patch("mocinha.providers.packages.pacman.run_in_target", return_value=ok("mocinha\n")):
+            with self.assertRaises(VerificationError):
+                provider.verify_live_only_packages_removed(ctx)

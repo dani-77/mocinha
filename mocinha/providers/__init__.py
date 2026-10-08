@@ -21,6 +21,7 @@ from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
 from mocinha.providers.network.iwd import IwdProvider
 from mocinha.providers.network.networkmanager import NetworkManagerProvider
 from mocinha.providers.online.pacman import PacmanOnlineProvider
+from mocinha.providers.packages.pacman import PacmanPackagesProvider
 from mocinha.providers.platform.freebsd import FreeBSDPlatformProvider
 from mocinha.providers.platform.linux import LinuxPlatformProvider
 from mocinha.providers.services.crux_sysv import CruxSysvServiceProvider
@@ -85,6 +86,9 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("network", NetworkManagerProvider("networkmanager", event_stream))
     registry.register("network", IwdProvider("iwd", event_stream))
 
+    # Package manager on the target (live-only package removal)
+    registry.register("packages", PacmanPackagesProvider("pacman", event_stream))
+
     # Users
     registry.register("users", ShadowUsersProvider("shadow", event_stream))
     registry.register("users", FreeBSDUsersProvider("pw", event_stream))
@@ -145,6 +149,10 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
         "target_verify": (plat_prov, None, plat_prov.verify),
         "target_unmount": (plat_prov, plat_prov.unmount_target, plat_prov.verify_unmounted),
     }
+    if any(step.step_id == "remove_live_only_packages" for step in plan.steps):
+        pkg_prov = require("packages", manifest.providers.packages)
+        bindings["remove_live_only_packages"] = (pkg_prov, pkg_prov.remove_live_only_packages,
+                                                 pkg_prov.verify_live_only_packages_removed)
     if any(step.step_id == "install_online_components" for step in plan.steps):
         online_prov = require("online", manifest.providers.online)
         bindings["install_online_components"] = (online_prov, online_prov.apply, online_prov.verify)

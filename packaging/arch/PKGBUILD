@@ -1,0 +1,47 @@
+# Maintainer: Daniel Azevedo <daniazevedo77@gmail.com>
+#
+# Mocinha --- live-system installer. Shipped on a live (e.g. btw-d77) and
+# removed from the installed system by Mocinha itself ([live_only].packages
+# in the live's /etc/mocinha.toml).
+#
+#   cd packaging/arch && makepkg -f
+#
+# Offline build against a local checkout (committed HEAD):
+#   MOCINHA_GIT=git+file:///path/to/mocinha makepkg -f
+
+pkgname=mocinha
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Small, modular, platform-aware live-system installer (GTK3 + CLI)"
+arch=('any')
+url="https://github.com/dani-77/mocinha"
+license=('custom')
+depends=('python' 'python-gobject' 'gtk3' 'sudo'
+         'arch-install-scripts' 'util-linux' 'e2fsprogs' 'dosfstools' 'squashfs-tools')
+optdepends=('networkmanager: connect to networks from Mocinha (nmcli)'
+            'iwd: connect to Wi-Fi from Mocinha (iwctl)')
+makedepends=('git')
+checkdepends=('python')
+source=("mocinha::${MOCINHA_GIT:-git+https://github.com/dani-77/mocinha.git}")
+sha256sums=('SKIP')
+
+pkgver() {
+	cd "$srcdir/mocinha"
+	printf '0.1.0.r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+check() {
+	cd "$srcdir/mocinha"
+	python3 -m unittest discover -s tests -q
+}
+
+package() {
+	cd "$srcdir/mocinha"
+	install -d "$pkgdir/usr/share/mocinha"
+	cp -r mocinha bin assets examples "$pkgdir/usr/share/mocinha/"
+	find "$pkgdir/usr/share/mocinha" -name '__pycache__' -prune -exec rm -rf {} +
+	install -Dm755 packaging/arch/mocinha.sh "$pkgdir/usr/bin/mocinha"
+	install -Dm644 packaging/arch/mocinha.desktop "$pkgdir/usr/share/applications/mocinha.desktop"
+	install -Dm644 assets/logo.png "$pkgdir/usr/share/pixmaps/mocinha.png"
+	install -Dm644 -t "$pkgdir/usr/share/doc/mocinha" README.md STATUS.md docs/manifest-schema.md
+}
