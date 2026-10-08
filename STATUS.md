@@ -143,9 +143,11 @@ confirmation. No placeholder binaries are written anywhere.
   `examples/manifests/btw-d77.toml`).
 - **Mocinha removes itself from the target**: `[live_only].packages`
   (`pacman -Rns` in the target) + `/etc/mocinha.toml` in `[live_only].files`.
-- The ISO built from that branch (`btw-d77-2026.10.08`) carries
-  `mocinha 0.1.0.r29.71e0fce`; two later changes (quieter removal check,
-  welcome text matching the online contract) are not in that package yet.
+- The ISO built from that branch (`btw-d77-2026.10.08`, rebuilt) carries
+  `mocinha 0.1.0.r30.48a195f`. The btw-d77 branch `mocinha` is pushed (private
+  repository); the d77-iso branch `mocinha` with the package stays local, and
+  `~/d77-iso` is back on `main`: building the btw-d77 branch needs
+  `git -C ~/d77-iso checkout mocinha` first.
 - No FreeBSD or CRUX package. With `crux-pkgadd` Mocinha never reaches the
   target unless listed.
 
@@ -175,7 +177,7 @@ over serial.
 | BIOS + GRUB, online components + `--aur yay-bin` (level-A code, `64d1990`) | pass (16 steps verified) | pass | pass (`btw-d77-aur.json`) |
 | UEFI + GRUB, `--offline` (online components declined; level-A code, `64d1990`) | pass | pass | pass (`btw-d77-offline.json`) |
 | BIOS + GRUB / UEFI + GRUB without online components (sysvd77 code, `49d6236`) | pass | pass | pass |
-| `btw-d77-2026.10.08` (branch `mocinha`): BIOS + GRUB, online, **run by the Mocinha package on the live** | pass (17 steps verified) | pass | pass (`btw-d77-packaged.json`: no `mocinha` package, `/usr/share/mocinha`, `/usr/bin/mocinha` or `/etc/mocinha.toml` on the target) |
+| `btw-d77-2026.10.08` (branch `mocinha`, package `r30.48a195f`): BIOS + GRUB and UEFI + GRUB, online, **run by the Mocinha package on the live** | pass (17 steps verified, no error lines) | pass | pass (`btw-d77-packaged.json`: no `mocinha` package, `/usr/share/mocinha`, `/usr/bin/mocinha` or `/etc/mocinha.toml` on the target) |
 | UEFI + Limine (earlier code, `e8bd6ee`) | refused at validation, before any disk write (no Limine in the live) | --- | --- |
 
 Checked on the installed system: hostname; only user `dani` (uid 1000, groups
