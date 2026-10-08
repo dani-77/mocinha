@@ -18,7 +18,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
 
     # If explicit CLI command or no display server, run CLI
-    cli_commands = {"probe", "check-manifest", "plan", "install", "network", "packages", "--cli", "-h", "--help"}
+    cli_commands = {"probe", "check-manifest", "plan", "install", "network", "packages", "mirrors", "--cli", "-h", "--help"}
     if not has_display or any(arg in cli_commands for arg in args):
         from mocinha.frontends.cli.main import main
         main()

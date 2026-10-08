@@ -1,0 +1,71 @@
+# chimera-bootstrap --- Mocinha bootstrap profile for Chimera Linux (level B)
+#
+# Not a remaster manifest: a profile shipped with Mocinha for installing Chimera
+# from its repositories (network), like chimera-installer's SOURCE=network:
+#   chimera-bootstrap [-m MIRROR] <root> base-full <kernel> <bootloader packages>
+# then genfstab, hostname, timezone, root + one user (wheel), update-initramfs,
+# grub-install --removable, update-grub. The live provides only
+# chimera-bootstrap, apk and its repository configuration.
+#
+# Package policy: chimera-installer's defaults (base-full; linux-stable or
+# linux-lts; grub-<target> for the firmware), plus what this profile's own
+# choice of services needs. Chimera's installer enables no services itself;
+# this profile offers NetworkManager by default so the installed system has
+# a network. Edit this profile, or write another, to change the policy.
+
+[system]
+id = "chimera"
+name = "Chimera Linux (bootstrap)"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "chimera-bootstrap"
+source = "/usr/lib/apk/repositories.d"   # what the target is installed from: the live's repositories
+min_disk_size_bytes = 10737418240
+root_filesystem = "ext4"
+root_mount_options = "rw,relatime"
+esp_size = "512m"
+esp_mountpoint = "/boot/efi"
+esp_mount_options = "rw,relatime,fmask=0022,dmask=0022"
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "chimera-bootstrap"
+users = "shadow"
+initramfs = "initramfs-tools"
+services = "dinit"
+sysconfig = "chimera"
+online = "apk"
+
+[bootstrap]
+packages = ["base-full"]
+kernels = ["linux-stable", "linux-lts"]
+
+[bootstrap.bootloader_packages.grub]
+bios = ["grub-i386-pc"]
+uefi = ["grub-x86_64-efi"]
+
+[bootstrap.service_packages]
+networkmanager = ["networkmanager", "networkmanager-dinit"]
+sshd = ["openssh"]
+
+[boot]
+available = ["grub"]
+default = "grub"
+grub_removable = true          # chimera-installer: grub-install --removable on UEFI
+
+[services]
+default_enabled = ["networkmanager"]
+optional = ["sshd"]
+
+[users]
+groups = ["wheel"]             # chimera-installer: usermod -a -G wheel
+password_hash = "SHA512"       # chimera-installer: chpasswd -c SHA512
+
+[online]
+optional = true
+upgrade = false
+mirror_list = "https://repo.chimera-linux.org/mirrors.txt"

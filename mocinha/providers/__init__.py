@@ -8,6 +8,7 @@ from mocinha.core.provider import ProviderRegistry
 from mocinha.providers.boot.freebsd_loader import FreeBSDBootProvider
 from mocinha.providers.boot.grub import GrubBootProvider
 from mocinha.providers.boot.limine import LimineBootProvider
+from mocinha.providers.deployment.chimera_bootstrap import ChimeraBootstrapDeploymentProvider
 from mocinha.providers.deployment.crux_pkgadd import CruxPkgaddDeploymentProvider
 from mocinha.providers.deployment.pacstrap import PacstrapDeploymentProvider
 from mocinha.providers.deployment.rsync import RsyncDeploymentProvider
@@ -20,13 +21,17 @@ from mocinha.providers.initramfs.dracut import DracutProvider
 from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
 from mocinha.providers.network.iwd import IwdProvider
 from mocinha.providers.network.networkmanager import NetworkManagerProvider
+from mocinha.providers.initramfs.initramfs_tools import InitramfsToolsProvider
+from mocinha.providers.online.apk import ApkOnlineProvider
 from mocinha.providers.online.pacman import PacmanOnlineProvider
 from mocinha.providers.packages.pacman import PacmanPackagesProvider
 from mocinha.providers.platform.freebsd import FreeBSDPlatformProvider
 from mocinha.providers.platform.linux import LinuxPlatformProvider
+from mocinha.providers.services.dinit import DinitServiceProvider
 from mocinha.providers.services.crux_sysv import CruxSysvServiceProvider
 from mocinha.providers.services.freebsd_rc import FreeBSDServiceProvider
 from mocinha.providers.services.systemd import SystemdServiceProvider
+from mocinha.providers.sysconfig.chimera import ChimeraSysconfigProvider
 from mocinha.providers.sysconfig.crux_rc import CruxRcSysconfigProvider
 from mocinha.providers.sysconfig.freebsd_rc import FreeBSDRcSysconfigProvider
 from mocinha.providers.sysconfig.systemd import SystemdSysconfigProvider
@@ -56,6 +61,7 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("sysconfig", SystemdSysconfigProvider("systemd", event_stream))
     registry.register("sysconfig", FreeBSDRcSysconfigProvider("freebsd-rc", event_stream))
     registry.register("sysconfig", CruxRcSysconfigProvider("crux-rc", event_stream))
+    registry.register("sysconfig", ChimeraSysconfigProvider("chimera", event_stream))
 
     # Deployment
     registry.register("deployment", SquashfsDeploymentProvider("squashfs-extract", event_stream))
@@ -64,15 +70,18 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("deployment", TreeCopyDeploymentProvider("tree-copy", event_stream))
     registry.register("deployment", CruxPkgaddDeploymentProvider("crux-pkgadd", event_stream))
     registry.register("deployment", PacstrapDeploymentProvider("pacstrap", event_stream))
+    registry.register("deployment", ChimeraBootstrapDeploymentProvider("chimera-bootstrap", event_stream))
 
     # Initramfs
     registry.register("initramfs", MkinitcpioProvider("mkinitcpio", event_stream))
     registry.register("initramfs", DracutProvider("dracut", event_stream))
+    registry.register("initramfs", InitramfsToolsProvider("initramfs-tools", event_stream))
 
     # Services
     registry.register("services", SystemdServiceProvider("arch-systemd", event_stream))
     registry.register("services", FreeBSDServiceProvider("freebsd-rc", event_stream))
     registry.register("services", CruxSysvServiceProvider("crux-sysvinit", event_stream))
+    registry.register("services", DinitServiceProvider("dinit", event_stream))
 
     # Bootloader
     registry.register("bootloader", LimineBootProvider("limine", event_stream))
@@ -81,6 +90,7 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
 
     # Online components (AGENTS.md "Online rules", level A)
     registry.register("online", PacmanOnlineProvider("pacman", event_stream))
+    registry.register("online", ApkOnlineProvider("apk", event_stream))
 
     # Network connection in the live (rule 7); NetworkManager first: it may drive iwd as its backend
     registry.register("network", NetworkManagerProvider("networkmanager", event_stream))

@@ -18,7 +18,8 @@ url="https://github.com/dani-77/mocinha"
 license=('custom')
 depends=('python' 'python-gobject' 'gtk3' 'sudo'
          'arch-install-scripts' 'util-linux' 'e2fsprogs' 'dosfstools' 'squashfs-tools')
-optdepends=('networkmanager: connect to networks from Mocinha (nmcli)'
+optdepends=('polkit: start Mocinha from a desktop launcher (pkexec + the session'"'"'s polkit agent)'
+            'networkmanager: connect to networks from Mocinha (nmcli)'
             'iwd: connect to Wi-Fi from Mocinha (iwctl)')
 makedepends=('git')
 checkdepends=('python')
@@ -41,6 +42,8 @@ package() {
 	cp -r mocinha bin assets examples "$pkgdir/usr/share/mocinha/"
 	find "$pkgdir/usr/share/mocinha" -name '__pycache__' -prune -exec rm -rf {} +
 	install -Dm755 packaging/arch/mocinha.sh "$pkgdir/usr/bin/mocinha"
+	install -Dm755 packaging/arch/mocinha-root "$pkgdir/usr/lib/mocinha/mocinha-root"
+	install -Dm644 packaging/arch/org.mocinha.installer.policy "$pkgdir/usr/share/polkit-1/actions/org.mocinha.installer.policy"
 	install -Dm644 packaging/arch/mocinha.desktop "$pkgdir/usr/share/applications/mocinha.desktop"
 	install -Dm644 assets/logo.png "$pkgdir/usr/share/pixmaps/mocinha.png"
 	install -Dm644 -t "$pkgdir/usr/share/doc/mocinha" README.md STATUS.md docs/manifest-schema.md

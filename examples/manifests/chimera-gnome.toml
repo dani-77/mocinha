@@ -1,0 +1,62 @@
+# chimera-gnome --- the official Chimera Linux GNOME live (copied to disk)
+#
+# Not a remaster manifest: Mocinha's manifest for the official live image
+# (chimera-linux-x86_64-LIVE-*-gnome.iso), following chimera-installer with
+# SOURCE=local: chimera-bootstrap -l (a tar copy of
+# /run/live/rootfs/filesystem.erofs), genfstab, hostname, timezone, root + one
+# user (wheel), chpasswd -c SHA512, update-initramfs, grub-install --removable,
+# update-grub.
+#
+# The image itself is clean: the live account (anon), GDM with autologin and
+# the services rtkit, polkitd, syslog-ng and networkmanager are all set up at
+# boot by the live initramfs hooks (9990-chimera-user, 9990-chimera-graphical),
+# in the live's writable overlay. chimera-installer enables none of those
+# services on the target, so its GNOME install boots without GDM or a network
+# service. Here the services the live session runs are pre-selected (they can
+# be deselected in the plan); the live autologin is not carried over.
+
+[system]
+id = "chimera"
+name = "Chimera Linux GNOME Live"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "local copy"
+source = "/run/live/rootfs/filesystem.erofs"   # chimera-bootstrap -l's default source
+min_disk_size_bytes = 10737418240
+root_filesystem = "ext4"
+root_mount_options = "rw,relatime"
+esp_size = "512m"
+esp_mountpoint = "/boot/efi"
+esp_mount_options = "rw,relatime,fmask=0022,dmask=0022"
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "tree-copy"
+users = "shadow"
+initramfs = "initramfs-tools"
+services = "dinit"
+sysconfig = "chimera"
+online = "apk"
+
+[boot]
+available = ["grub"]
+default = "grub"
+grub_removable = true          # chimera-installer: grub-install --removable on UEFI
+
+[services]
+# What the live session runs (its boot hooks); chimera-installer enables none of them.
+default_enabled = ["gdm", "networkmanager", "polkitd", "rtkit", "syslog-ng"]
+optional = ["bluetoothd", "sshd"]
+
+[users]
+groups = ["wheel"]             # chimera-installer: usermod -a -G wheel
+password_hash = "SHA512"       # chimera-installer: chpasswd -c SHA512
+
+[online]
+optional = true
+upgrade = false
+mirror_list = "https://repo.chimera-linux.org/mirrors.txt"

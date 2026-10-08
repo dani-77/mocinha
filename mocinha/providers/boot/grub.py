@@ -80,7 +80,11 @@ class GrubBootProvider(ProviderContract):
                                   "(e.g. [packages].install_bios / install_uefi) or choose another bootloader.",
             )
         # Paths as seen inside the target chroot
-        if is_uefi:
+        if is_uefi and context.metadata.get("grub_removable"):
+            # Removable-media path EFI/BOOT/BOOTX64.EFI, no NVRAM entry (e.g. Chimera's installer)
+            cmd = [tool, "--target=x86_64-efi", "--removable", f"--efi-directory={context.metadata['esp_mountpoint']}",
+                   "--boot-directory=/boot"]
+        elif is_uefi:
             cmd = [tool, "--target=x86_64-efi", f"--efi-directory={context.metadata['esp_mountpoint']}",
                    "--boot-directory=/boot", f"--bootloader-id={context.metadata['efi_id']}", "--recheck"]
         else:
@@ -127,7 +131,9 @@ class GrubBootProvider(ProviderContract):
         boot_dir = target_root / "boot"
         if self._is_uefi(context):
             esp = target_root / context.metadata["esp_mountpoint"].lstrip("/")
-            require_pe_binary(esp / "EFI" / context.metadata["efi_id"] / "grubx64.efi", "GRUB EFI binary")
+            efi_binary = (esp / "EFI" / "BOOT" / "BOOTX64.EFI" if context.metadata.get("grub_removable")
+                          else esp / "EFI" / context.metadata["efi_id"] / "grubx64.efi")
+            require_pe_binary(efi_binary, "GRUB EFI binary")
         else:
             core_img = boot_dir / "grub" / "i386-pc" / "core.img"
             with open(context.target_disk, "rb") as disk:

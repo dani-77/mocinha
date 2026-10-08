@@ -62,6 +62,7 @@ class BootConfig:
     timeout: Optional[int] = None    # None: bootloader/remaster default
     kernel_args: List[str] = field(default_factory=list)  # appended to the kernel command line
     efi_id: Optional[str] = None     # EFI/<efi_id> directory and NVRAM entry name; None: [system].id
+    grub_removable: bool = False     # UEFI: GRUB at the removable-media path EFI/BOOT/BOOTX64.EFI, no NVRAM entry
 
 
 @dataclass
@@ -90,6 +91,9 @@ class UsersConfig:
     # Groups of the primary user (including the administrator group, e.g. "wheel")
     groups: List[str] = field(default_factory=list)
     shell: Optional[str] = None  # None: the target's useradd/pw default
+    # crypt method passed to chpasswd -c (e.g. "SHA512"); None: the target's default.
+    # Chimera's chpasswd without -c goes through PAM and writes nothing in a chroot.
+    password_hash: Optional[str] = None
 
 
 @dataclass
@@ -296,7 +300,7 @@ def _parse_online(data: Any) -> "OnlineConfig":
         raise ManifestError(message="Invalid [online]", cause="[online] must be a table and repositories an array of tables.",
                             failed_operation="Validate [online]")
     t = _Table({k: v for k, v in data.items() if k != "repositories"}, "[online]", {"optional": bool, "upgrade": bool},
-               {"packages": list, "aur": list, "grub_defaults": dict, "overwrite": list})
+               {"packages": list, "aur": list, "grub_defaults": dict, "overwrite": list, "mirror_list": str})
     repos = []
     for entry in data.get("repositories", []):
         r = _Table(entry, "[[online.repositories]]", {"name": str, "servers": list, "siglevel": str}, {})
@@ -322,9 +326,13 @@ def _parse_online(data: Any) -> "OnlineConfig":
         raise ManifestError(message="Invalid [online].overwrite",
                             cause="Entries are absolute path globs (e.g. \"/etc/skel/*\"), never the whole tree.",
                             failed_operation="Validate [online]")
-    return OnlineConfig(optional=t.get("optional"), upgrade=t.get("upgrade"), repositories=repos,
+    config = OnlineConfig(optional=t.get("optional"), upgrade=t.get("upgrade"), repositories=repos,
                         packages=t.get("packages", []), aur=t.get("aur", []), grub_defaults=dict(grub),
-                        overwrite=list(overwrite))
+                        overwrite=list(overwrite), mirror_list=t.get("mirror_list"))
+    if config.mirror_list and not config.mirror_list.startswith("https://"):
+        raise ManifestError(message="Invalid [online].mirror_list", cause="The mirror list must be an https:// URL.",
+                            failed_operation="Validate [online]")
+    return config
 
 
 def _parse_bootstrap(data: Any) -> "BootstrapConfig":
@@ -479,6 +487,7 @@ class OnlineConfig:
     aur: List[str] = field(default_factory=list)     # built from the AUR at the revision shown in the plan
     grub_defaults: Dict[str, str] = field(default_factory=dict)  # /etc/default/grub settings needing them
     overwrite: List[str] = field(default_factory=list)  # deployed files the packages may take over (pacman --overwrite)
+    mirror_list: Optional[str] = None  # URL of the distribution's mirror list; the user may pick a mirror from it
 
 
 @dataclass
@@ -588,9 +597,10 @@ class Manifest:
             )
 
         t = _Table(data["boot"], "[boot]", {"available": list, "default": str},
-                   {"timeout": int, "kernel_args": list, "efi_id": str})
+                   {"timeout": int, "kernel_args": list, "efi_id": str, "grub_removable": bool})
         boot = BootConfig(available=t.get("available"), default=t.get("default"),
-                          timeout=t.get("timeout"), kernel_args=t.get("kernel_args", []), efi_id=t.get("efi_id"))
+                          timeout=t.get("timeout"), kernel_args=t.get("kernel_args", []), efi_id=t.get("efi_id"),
+                          grub_removable=t.get("grub_removable", False))
         if boot.efi_id is not None and not re.fullmatch(r"[A-Za-z0-9._-]+", boot.efi_id):
             raise ManifestError(
                 message=f"Invalid [boot].efi_id {boot.efi_id!r}",
@@ -619,7 +629,7 @@ class Manifest:
             metadata=metadata_map, default_target=t.get("default_target"),
         )
 
-        t = _Table(data.get("users", {}), "[users]", {}, {"groups": list, "shell": str})
+        t = _Table(data.get("users", {}), "[users]", {}, {"groups": list, "shell": str, "password_hash": str})
         groups = t.get("groups", [])
         if not all(re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups):
             raise ManifestError(
@@ -628,7 +638,11 @@ class Manifest:
                 failed_operation="Validate [users].groups",
                 current_state=f"groups={groups!r}",
             )
-        users = UsersConfig(groups=groups, shell=t.get("shell"))
+        if t.get("password_hash") not in (None, "DES", "MD5", "SHA256", "SHA512", "BCRYPT", "YESCRYPT"):
+            raise ManifestError(message="Invalid [users].password_hash",
+                                cause="Known chpasswd -c methods: DES, MD5, SHA256, SHA512, BCRYPT, YESCRYPT.",
+                                failed_operation="Validate [users]")
+        users = UsersConfig(groups=groups, shell=t.get("shell"), password_hash=t.get("password_hash"))
 
         live_only = _parse_live_only(data.get("live_only", {}))
         if live_only.packages and not providers.packages:

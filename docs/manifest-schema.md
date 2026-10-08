@@ -50,7 +50,7 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 Maps capabilities to provider names; all keys are required:
 `platform`, `storage`, `filesystem`, `deployment`, `users`, `services`,
 `sysconfig` (hostname/locale/keymap/timezone files: `systemd`,
-`freebsd-rc`, `crux-rc`), `initramfs` (`none` when the platform needs no
+`freebsd-rc`, `crux-rc`, `chimera`), `initramfs` (`none` when the platform needs no
 initramfs step). Optional: `online` (e.g. `pacman`), required when the
 manifest has `[online]` and needed for any user-requested online package. A name
 that is not registered fails plan wiring, before confirmation.
@@ -64,6 +64,7 @@ that is not registered fails plan wiring, before confirmation.
 | `timeout` | no | Boot menu timeout; omitted keeps the bootloader's/remaster's own setting. |
 | `kernel_args` | no | Arguments appended to the kernel command line (the user may add more). |
 | `efi_id` | no | Name of the `EFI/<efi_id>` directory and NVRAM entry GRUB installs; default `[system].id`. |
+| `grub_removable` | no | `true`: on UEFI, GRUB goes to the removable-media path `EFI/BOOT/BOOTX64.EFI` with no NVRAM entry (`grub-install --removable`, e.g. Chimera's installer). |
 
 GRUB is installed with the target's own `grub-install` and configured
 with its own `grub-mkconfig` (in a chroot of the target) and
@@ -93,6 +94,7 @@ enablement links, which are removed.
 |---|---|
 | `groups` | Groups of the primary user, including the administrator group (e.g. `wheel`). Missing groups fail the install. |
 | `shell` | Login shell; omitted uses the target's `useradd`/`pw` default. |
+| `password_hash` | crypt method passed to `chpasswd -c` (e.g. `SHA512`); omitted uses the target's default. Needed on Chimera, whose `chpasswd` without `-c` goes through PAM and writes nothing in a chroot. |
 
 Administrator rules (sudoers, doas) are remaster policy and are declared
 as `[[target_files]]`.
@@ -190,6 +192,7 @@ the primary user). Every online action is shown in the plan; the preflight
 | `aur` | no | Packages built from the AUR by a temporary unprivileged user at the git revision shown before confirmation; a different revision at execution time stops the install. |
 | `overwrite` | no | Absolute path globs of deployed files the packages may take over (`pacman --overwrite`), e.g. files a live copied from its airootfs that a package also ships. Never the whole tree. |
 | `[[online.repositories]]` | no | `name`, `servers` (https only), `siglevel`: appended to the target's `pacman.conf` when not already there; the signature policy is shown in the plan. |
+| `mirror_list` | no | https URL of the distribution's mirror list (e.g. Chimera's `mirrors.txt`). The user may pick a mirror from it (`--mirror`, GUI "Network & Mirror" page); the online provider writes it to the target (Chimera: `/etc/apk/repositories.d/00-chimera-mirror.list`) and, for bootstrap installs, downloads from it. No choice = the distribution's default; a mirror without a list is refused. |
 | `[online.grub_defaults]` | no | `/etc/default/grub` settings that only make sense with the online components (e.g. `GRUB_THEME`); applied only when they are installed, and the theme file must exist. |
 
 ### `[bootstrap]` (bootstrap profiles only; AGENTS.md "Online rules", level B)
@@ -222,10 +225,11 @@ providers that cannot apply a requested change refuse it during
 validation, before any disk is modified). Online: decline the optional
 online components (`--offline`; GUI checkbox), extra repository packages
 (`--online-package`; part of the bootstrap transaction for profiles) and AUR
-packages (`--aur`); for bootstrap profiles also the kernel (`--kernel`) and a
+packages (`--aur`), the package mirror (`--mirror`, listed by `mocinha
+mirrors`); for bootstrap profiles also the kernel (`--kernel`) and a
 package search (`mocinha packages search <term>`, GUI search box). The network can be set up
 from Mocinha itself (`mocinha network status|scan|connect`; GUI page
-"Network & Online Components").
+"Network & Mirror", shown right after the welcome page).
 
 ---
 

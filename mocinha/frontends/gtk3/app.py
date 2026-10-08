@@ -74,7 +74,9 @@ class MocinhaGTKApp(Gtk.Window):
         self._page_user = self._create_user_page()
         self._page_services = self._create_services_page()
         self._page_boot = self._create_boot_page()
-        # Only for remasters with an online provider (AGENTS.md "Online rules")
+        # Only for remasters with an online provider (AGENTS.md "Online rules"): the network
+        # (and package mirror) first, as the online steps and the mirror list need it
+        self._page_network = self._create_network_page() if self.manifest.providers.online else None
         self._page_online = self._create_online_page() if self.manifest.providers.online else None
         self._page_summary = self._create_summary_page()
         self._page_progress = self._create_progress_page()
@@ -82,6 +84,7 @@ class MocinhaGTKApp(Gtk.Window):
 
         self.pages = [
             ("welcome", self._page_welcome),
+        ] + ([("network", self._page_network)] if self._page_network else []) + [
             ("disk", self._page_disk),
             ("user", self._page_user),
             ("services", self._page_services),
@@ -357,7 +360,7 @@ class MocinhaGTKApp(Gtk.Window):
         box.pack_start(self.boot_combo, False, False, 0)
         return box
 
-    def _create_online_page(self) -> Gtk.Widget:
+    def _create_network_page(self) -> Gtk.Widget:
         from mocinha.providers.network import select_network_provider
 
         self.network_provider = select_network_provider(self.registry)
@@ -366,7 +369,7 @@ class MocinhaGTKApp(Gtk.Window):
             getattr(box, f"set_margin_{side}")(20 if side in ("top", "bottom") else 30)
 
         title = Gtk.Label()
-        title.set_markup("<span size='x-large' weight='bold'>Network &amp; Online Components</span>")
+        title.set_markup("<span size='x-large' weight='bold'>Network &amp; Mirror</span>")
         title.set_alignment(0, 0.5)
         box.pack_start(title, False, False, 0)
 
@@ -406,6 +409,51 @@ class MocinhaGTKApp(Gtk.Window):
         else:
             GLib.idle_add(lambda: self._network_task(self._network_refresh_work) and False)
 
+        # --- package mirror ([online].mirror_list): loaded only once the network is up
+        self.mirror_combo = None
+        if self.manifest.online and self.manifest.online.mirror_list:
+            mrow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            mrow.pack_start(Gtk.Label(label="Package mirror:"), False, False, 0)
+            self.mirror_combo = Gtk.ComboBoxText()
+            self.mirror_combo.append("", "Default (the distribution's own repository)")
+            self.mirror_combo.set_active(0)
+            mrow.pack_start(self.mirror_combo, True, True, 0)
+            btn_mirrors = Gtk.Button(label="Load mirrors")
+            btn_mirrors.connect("clicked", lambda _b: self._network_task(self._mirrors_work))
+            btn_mirrors.set_sensitive(self.network_provider is not None)
+            mrow.pack_start(btn_mirrors, False, False, 0)
+            box.pack_start(mrow, False, False, 0)
+        return box
+
+    def _mirrors_work(self) -> None:
+        provider = self.registry.get("online", self.manifest.providers.online)
+        try:
+            mirrors = provider.mirrors(self.manifest.online.mirror_list)
+            GLib.idle_add(self._show_mirrors, mirrors, None)
+        except Exception as err:  # network errors are shown, never fatal here
+            GLib.idle_add(self._show_mirrors, [], str(err))
+
+    def _show_mirrors(self, mirrors, error) -> bool:
+        if error:
+            self.net_status.set_text(f"Cannot load the mirror list (network?): {error}")
+            return False
+        self.mirror_combo.remove_all()
+        self.mirror_combo.append("", "Default (the distribution's own repository)")
+        for m in mirrors:
+            self.mirror_combo.append(m["url"], f"{m['url']}  ---  {m['description']}")
+        self.mirror_combo.set_active(0)
+        return False
+
+    def _create_online_page(self) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{side}")(20 if side in ("top", "bottom") else 30)
+
+        title = Gtk.Label()
+        title.set_markup("<span size='x-large' weight='bold'>Online Components</span>")
+        title.set_alignment(0, 0.5)
+        box.pack_start(title, False, False, 0)
+
         # --- online components
         online = self.manifest.online
         self.online_check = Gtk.CheckButton()
@@ -432,8 +480,11 @@ class MocinhaGTKApp(Gtk.Window):
         self.entry_online_packages.set_placeholder_text("extra packages from the repositories, space-separated")
         self.entry_aur_packages = Gtk.Entry()
         self.entry_aur_packages.set_placeholder_text("packages built from the AUR (unsigned PKGBUILDs)")
-        for i, (label, entry) in enumerate((("Extra packages:", self.entry_online_packages),
-                                            ("AUR packages:", self.entry_aur_packages))):
+        provider = self.registry.get("online", self.manifest.providers.online)
+        rows = [("Extra packages:", self.entry_online_packages)]
+        if provider is not None and "aur" in provider.capabilities():
+            rows.append(("AUR packages:", self.entry_aur_packages))
+        for i, (label, entry) in enumerate(rows):
             lbl = Gtk.Label(label=label)
             lbl.set_alignment(0, 0.5)
             entry.set_hexpand(True)
@@ -680,6 +731,8 @@ class MocinhaGTKApp(Gtk.Window):
             choices.aur_packages = self.entry_aur_packages.get_text().split()
             if self.kernel_combo is not None:
                 choices.kernel = self.kernel_combo.get_active_text()
+        if self._page_network is not None and self.mirror_combo is not None:
+            choices.mirror = self.mirror_combo.get_active_id() or None
 
         from mocinha.providers import wire_plan_providers
 

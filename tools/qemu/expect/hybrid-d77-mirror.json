@@ -1,0 +1,34 @@
+{
+  "_comment": "Expected state derived by reading hybrid-d77's installer (h77-installer -> patched chimera-installer, SOURCE=local: chimera-bootstrap -l, groups checklist, services checklist all on, KMAP, update-initramfs, grub-install --removable). Hostname, user, passwords, keymap and timezone are the test's choices. Mirror run: the user chose https://chimera.sakamoto.pl from Chimera's mirror list.",
+  "hostname": "hybrid-test",
+  "os_id": "hybrid-d77",
+  "users": {
+    "dani": "1000"
+  },
+  "groups_of_primary_user": [
+    "wheel",
+    "network",
+    "storage",
+    "audio",
+    "video"
+  ],
+  "keymap": "pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "admin_enabled": [
+    "polkitd",
+    "networkmanager",
+    "seatd",
+    "rtkit",
+    "syslog-ng"
+  ],
+  "running": [
+    "polkitd",
+    "networkmanager",
+    "seatd",
+    "rtkit",
+    "syslog-ng",
+    "dbus-daemon",
+    "elogind"
+  ],
+  "mirror": "https://chimera.sakamoto.pl"
+}

@@ -90,7 +90,7 @@ class PacmanOnlineProvider(ProviderContract):
         self.live_pacman_conf = live_pacman_conf
 
     def capabilities(self) -> List[str]:
-        return ["online", "packages-online"]
+        return ["online", "packages-online", "aur"]
 
     @staticmethod
     def _online(context: ExecutionContext) -> Optional[Dict[str, Any]]:
@@ -102,6 +102,10 @@ class PacmanOnlineProvider(ProviderContract):
         online = self._online(context)
         if online is None:
             return
+        if online.get("mirror"):
+            raise ExecutionError(message="Choosing a mirror is not implemented for pacman.",
+                                 cause="The target uses the live's mirrorlist; a chosen mirror would be ignored.",
+                                 failed_operation="Validate the package mirror", current_state="No disk has been modified.")
         if not shutil.which("pacman"):
             raise ExecutionError(message="pacman not found in the live system.",
                                  cause="The online preflight resolves packages with the live's pacman.",

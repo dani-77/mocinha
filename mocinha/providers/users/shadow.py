@@ -25,6 +25,7 @@ def _db_entries(path: Path) -> dict:
 
 
 class ShadowUsersProvider(ProviderContract):
+    _hash_method: Optional[str] = None
     """Shadow utils user and administrator manager."""
 
     def __init__(self, name: str = "shadow", event_stream: Optional[EventStream] = None) -> None:
@@ -79,7 +80,8 @@ class ShadowUsersProvider(ProviderContract):
         (pam_unix.so ... sha512), which openssl passwd -6 reproduces.
         """
         if self._has_tool(target_root, "chpasswd"):
-            self._run(target_root, ["chpasswd"], input_text=f"{user}:{password}\n")
+            method = self._hash_method
+            self._run(target_root, ["chpasswd"] + (["-c", method] if method else []), input_text=f"{user}:{password}\n")
             return
         method = self._pam_hash_method(target_root)
         if method != "sha512" or not self._has_tool(target_root, "openssl"):
@@ -148,6 +150,7 @@ class ShadowUsersProvider(ProviderContract):
             self._run(target_root, ["usermod", "-p", "!*", "root"])
 
     def apply(self, context: ExecutionContext) -> None:
+        self._hash_method = context.metadata.get("password_hash")
         target_root = context.target_mount
         username = context.metadata["username"]
         password = context.metadata["password"]
@@ -230,7 +233,13 @@ class ShadowUsersProvider(ProviderContract):
             if g not in group or username not in group[g][-1].split(","):
                 problems.append(f"'{username}' is not a member of group {g}")
 
-        root_hash = _db_entries(etc / "shadow").get("root", ["root", ""])[1]
+        shadow = _db_entries(etc / "shadow")
+        # Regression (hybrid-d77): chpasswd exited 0 but wrote nothing; a password must be a crypt hash
+        if not shadow.get(username, ["", ""])[1].startswith("$"):
+            problems.append(f"'{username}' has no password hash on target")
+        if not context.metadata["lock_root"] and not shadow.get("root", ["", ""])[1].startswith("$"):
+            problems.append("root has no password hash on target although a root password was chosen")
+        root_hash = shadow.get("root", ["root", ""])[1]
         if root_hash == "":
             problems.append("root has an empty password on target")
         elif context.metadata["lock_root"] and not root_hash.startswith(("!", "*")):

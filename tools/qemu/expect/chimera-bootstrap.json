@@ -1,0 +1,22 @@
+{
+  "_comment": "Level B from the official Chimera GNOME live: examples/manifests/chimera-bootstrap.toml (chimera-bootstrap in network mode, base-full + linux-stable + grub-x86_64-efi + NetworkManager), with the mirror https://chimera.sakamoto.pl chosen by the test.",
+  "hostname": "hybrid-test",
+  "os_id": "chimera",
+  "users": {
+    "dani": "1000"
+  },
+  "groups_of_primary_user": [
+    "wheel"
+  ],
+  "keymap": "pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "admin_enabled": [
+    "networkmanager"
+  ],
+  "running": [
+    "networkmanager",
+    "dbus-daemon",
+    "elogind"
+  ],
+  "mirror": "https://chimera.sakamoto.pl"
+}

@@ -1,0 +1,67 @@
+# hybrid-d77 --- Chimera Linux (musl, BSD userland), dinit, Sway or niri
+#
+# Install intent mirrors hybrid-d77's own installer: h77-installer, a thin
+# wrapper around its patched chimera-installer (vendor/chimera-install-scripts
+# and pkg/h77-installer in ~/Remaster/hybrid-d77), with SOURCE=local:
+#   chimera-bootstrap -l  -> a tar copy of the live's mounted image
+#                            (/run/live/rootfs/filesystem.erofs)
+#   genfstab -U, /etc/hostname, /etc/localtime, /etc/default/keyboard KMAP=,
+#   root + one user (wheel + the groups checklist), update-initramfs -c -k all,
+#   grub-install --removable, update-grub, services checklist -> links in
+#   /etc/dinit.d/boot.d, optional apk mirror (repositories.d/00-chimera-mirror.list).
+#
+# The image carries no live account (the live user is created at boot by the
+# initramfs hook) and the services the live enables at boot live in its
+# writable overlay, not in the image: a copy of the image is already clean.
+# chimera-installer partitions by hand (cfdisk); the layout below is Mocinha's.
+
+[system]
+id = "hybrid-d77"
+name = "hybrid-d77 Linux Live"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "local copy"
+source = "/run/live/rootfs/filesystem.erofs"   # chimera-bootstrap -l's default source
+min_disk_size_bytes = 10737418240
+root_filesystem = "ext4"
+root_mount_options = "rw,relatime"
+esp_size = "512m"
+esp_mountpoint = "/boot/efi"
+esp_mount_options = "rw,relatime,fmask=0022,dmask=0022"
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "tree-copy"
+users = "shadow"
+initramfs = "initramfs-tools"
+services = "dinit"
+sysconfig = "chimera"
+online = "apk"
+
+[boot]
+available = ["grub"]
+default = "grub"
+grub_removable = true          # chimera-installer: grub-install --removable on UEFI
+
+[services]
+# chimera-installer's checklist (all preset on). dbus, elogind, agetty, chrony,
+# udevd, turnstiled and tmpfiles-clean are enabled by their own packages.
+default_enabled = ["polkitd", "networkmanager", "seatd", "rtkit", "syslog-ng"]
+
+[users]
+# chimera-installer: wheel; hybrid-d77's groups checklist: network, storage, audio, video
+groups = ["wheel", "network", "storage", "audio", "video"]
+# chimera-installer: chpasswd -c SHA512 (without -c, Chimera's chpasswd goes
+# through PAM and writes nothing inside a chroot)
+password_hash = "SHA512"
+
+[online]
+# Nothing is fetched by default (SOURCE=local); the user may pick an apk mirror
+# from Chimera's list, which then persists on the installed system.
+optional = true
+upgrade = false
+mirror_list = "https://repo.chimera-linux.org/mirrors.txt"

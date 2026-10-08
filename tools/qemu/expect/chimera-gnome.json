@@ -1,0 +1,30 @@
+{
+  "_comment": "Official Chimera GNOME live copied to disk (examples/manifests/chimera-gnome.toml): chimera-installer's SOURCE=local result, plus the services the live session runs (pre-selected in the plan; chimera-installer enables none). The live autologin must not be carried over.",
+  "hostname": "hybrid-test",
+  "os_id": "chimera",
+  "users": {
+    "dani": "1000"
+  },
+  "groups_of_primary_user": [
+    "wheel"
+  ],
+  "keymap": "pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "admin_enabled": [
+    "gdm",
+    "networkmanager",
+    "polkitd",
+    "rtkit",
+    "syslog-ng"
+  ],
+  "running": [
+    "gdm",
+    "networkmanager",
+    "polkitd",
+    "rtkit",
+    "syslog-ng",
+    "dbus-daemon",
+    "elogind"
+  ],
+  "mirror": null
+}

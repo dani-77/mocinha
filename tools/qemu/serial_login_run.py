@@ -5,7 +5,9 @@ Used by run_automated_test.sh: the btw-d77 live starts greetd, which takes
 tty1 away from the archiso root autologin, so the archiso script= hook never
 runs. The serial getty (console=ttyS0) is used instead.
 
-    serial_login_run.py SOCKET LOGFILE USER COMMAND
+    serial_login_run.py SOCKET LOGFILE USER COMMAND [PASSWORD]
+
+PASSWORD: for lives whose root has one (e.g. Chimera's "chimera").
 """
 
 import socket
@@ -15,6 +17,7 @@ import time
 
 def main() -> int:
     sock_path, log_path, user, command = sys.argv[1:5]
+    password = sys.argv[5] if len(sys.argv) > 5 else None
     deadline = time.time() + 30
     while True:
         try:
@@ -45,8 +48,11 @@ def main() -> int:
                 s.sendall(user.encode() + b"\n")
                 buffer, state = "", "WAIT_SHELL"
             elif state == "WAIT_SHELL" and "Password:" in buffer:
-                print("live asked for a password; cannot continue", file=sys.stderr)
-                return 1
+                if password is None:
+                    print("live asked for a password; cannot continue", file=sys.stderr)
+                    return 1
+                s.sendall(password.encode() + b"\n")
+                buffer, password = "", None
             elif state == "WAIT_SHELL" and "# " in buffer:
                 s.sendall(command.encode() + b"\n")
                 buffer, state = "", "COMMAND_SENT"

@@ -42,6 +42,8 @@ class UserChoices:
     aur_packages: List[str] = field(default_factory=list)
     # Bootstrap installs (level B): kernel package among [bootstrap].kernels; None = the first one
     kernel: Optional[str] = None
+    # Package mirror chosen from [online].mirror_list; None = the distribution's default
+    mirror: Optional[str] = None
 
 
 HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
@@ -279,7 +281,9 @@ class InstallationResolver:
             )
 
         online = self._resolve_online(choices)
-        if online and online["enabled"]:
+        online_work = online and online["enabled"] and any(
+            online.get(k) for k in ("packages", "aur", "repositories", "upgrade", "mirror", "grub_defaults"))
+        if online_work:
             steps.append(PlanStep(
                 step_id="install_online_components",
                 title="Install online components (requires network)",
@@ -373,6 +377,7 @@ class InstallationResolver:
             "packages": packages,
             "initramfs_args": list(self.manifest.initramfs.args),
             "efi_id": self.manifest.boot.efi_id or self.manifest.system.id,
+            "grub_removable": self.manifest.boot.grub_removable,
             "online": online,
             "bootstrap": bootstrap,
             "lock_root": not choices.root_password,
@@ -381,6 +386,7 @@ class InstallationResolver:
             "timezone": choices.timezone,
             "user_groups": list(self.manifest.users.groups),
             "user_shell": self.manifest.users.shell,
+            "password_hash": self.manifest.users.password_hash,
             "root_filesystem": self.manifest.install.root_filesystem,
             "root_mount_options": self.manifest.install.root_mount_options,
             "esp_size": self.manifest.install.esp_size,
@@ -404,9 +410,9 @@ class InstallationResolver:
         if bootstrap:
             summary.online = (f"bootstrap: kernel {bootstrap['kernel']}, {len(bootstrap['packages'])} packages from the "
                               f"repositories (mirrors and dependencies in the preflight report)")
-            if online and online["enabled"]:
+            if online_work:
                 summary.online += "; " + self._describe_online(online)
-        elif online and online["enabled"]:
+        elif online_work:
             summary.online = self._describe_online(online)
         elif online and online["skipped"]:
             summary.online_skipped = f"packages {online['skipped']['packages']}, AUR {online['skipped']['aur']}"
@@ -530,6 +536,13 @@ class InstallationResolver:
             # Extra repository packages are part of the bootstrap transaction; only AUR builds remain here
             choices = UserChoices(**{**vars(choices), "online_packages": []})
         extra = list(choices.online_packages) + list(choices.aur_packages)
+        if choices.mirror and not (cfg and cfg.mirror_list):
+            raise ResolutionError(
+                message="A mirror was chosen, but this remaster declares no mirror list.",
+                cause="[online].mirror_list is not set in the manifest.",
+                failed_operation="Resolve the package mirror",
+                possible_recovery="Install without --mirror (the distribution's default is used).",
+            )
         if cfg is None and not extra:
             return None
         if not self.manifest.providers.online:
@@ -553,7 +566,7 @@ class InstallationResolver:
                 current_state=f"Declared: packages {cfg.packages}, AUR {cfg.aur}",
                 possible_recovery="Connect to a network and install with the online components.",
             )
-        if declined and extra:
+        if declined and (extra or choices.mirror):
             raise ResolutionError(message="Extra online packages were requested together with an offline install.",
                                   cause="The two choices contradict each other.", failed_operation="Resolve online components")
         declared = {"repositories": [vars(r) for r in cfg.repositories] if cfg else [],
@@ -568,15 +581,19 @@ class InstallationResolver:
             "upgrade": cfg.upgrade if cfg else self.manifest.bootstrap is not None,
             "grub_defaults": dict(cfg.grub_defaults) if cfg else {},
             "overwrite": list(cfg.overwrite) if cfg else [],
+            "mirror": choices.mirror,
         }
 
     @staticmethod
     def _describe_online(online: Dict[str, Any]) -> str:
+        if not (online["packages"] or online["aur"] or online["repositories"] or online["upgrade"]):
+            return f"package mirror: {online.get('mirror') or 'distribution default'}"
         repos = "; ".join(f"[{r['name']}] SigLevel={r['siglevel']} {r['servers']}" for r in online["repositories"])
         parts = [f"repositories added to the target: {repos or 'none'}",
                  f"packages: {online['packages']}",
                  f"AUR builds (unsigned PKGBUILDs, revisions checked before confirmation): {online['aur']}",
                  "full upgrade (-Syu) with them" if online["upgrade"] else "no full upgrade (partial upgrade risk)"]
+        parts.append(f"package mirror: {online.get('mirror') or 'distribution default'}")
         if online["overwrite"]:
             parts.append(f"packages may take over these deployed files: {online['overwrite']}")
         if online["grub_defaults"]:

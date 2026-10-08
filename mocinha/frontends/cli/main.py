@@ -100,6 +100,7 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
         online_packages=list(args.online_package or []),
         aur_packages=list(args.aur or []),
         kernel=args.kernel,
+        mirror=args.mirror,
     )
     plan = resolver.resolve(choices)
     wire_plan_providers(plan, registry, manifest)
@@ -154,6 +155,28 @@ def cmd_network(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"\n{e}\n", file=sys.stderr)
         return 1
+
+
+def cmd_mirrors(args: argparse.Namespace) -> int:
+    """Lists the remaster's package mirrors (needs the network)."""
+    stream = EventStream()
+    try:
+        manifest = Manifest.load_from_file(Path(args.manifest))
+        if not (manifest.online and manifest.online.mirror_list):
+            print("This remaster declares no mirror list ([online].mirror_list).", file=sys.stderr)
+            return 1
+        provider = create_default_registry(stream).get("online", manifest.providers.online)
+        if provider is None or not hasattr(provider, "mirrors"):
+            print(f"The online provider {manifest.providers.online!r} cannot list mirrors.", file=sys.stderr)
+            return 1
+        mirrors = provider.mirrors(manifest.online.mirror_list)
+    except Exception as e:
+        print(f"\nCannot read the mirror list (is the network up? mocinha network status):\n{e}\n", file=sys.stderr)
+        return 1
+    print("Default  (the distribution's own repository; no mirror is written)")
+    for m in mirrors:
+        print(f"{m['url']}  {m['description']}")
+    return 0
 
 
 def cmd_packages(args: argparse.Namespace) -> int:
@@ -227,6 +250,7 @@ def add_online_arguments(p: argparse.ArgumentParser) -> None:
                    help="Decline the manifest's optional online components (listed as skipped in the plan)")
     p.add_argument("--online-package", action="append", metavar="PKG", help="Extra package from the repositories (repeatable)")
     p.add_argument("--aur", action="append", metavar="PKG", help="Extra package built from the AUR (repeatable)")
+    p.add_argument("--mirror", help="Package mirror from the remaster's mirror list (mocinha mirrors); default: the distribution's")
     p.add_argument("--kernel", help="Bootstrap profiles: kernel package among [bootstrap].kernels (default: the first)")
 
 
@@ -283,6 +307,11 @@ def main() -> None:
     p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
     p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")
     p_inst.set_defaults(func=cmd_install)
+
+    # mirrors
+    p_mir = subparsers.add_parser("mirrors", help="List the remaster's package mirrors (needs the network)")
+    p_mir.add_argument("--manifest", default="/etc/mocinha.toml")
+    p_mir.set_defaults(func=cmd_mirrors)
 
     # packages
     p_pkg = subparsers.add_parser("packages", help="Search the repositories (throwaway database; nothing is installed)")
