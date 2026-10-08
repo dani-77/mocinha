@@ -14,7 +14,6 @@ url = "https://github.com/dani-77/mocinha"
 # commit @COMMIT@
 source = f"{url}/archive/@COMMIT@.tar.gz>mocinha-{pkgver}.tar.gz"
 sha256 = "@SHA256@"
-options = ["!check"]
 
 
 def install(self):
