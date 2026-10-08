@@ -21,7 +21,7 @@ something is not listed as validated here, assume it is not.
 | btw-d77 (Arch + systemd) | **Installed on real hardware** (ThinkPad X61, BIOS) through the **GTK3 wizard** of the packaged Mocinha, live copy, Qtile session working --- reported by the maintainer (2026-10-08); not instrumented by the test harness. **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
 | au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
 | Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
-| hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror. Never run on real hardware. |
+| hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror; and **with the Mocinha package on the live** (ISO 20261008 built from the local hybrid-d77 branch `mocinha`): BIOS and UEFI install + boot + self-removal, and the launcher from the Sway session (pkexec + mate-polkit) opens the wizard as root. Never run on real hardware; the wizard has not driven an install there. |
 | Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
@@ -127,7 +127,7 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 152 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 158 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -450,6 +450,33 @@ passes end to end: the session spawns the launcher (as fuzzel does), the
 polkit dialog shows Mocinha's message, and after authentication
 `python3 /usr/share/mocinha/bin/mocinha` runs as root with the wizard open.
 Not yet confirmed on real hardware.
+
+### Packaging on hybrid-d77 (cports)
+
+`packaging/chimera/make-source.sh` writes `mocinha-<pkgver>.tar.gz` from the
+committed HEAD and the matching cports template; hybrid-d77's `build.sh`
+(branch `mocinha`) runs it from `MOCINHA_SRC` (default `~/Projectos/mocinha`)
+and its cbuild container seeds `sources/by_sha256` with it, so the private
+source is never downloaded. Packages: `mocinha` and `h77-mocinha`
+(`/etc/mocinha.toml`); both are removed from the installed system with `apk del`.
+
+| Run (ISO hybrid-d77 20261008 sway, branch `mocinha`) | Result |
+|---|---|
+| BIOS install by the packaged Mocinha + boot + equivalence (`hybrid-d77-packaged.json`) | pass |
+| UEFI install by the packaged Mocinha + boot + equivalence | pass (package 0.1.0.40) |
+| Launcher from the Sway session (`gui_smoke_chimera.py`) | pass: polkit dialog, wizard runs as root |
+
+Found while doing it: cbuild template rules (no parenthesised pkgdesc, no
+unexplained `!check`, icons in `/usr/share/icons`); on hybrid-d77 the Sway and
+niri configs started the polkit agent from `/usr/libexec`, but mate-polkit
+installs it in `/usr/lib` (no agent in either session; fixed on the branch
+only); Sway started from tty1 hands that tty to launched apps, so the wrapper
+now tries polkit first in a graphical session. On Chimera polkit asks for the
+**root** password (its admin identity is root, not wheel).
+
+The hybrid-d77 repository is **public**: the branch (template metadata, the
+manifest, build.sh's call to make-source.sh; no Mocinha source) is not pushed
+until decided.
 
 ## Open issues and debt
 

@@ -26,12 +26,10 @@ from test_boot_installed import ppm_to_png  # noqa: E402
 
 LAUNCH = ("for i in $(seq 120); do s=$(find /run/user -maxdepth 2 -name 'sway-ipc.*.sock' 2>/dev/null | head -n1); "
           "[ -n \"$s\" ] && break; sleep 2; done; u=$(stat -f %Su \"$s\" 2>/dev/null || stat -c %U \"$s\"); echo \"sway socket=$s user=$u\"; sleep 8; "
-          "ls -l /usr/libexec/polkit-mate-authentication-agent-1; command -v gtk-launch pkexec; "
           "su \"$u\" -c \"SWAYSOCK=$s swaymsg exec 'gtk-launch mocinha'\"; "
-          "su \"$u\" -c \"SWAYSOCK=$s swaymsg exec 'sh -c \\\"mocinha > /tmp/mocinha-launch.log 2>&1\\\"'\"; sleep 10; "
-          "echo '--- launch log'; cat /tmp/mocinha-launch.log; echo '--- sway config agent'; grep -n polkit /home/$u/.config/sway/config; "
+          "sleep 10; "
           "echo '--- processes'; pgrep -lf pkexec; pgrep -lf polkit-mate; echo MOCINHA_\"\"DIALOG_UP")
-CHECK = "sleep 15; echo MOCINHA_\"\"AFTER_AUTH; pgrep -lf -U root share/mocinha/bin/mocinha | head -n2"
+CHECK = "sleep 15; echo MOCINHA_\"\"AFTER_AUTH; for p in $(pgrep -f -U root share/mocinha/bin/mocinha); do ps -o user=,args= -p $p; done"
 
 
 def main() -> int:
