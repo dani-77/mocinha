@@ -9,8 +9,8 @@ pkgrel = 0
 pkgdesc = "Small, modular, platform-aware live-system installer"
 license = "MIT"
 url = "https://github.com/dani-77/mocinha"
-_commit = "@COMMIT@"
-source = f"{url}/archive/{_commit}.tar.gz>mocinha-{pkgver}.tar.gz"
+# commit @COMMIT@
+source = f"{url}/archive/@ARCHIVE@.tar.gz>mocinha-{pkgver}.tar.gz"
 sha256 = "@SHA256@"
 
 
