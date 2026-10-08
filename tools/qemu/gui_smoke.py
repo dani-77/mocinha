@@ -42,7 +42,7 @@ echo "--- autostart"; ls -la /home/$u/.config/qtile/ 2>&1 | head; grep -n polkit
 echo MOCINHA_""DIALOG_UP
 """
 LAUNCH = "bash -c " + "'" + LAUNCH_SCRIPT.replace("'", "'\\''") + "'"
-CHECK = "sleep 15; echo MOCINHA_""AFTER_AUTH; pgrep -a -u root -f 'share/mocinha/bin/mocinha' | head -n2"
+CHECK = "sleep 15; echo MOCINHA_\"\"AFTER_AUTH; pgrep -a -u root -f 'share/mocinha/bin/mocinha' | head -n2"
 START = ("for i in $(seq 90); do s=$(ls /run/user/*/wayland-? 2>/dev/null | head -n1); [ -n \"$s\" ] && break; sleep 2; done; "
          "export XDG_RUNTIME_DIR=$(dirname \"$s\") WAYLAND_DISPLAY=$(basename \"$s\"); "
          "echo session=$s; pacman -Q mocinha; "
@@ -122,7 +122,12 @@ def main() -> int:
                 except socket.timeout:
                     pass
                 shot("mocinha-after-auth.png")
-                ok = "/usr/share/mocinha/bin/mocinha" in out[out.find("MOCINHA_AFTER_AUTH"):]
+                time.sleep(2)
+                try:
+                    out += s.recv(65536).decode(errors="replace")
+                except socket.timeout:
+                    pass
+                ok = "python3 /usr/share/mocinha/bin/mocinha" in out[out.find("MOCINHA_AFTER_AUTH"):]
                 (logs / "serial.log").write_text(out)
                 print(out[out.find("MOCINHA_AFTER_AUTH"):][:800])
                 print("LAUNCHER PASSED: Mocinha runs as root after polkit authentication" if ok

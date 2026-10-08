@@ -442,8 +442,14 @@ ships `/etc/skel/.config/qtile/autostart.sh` with mode 644 (mkarchiso resets
 airootfs modes; `profiledef.sh` has no `file_permissions` entry for it), so
 `subprocess.call` fails and nothing in it runs (no polkit agent, dunst,
 udiskie, wlsunset, swayidle). The same 644 file reaches an offline install;
-with the online components `d77-qtile-skel` restores 755. Remaster issue,
-not changed here.
+with the online components `d77-qtile-skel` restores 755. Fixed on the
+btw-d77 branch `mocinha` only (`profiledef.sh` `file_permissions` for
+autostart.sh and six /usr/local/bin scripts that also shipped 644: power
+menus, screenlock, wswap). With that ISO, `tools/qemu/gui_smoke.py --launcher`
+passes end to end: the session spawns the launcher (as fuzzel does), the
+polkit dialog shows Mocinha's message, and after authentication
+`python3 /usr/share/mocinha/bin/mocinha` runs as root with the wizard open.
+Not yet confirmed on real hardware.
 
 ## Open issues and debt
 
