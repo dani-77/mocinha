@@ -45,6 +45,6 @@ package() {
 	install -Dm755 packaging/common/mocinha-root "$pkgdir/usr/lib/mocinha/mocinha-root"
 	install -Dm644 packaging/common/org.mocinha.installer.policy "$pkgdir/usr/share/polkit-1/actions/org.mocinha.installer.policy"
 	install -Dm644 packaging/common/mocinha.desktop "$pkgdir/usr/share/applications/mocinha.desktop"
-	install -Dm644 assets/logo.png "$pkgdir/usr/share/pixmaps/mocinha.png"
+	install -Dm644 assets/mocinha-icon-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/mocinha.png"
 	install -Dm644 -t "$pkgdir/usr/share/doc/mocinha" README.md STATUS.md docs/manifest-schema.md
 }

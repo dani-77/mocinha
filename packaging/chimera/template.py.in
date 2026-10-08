@@ -22,5 +22,5 @@ def install(self):
     self.install_bin("packaging/common/mocinha.sh", name="mocinha")
     self.install_file("packaging/common/mocinha-root", "usr/lib/mocinha", mode=0o755)
     self.install_file("packaging/common/mocinha.desktop", "usr/share/applications")
-    self.install_file("assets/logo.png", "usr/share/pixmaps", name="mocinha.png")
+    self.install_file("assets/mocinha-icon-256.png", "usr/share/icons/hicolor/256x256/apps", name="mocinha.png")
     self.install_file("packaging/common/org.mocinha.installer.policy", "usr/share/polkit-1/actions")
