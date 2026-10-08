@@ -4,6 +4,7 @@
 # /root/mocinha by run_chimera_test.sh's login command. Parameters (kernel command line):
 #   mocinha.manifest=<name>  examples/manifests/<name>.toml    mocinha.logdir=<path>
 #   mocinha.mirror=<url>     package mirror (default: none chosen)
+#   mocinha.online_package=<pkg>  a package installed from the repositories (needs the network)
 set -x
 
 cmdline_param() {
@@ -16,6 +17,7 @@ cmdline_param() {
 MANIFEST_NAME="$(cmdline_param mocinha.manifest || echo hybrid-d77)"
 LOGREL="$(cmdline_param mocinha.logdir || echo tools/qemu/logs/chimera-default)"
 MIRROR="$(cmdline_param mocinha.mirror || true)"
+ONLINE_PKG="$(cmdline_param mocinha.online_package || true)"
 # mocinha.packaged=1: the Mocinha package of the live, with its /etc/mocinha.toml
 PACKAGED="$(cmdline_param mocinha.packaged || true)"
 REPO=/root/mocinha
@@ -36,6 +38,7 @@ set -- --manifest "$MANIFEST" --disk /dev/vda --bootloader grub \
     --user dani --password mocinha-test --root-password mocinha-root --hostname hybrid-test \
     --keymap pt-latin1 --timezone Europe/Lisbon --kernel-args "console=tty0 console=ttyS0,115200"
 [ -n "$MIRROR" ] && set -- "$@" --mirror "$MIRROR"
+[ -n "$ONLINE_PKG" ] && set -- "$@" --online-package "$ONLINE_PKG"
 
 {
     echo "### os-release"; cat /etc/os-release

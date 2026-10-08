@@ -269,6 +269,22 @@ class TestSysvd77(unittest.TestCase):
             self.assertEqual(len(mounts), len(umounts))
             self.assertEqual(umounts[0][-1], mounts[-1][-1])  # reverse order
 
+    def test_run_in_target_network_binds_resolv_conf_file(self) -> None:
+        """Regression (hybrid-d77 on bare metal, online packages): [Errno 17] File exists: '/mnt/etc/resolv.conf'.
+
+        The resolv.conf mount point is a file; it must not go through mkdir."""
+        runner = FakeRunner()
+        (self.target / "etc").mkdir(parents=True, exist_ok=True)
+        (self.target / "etc/resolv.conf").write_text("# target\n")
+        with mock.patch("shutil.which", return_value=None):
+            base.run_in_target(runner, str(self.target), ["apk", "update"], network=True)
+            (self.target / "etc/resolv.conf").unlink()
+            base.run_in_target(runner, str(self.target), ["apk", "update"], network=True)
+        binds = [c for c in runner.calls if c[:3] == ["mount", "--bind", "/etc/resolv.conf"]]
+        self.assertEqual(len(binds), 2)
+        self.assertEqual(binds[0][-1], str(self.target / "etc/resolv.conf"))
+        self.assertFalse((self.target / "etc/resolv.conf").exists())  # the one created for the command is removed
+
     # --- accounts -----------------------------------------------------------
     def test_password_without_chpasswd_uses_target_pam_method(self) -> None:
         """Regression (sysv-d77 VM): CRUX's shadow has no chpasswd; its passwd hashes via pam_unix sha512."""

@@ -3,6 +3,7 @@
 # official Chimera), then boot-test with test_boot_chimera.py.
 #
 #   tools/qemu/run_chimera_test.sh --iso PATH [--firmware bios|uefi] [--manifest NAME] [--mirror URL]
+#       [--packaged] [--online-package PKG]
 #
 # Boots the ISO's own kernel/initrd with the boot line of its GRUB menu plus a
 # serial console, logs in as root on the serial getty (Chimera's dinit-agetty
@@ -17,7 +18,7 @@ OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/qemu/edk2-i386-vars.fd}"
 TIMEOUT="${TIMEOUT:-2400}"
 LIVE_ROOT_PASSWORD="${LIVE_ROOT_PASSWORD:-chimera}"   # Chimera's documented live default
 
-FIRMWARE=bios ISO="" MANIFEST=hybrid-d77 MIRROR="" PACKAGED=""
+FIRMWARE=bios ISO="" MANIFEST=hybrid-d77 MIRROR="" PACKAGED="" ONLINE_PKG=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --iso) ISO="$2"; shift 2 ;;
@@ -25,7 +26,8 @@ while [ $# -gt 0 ]; do
         --manifest) MANIFEST="$2"; shift 2 ;;
         --mirror) MIRROR="$2"; shift 2 ;;
         --packaged) PACKAGED=1; shift ;;
-        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        --online-package) ONLINE_PKG="$2"; shift 2 ;;
+        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -34,6 +36,7 @@ done
 RUN="chimera-$MANIFEST-$FIRMWARE"
 [ -z "$MIRROR" ] || RUN="$RUN-mirror"
 [ -z "$PACKAGED" ] || RUN="$RUN-packaged"
+[ -z "$ONLINE_PKG" ] || RUN="$RUN-online"
 WORK="$DIR/work"; LOGS="$DIR/logs/$RUN"; DISK="$WORK/target-$RUN.qcow2"
 KDIR="$WORK/kernel/$(basename "$ISO" .iso)"
 mkdir -p "$WORK" "$LOGS" "$KDIR"
@@ -44,6 +47,7 @@ BOOTLINE="$(bsdtar -xOf "$ISO" boot/grub/grub.cfg | grep -m1 -E '^\s*linux /live
 APPEND="$BOOTLINE console=tty0 console=ttyS0,115200 mocinha.manifest=$MANIFEST mocinha.logdir=tools/qemu/logs/$RUN"
 [ -z "$MIRROR" ] || APPEND="$APPEND mocinha.mirror=$MIRROR"
 [ -z "$PACKAGED" ] || APPEND="$APPEND mocinha.packaged=1"
+[ -z "$ONLINE_PKG" ] || APPEND="$APPEND mocinha.online_package=$ONLINE_PKG"
 echo "=== MOCINHA INSTALL TEST --- $ISO ($FIRMWARE, manifest $MANIFEST) -> $DISK"
 echo ">> append: $APPEND"
 

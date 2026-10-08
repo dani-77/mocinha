@@ -321,7 +321,8 @@ def run_in_target(runner: "CommandRunner", target_root: str, cmd: List[str],
             point = root / rel
             if os.path.ismount(point):
                 continue
-            point.mkdir(parents=True, exist_ok=True)
+            if rel != "etc/resolv.conf":  # a file mount point, prepared above (mkdir would raise EEXIST)
+                point.mkdir(parents=True, exist_ok=True)
             runner.run(mount_cmd + [str(point)], phase=phase, check=True)
             done.append(point)
         return runner.run(["chroot", str(root)] + cmd, phase=phase, check=check, input_text=input_text, env=env,
