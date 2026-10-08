@@ -8,6 +8,17 @@
 
 <p align="center"><i>Knowledgeable, not opinionated.</i></p>
 
+> [!WARNING]
+> **Work in progress --- not a finished installer.**
+> Mocinha partitions and formats disks. It has been validated almost only in
+> virtual machines (QEMU) against the author's own remaster images, and has
+> run on real hardware only a handful of times. Interfaces, manifest keys and
+> behaviour still change without notice.
+> **Do not use it on a disk whose data you want to keep.** Test it in a VM or
+> on a disposable disk. What is actually validated, and how, is in
+> [`STATUS.md`](STATUS.md) --- anything not listed there should be assumed
+> untested.
+
 ---
 
 ## Why this shape
@@ -51,15 +62,19 @@ Validated in this order, each against the real remaster image from
 | **au-d77** | FreeBSD 14.5 + rc.d | the architecture is not secretly Linux-only |
 | **sysv-d77** | CRUX 3.8 + sysvinit | Linux support is not secretly Arch/systemd-only |
 | **arch-bootstrap** | Arch Linux, from the repositories | level B: a fresh system chosen at install time |
+| **hybrid-d77** / Chimera | Chimera Linux (musl, BSD userland) + dinit | a third init system and userland; level B with `chimera-bootstrap` |
 
 ## Current status
 
-Install, boot and equivalence pass in QEMU for all four, BIOS and UEFI
-(au-d77: installed from the BIOS live, the installed disk boots under both;
-its live image does not boot under OVMF). **Never run on real hardware; the
-GTK3 wizard has never driven an installation.** Mocinha is not packaged for
-any live yet. `STATUS.md` records exactly what was validated, how, and what
-differs from each remaster's own installer.
+Install, boot and equivalence pass in QEMU for btw-d77, au-d77, sysv-d77,
+hybrid-d77, the official Chimera Linux live and the Arch bootstrap profile, BIOS
+and UEFI (au-d77: installed from the BIOS live; its live image does not boot
+under OVMF). On real hardware so far: btw-d77 installed on a ThinkPad X61 through
+the GTK3 wizard, and hybrid-d77 (niri) booted with the wizard open on a ThinkPad
+T480s --- both reported by the author. Packaged for Arch (PKGBUILD) and Chimera
+(cports), carried on development branches of the remasters. `STATUS.md` records
+exactly what was validated, how, and what differs from each remaster's own
+installer.
 
 ## Layout
 

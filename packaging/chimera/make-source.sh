@@ -3,7 +3,7 @@
 #
 #   packaging/chimera/make-source.sh OUTDIR
 #
-# Mocinha's repository is private, so cbuild cannot download it: this writes
+# Builds from a local checkout (no download): this writes
 # mocinha-<pkgver>.tar.gz from the committed HEAD (git archive, reproducible
 # gzip -n) into OUTDIR, prints its sha256 and writes the matching template
 # (OUTDIR/template.py, from packaging/chimera/template.py.in). The remaster's

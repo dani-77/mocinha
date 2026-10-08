@@ -7,7 +7,7 @@ offline-first, with online components where they are declared or chosen
 (level A, implemented) and a bootstrap mode composed at install time
 (level B, first version implemented for the Arch family). See `AGENTS.md` "Online rules" and
 `plano.md` §22.1.
-**Branch:** `main` (private GitHub repository `dani-77/mocinha`)
+**Branch:** `main` (public GitHub repository `dani-77/mocinha` since 2026-10-08, MIT; work in progress)
 
 This file records what has actually been done and validated, and how. If
 something is not listed as validated here, assume it is not.
@@ -139,7 +139,7 @@ confirmation. No placeholder binaries are written anywhere.
   `/usr/bin/mocinha` wrapper that re-runs through sudo keeping the display,
   desktop entry, icon; `check()` runs the unit tests). Built in the btw-d77
   Arch build container, added to `~/d77-iso` on a **local branch `mocinha`
-  (not pushed: d77-iso is a public repository and Mocinha is private)**, and
+  (not pushed: d77-iso is a public repository and Mocinha was private at the time)**, and
   shipped by `~/Remaster/btw-d77` branch `mocinha` (package in
   `packages.x86_64`, manifest at `/etc/mocinha.toml`, a copy of
   `examples/manifests/btw-d77.toml`).
@@ -456,7 +456,7 @@ Not yet confirmed on real hardware.
 `packaging/chimera/make-source.sh` writes `mocinha-<pkgver>.tar.gz` from the
 committed HEAD and the matching cports template; hybrid-d77's `build.sh`
 (branch `mocinha`) runs it from `MOCINHA_SRC` (default `~/Projectos/mocinha`)
-and its cbuild container seeds `sources/by_sha256` with it, so the private
+and its cbuild container seeds `sources/by_sha256` with it, so the (then private)
 source is never downloaded. Packages: `mocinha` and `h77-mocinha`
 (`/etc/mocinha.toml`); both are removed from the installed system with `apk del`.
 
