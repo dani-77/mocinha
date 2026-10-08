@@ -41,10 +41,10 @@ package() {
 	install -d "$pkgdir/usr/share/mocinha"
 	cp -r mocinha bin assets examples "$pkgdir/usr/share/mocinha/"
 	find "$pkgdir/usr/share/mocinha" -name '__pycache__' -prune -exec rm -rf {} +
-	install -Dm755 packaging/arch/mocinha.sh "$pkgdir/usr/bin/mocinha"
-	install -Dm755 packaging/arch/mocinha-root "$pkgdir/usr/lib/mocinha/mocinha-root"
-	install -Dm644 packaging/arch/org.mocinha.installer.policy "$pkgdir/usr/share/polkit-1/actions/org.mocinha.installer.policy"
-	install -Dm644 packaging/arch/mocinha.desktop "$pkgdir/usr/share/applications/mocinha.desktop"
+	install -Dm755 packaging/common/mocinha.sh "$pkgdir/usr/bin/mocinha"
+	install -Dm755 packaging/common/mocinha-root "$pkgdir/usr/lib/mocinha/mocinha-root"
+	install -Dm644 packaging/common/org.mocinha.installer.policy "$pkgdir/usr/share/polkit-1/actions/org.mocinha.installer.policy"
+	install -Dm644 packaging/common/mocinha.desktop "$pkgdir/usr/share/applications/mocinha.desktop"
 	install -Dm644 assets/logo.png "$pkgdir/usr/share/pixmaps/mocinha.png"
 	install -Dm644 -t "$pkgdir/usr/share/doc/mocinha" README.md STATUS.md docs/manifest-schema.md
 }

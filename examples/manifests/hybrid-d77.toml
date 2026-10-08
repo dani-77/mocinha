@@ -41,6 +41,12 @@ initramfs = "initramfs-tools"
 services = "dinit"
 sysconfig = "chimera"
 online = "apk"
+packages = "apk"
+
+[live_only]
+# The installer itself and the package carrying this manifest (/etc/mocinha.toml):
+# uninstalled from the target with apk.
+packages = ["mocinha", "h77-mocinha"]
 
 [boot]
 available = ["grub"]

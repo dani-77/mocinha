@@ -239,3 +239,24 @@ class TestChimeraBootstrap(unittest.TestCase):
         self.assertEqual(ctx.metadata["bootstrap_resolved"], ["musl", "chimerautils", "base-full"])
         provider.apply(ctx)
         self.assertEqual(calls[-1], ["chimera-bootstrap", "-m", "https://chimera.sakamoto.pl", "/mnt", "base-full", "linux-stable"])
+
+
+class TestApkLiveOnly(unittest.TestCase):
+    def test_apk_removes_live_only_packages(self) -> None:
+        from mocinha.providers.packages.apk import ApkPackagesProvider
+        ctx = ExecutionContext(target_disk="/dev/vda", target_mount="/mnt", target_partitions={},
+                               metadata={"live_only_packages": ["mocinha", "h77-mocinha", "absent"]})
+        answers = iter([ok("musl\nmocinha\nh77-mocinha\n"), ok(), ok("musl\n")])
+        provider = ApkPackagesProvider("apk", EventStream())
+        with mock.patch("mocinha.providers.packages.apk.run_in_target", side_effect=lambda *a, **k: next(answers)) as run:
+            provider.remove_live_only_packages(ctx)
+            provider.verify_live_only_packages_removed(ctx)
+        self.assertEqual(run.call_args_list[1].args[2], ["apk", "--no-interactive", "del", "mocinha", "h77-mocinha"])
+        with mock.patch("mocinha.providers.packages.apk.run_in_target", return_value=ok("mocinha\n")):
+            with self.assertRaises(VerificationError):
+                provider.verify_live_only_packages_removed(ctx)
+
+    def test_hybrid_manifest_removes_mocinha(self) -> None:
+        plan = resolve()
+        self.assertIn("remove_live_only_packages", [s.step_id for s in plan.steps])
+        self.assertEqual(plan.metadata["live_only_packages"], ["mocinha", "h77-mocinha"])
