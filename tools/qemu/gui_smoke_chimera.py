@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GUI smoke test on a Chimera-based live with a login session (hybrid-d77 sway):
+"""GUI smoke test on a Chimera-based live with a login session (hybrid-d77 sway or niri):
 the packaged Mocinha opens from the desktop like a menu does, through pkexec and
 the session's polkit agent.
 
@@ -24,10 +24,13 @@ QEMU_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(QEMU_DIR))
 from test_boot_installed import ppm_to_png  # noqa: E402
 
-LAUNCH = ("for i in $(seq 120); do s=$(find /run/user -maxdepth 2 -name 'sway-ipc.*.sock' 2>/dev/null | head -n1); "
-          "[ -n \"$s\" ] && break; sleep 2; done; u=$(stat -f %Su \"$s\" 2>/dev/null || stat -c %U \"$s\"); echo \"sway socket=$s user=$u\"; sleep 8; "
-          "su \"$u\" -c \"SWAYSOCK=$s swaymsg exec 'gtk-launch mocinha'\"; "
-          "sleep 10; "
+# The session's compositor launches the desktop entry, as its menu/launcher does:
+# Sway (swaymsg exec) or niri (niri msg action spawn).
+LAUNCH = ("for i in $(seq 120); do s=$(find /run/user -maxdepth 2 \\( -name 'sway-ipc.*.sock' -o -name 'niri.*.sock' \\) 2>/dev/null | head -n1); "
+          "[ -n \"$s\" ] && break; sleep 2; done; u=$(stat -f %Su \"$s\" 2>/dev/null || stat -c %U \"$s\"); echo \"compositor socket=$s user=$u\"; sleep 8; "
+          "case \"$s\" in *sway-ipc*) c=\"SWAYSOCK=$s swaymsg exec 'gtk-launch mocinha'\" ;; "
+          "*) c=\"NIRI_SOCKET=$s niri msg action spawn -- gtk-launch mocinha\" ;; esac; "
+          "su \"$u\" -c \"$c\"; sleep 10; "
           "echo '--- processes'; pgrep -lf pkexec; pgrep -lf polkit-mate; echo MOCINHA_\"\"DIALOG_UP")
 CHECK = "sleep 15; echo MOCINHA_\"\"AFTER_AUTH; for p in $(pgrep -f -U root share/mocinha/bin/mocinha); do ps -o user=,args= -p $p; done"
 
@@ -38,6 +41,8 @@ def main() -> int:
     ap.add_argument("--user", default="anon")
     ap.add_argument("--password", default="chimera")      # Chimera's documented live default
     ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--gl", action="store_true",
+                    help="virtio-vga-gl + egl-headless (host GPU): for compositors that need OpenGL (niri)")
     args = ap.parse_args()
     iso = Path(args.iso)
     work, logs = QEMU_DIR / "work", QEMU_DIR / "logs" / "gui-smoke-chimera"
@@ -56,7 +61,8 @@ def main() -> int:
         "qemu-system-x86_64", "-enable-kvm", "-cpu", "host", "-smp", "4", "-m", "4G",
         "-kernel", str(kdir / "vmlinuz"), "-initrd", str(kdir / "initrd"),
         "-append", f"{bootline} console=ttyS0,115200 console=tty0",
-        "-cdrom", str(iso), "-device", "virtio-vga", "-display", "none",
+        "-cdrom", str(iso)] + (["-device", "virtio-vga-gl", "-display", "egl-headless"] if args.gl
+                               else ["-device", "virtio-vga", "-display", "none"]) + [
         "-nic", "user,model=virtio-net-pci",
         "-monitor", f"unix:{mon},server=on,wait=off", "-serial", f"unix:{ser},server=on,wait=off"])
     out = ""
@@ -87,8 +93,13 @@ def main() -> int:
 
         def shot(name: str) -> None:
             ppm = work / "guic.ppm"
+            ppm.unlink(missing_ok=True)          # never report an older capture as this one
+            (logs / name).unlink(missing_ok=True)
             mon_cmd(f"screendump {ppm}")
             time.sleep(2)
+            if not ppm.is_file():
+                print(f"[GUI] no screenshot available for {name} (display backend without screendump)")
+                return
             (logs / name).write_bytes(ppm_to_png(ppm.read_bytes()))
             print(f"[GUI] screenshot {logs / name}")
 

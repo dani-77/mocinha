@@ -465,6 +465,8 @@ source is never downloaded. Packages: `mocinha` and `h77-mocinha`
 | BIOS install by the packaged Mocinha + boot + equivalence (`hybrid-d77-packaged.json`) | pass |
 | UEFI install by the packaged Mocinha + boot + equivalence | pass (package 0.1.0.40) |
 | Launcher from the Sway session (`gui_smoke_chimera.py`) | pass: polkit dialog, wizard runs as root |
+| niri ISO 20261008: BIOS install by the packaged Mocinha + boot + equivalence | pass (package 0.1.0.42) |
+| Launcher from the niri session (`gui_smoke_chimera.py --gl`) | pass at process level (Mocinha runs as root after the polkit password); no screenshot: niri needs OpenGL, so the VM uses `virtio-vga-gl` + `egl-headless`, which has no screendump. With plain `virtio-vga` niri never draws in QEMU. |
 
 Found while doing it: cbuild template rules (no parenthesised pkgdesc, no
 unexplained `!check`, icons in `/usr/share/icons`); on hybrid-d77 the Sway and

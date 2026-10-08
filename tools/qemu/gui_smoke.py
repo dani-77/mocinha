@@ -88,6 +88,7 @@ def main() -> int:
 
         def shot(name: str) -> None:
             ppm = work / "gui.ppm"
+            ppm.unlink(missing_ok=True)          # never report an older capture as this one
             m.sendall(f"screendump {ppm}\n".encode())
             time.sleep(2)
             (logs / name).write_bytes(ppm_to_png(ppm.read_bytes()))
