@@ -25,7 +25,8 @@ class PacmanPackagesProvider(ProviderContract):
     def _installed(self, root: str, names: List[str]) -> List[str]:
         if not names:
             return []
-        proc = run_in_target(self.runner, root, ["pacman", "-Qq"] + names, phase=EventPhase.VERIFY, check=False)
+        # All installed names, filtered here: "pacman -Qq <missing>" exits 1, which is not an error
+        proc = run_in_target(self.runner, root, ["pacman", "-Qq"], phase=EventPhase.VERIFY)
         return [n for n in proc.stdout.split() if n in names]
 
     def remove_live_only_packages(self, context: ExecutionContext) -> None:

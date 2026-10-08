@@ -148,7 +148,7 @@ class MocinhaGTKApp(Gtk.Window):
         desc.set_line_wrap(True)
         desc.set_markup(
             "Mocinha will install this live system directly to your target disk.\n\n"
-            "• <b>Offline-first:</b> No Internet downloads required.\n"
+            "• <b>Offline-first:</b> works without network; online components only when declared or chosen.\n"
             "• <b>Transparent:</b> Review a complete plan before any disk is modified.\n"
             "• <b>Knowledgeable:</b> Validates system constraints and dependencies."
         )

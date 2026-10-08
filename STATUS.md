@@ -105,9 +105,11 @@ confirmation. No placeholder binaries are written anywhere.
   report is printed with the plan.
   User, password and hostname are required; passwords are given on the
   command line (visible in `ps`).
-- **GTK3 wizard**: only **rendered offscreen** on the development host with
-  simulated machine facts (screenshots of the pages). Never run inside a live,
-  never ran an installation, never run on FreeBSD. It has root password and
+- **GTK3 wizard**: **opens inside the btw-d77 live** (packaged, started as
+  root on the live user's Qtile/Wayland session; `tools/qemu/gui_smoke.py`,
+  screenshot of the welcome page). Other pages only rendered offscreen with
+  simulated data. It has **never driven an installation**; never run on
+  FreeBSD or CRUX. It has root password and
   password confirmation fields; no locale, keymap, timezone or kernel-argument
   fields (the live's settings are kept). The hostname is pre-filled with
   `[system].id`. A "Network & Online Components" page (connection state,
@@ -123,7 +125,7 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 133 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 137 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -131,12 +133,21 @@ confirmation. No placeholder binaries are written anywhere.
 - QEMU harnesses in `tools/qemu/` (below).
 
 ### Packaging
-- **None.** Mocinha is not packaged for any live; the VM tests deliver it over
-  9p (btw-d77, sysv-d77) or HTTP (au-d77). It does not remove itself from the
-  target. With `crux-pkgadd` it never reaches the target unless the manifest
-  lists it; with live copies (btw-d77, au-d77) removing a packaged Mocinha
-  would need package removal through the target's package manager, which does
-  not exist yet (`[live_only].files` would leave the package registered).
+- **Arch package** (`packaging/arch/PKGBUILD`: tree in `/usr/share/mocinha`,
+  `/usr/bin/mocinha` wrapper that re-runs through sudo keeping the display,
+  desktop entry, icon; `check()` runs the unit tests). Built in the btw-d77
+  Arch build container, added to `~/d77-iso` on a **local branch `mocinha`
+  (not pushed: d77-iso is a public repository and Mocinha is private)**, and
+  shipped by `~/Remaster/btw-d77` branch `mocinha` (package in
+  `packages.x86_64`, manifest at `/etc/mocinha.toml`, a copy of
+  `examples/manifests/btw-d77.toml`).
+- **Mocinha removes itself from the target**: `[live_only].packages`
+  (`pacman -Rns` in the target) + `/etc/mocinha.toml` in `[live_only].files`.
+- The ISO built from that branch (`btw-d77-2026.10.08`) carries
+  `mocinha 0.1.0.r29.71e0fce`; two later changes (quieter removal check,
+  welcome text matching the online contract) are not in that package yet.
+- No FreeBSD or CRUX package. With `crux-pkgadd` Mocinha never reaches the
+  target unless listed.
 
 ---
 
@@ -164,6 +175,7 @@ over serial.
 | BIOS + GRUB, online components + `--aur yay-bin` (level-A code, `64d1990`) | pass (16 steps verified) | pass | pass (`btw-d77-aur.json`) |
 | UEFI + GRUB, `--offline` (online components declined; level-A code, `64d1990`) | pass | pass | pass (`btw-d77-offline.json`) |
 | BIOS + GRUB / UEFI + GRUB without online components (sysvd77 code, `49d6236`) | pass | pass | pass |
+| `btw-d77-2026.10.08` (branch `mocinha`): BIOS + GRUB, online, **run by the Mocinha package on the live** | pass (17 steps verified) | pass | pass (`btw-d77-packaged.json`: no `mocinha` package, `/usr/share/mocinha`, `/usr/bin/mocinha` or `/etc/mocinha.toml` on the target) |
 | UEFI + Limine (earlier code, `e8bd6ee`) | refused at validation, before any disk write (no Limine in the live) | --- | --- |
 
 Checked on the installed system: hostname; only user `dani` (uid 1000, groups
@@ -388,8 +400,8 @@ floppy listed as a disk by the probe.
 ## Open issues and debt
 
 - GUI: never exercised in a live; no locale/keymap/timezone/kernel-argument fields.
-- Packaging for the lives, `python3` vs `python3.12` on FreeBSD, and removing
-  Mocinha from the installed target: not done.
+- Packaging for au-d77 and sysv-d77 (and `python3` vs `python3.12` on FreeBSD):
+  not done. Publishing the Arch package (public d77-iso) is a decision pending.
 - Limine, `rsync-copy`, `tar-extract`: never validated in a VM.
 - Disk-safety adversarial scenarios not run on the sysv-d77 live.
 - `[install].method` is only a label in the plan; the deployment provider is

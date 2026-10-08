@@ -21,6 +21,8 @@ AUR="$(cmdline_param mocinha.aur || true)"
 # mocinha.manifest=<name>: examples/manifests/<name>.toml (default btw-d77); mocinha.kernel=<pkg> (bootstrap profiles)
 MANIFEST_NAME="$(cmdline_param mocinha.manifest || echo btw-d77)"
 KERNEL="$(cmdline_param mocinha.kernel || true)"
+# mocinha.packaged=1: run the Mocinha package installed on the live, with its /etc/mocinha.toml
+PACKAGED="$(cmdline_param mocinha.packaged || true)"
 case "$MANIFEST_NAME" in arch-bootstrap) TEST_HOSTNAME=arch-test ;; *) TEST_HOSTNAME=btw-test ;; esac
 
 echo "=== MOCINHA AUTOMATED TEST (bootloader=$BOOTLOADER) ==="
@@ -32,6 +34,14 @@ LOGDIR="/mnt/mocinha/$LOGREL"
 mkdir -p "$LOGDIR"
 
 MANIFEST="examples/manifests/$MANIFEST_NAME.toml"
+MOCINHA=(./bin/mocinha)
+if [ "$PACKAGED" = 1 ]; then
+    MANIFEST=/etc/mocinha.toml
+    MOCINHA=(mocinha)
+    { echo "### package"; pacman -Qi mocinha; echo "### manifest identical to the repository's?";
+      cmp <(sed '2,4d' /etc/mocinha.toml) "examples/manifests/$MANIFEST_NAME.toml" && echo yes; } \
+        > "$LOGDIR/package.log" 2>&1
+fi
 COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
         --user dani --password mocinha-test --hostname "$TEST_HOSTNAME"
         --locale pt_PT.UTF-8 --keymap pt-latin1 --timezone Europe/Lisbon
@@ -48,11 +58,11 @@ COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
     echo "### users (live)"; getent passwd | awk -F: '$3 >= 1000 && $3 < 60000'
 } > "$LOGDIR/live-facts.log" 2>&1
 
-./bin/mocinha probe > "$LOGDIR/probe.log" 2>&1 || true
-./bin/mocinha network status > "$LOGDIR/network.log" 2>&1 || true
-./bin/mocinha plan "${COMMON[@]}" > "$LOGDIR/plan.log" 2>&1 || true
+"${MOCINHA[@]}" probe > "$LOGDIR/probe.log" 2>&1 || true
+"${MOCINHA[@]}" network status > "$LOGDIR/network.log" 2>&1 || true
+"${MOCINHA[@]}" plan "${COMMON[@]}" > "$LOGDIR/plan.log" 2>&1 || true
 
-./bin/mocinha install "${COMMON[@]}" --confirm 2>&1 | tee "$LOGDIR/install.log"
+"${MOCINHA[@]}" install "${COMMON[@]}" --confirm 2>&1 | tee "$LOGDIR/install.log"
 INSTALL_RES=${PIPESTATUS[0]}
 
 if [ "$INSTALL_RES" -eq 0 ]; then

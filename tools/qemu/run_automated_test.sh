@@ -39,6 +39,7 @@ while [ $# -gt 0 ]; do
         --offline) EXTRA_APPEND+=" mocinha.offline=1"; RUN_SUFFIX+="-offline"; shift ;;
         --aur) EXTRA_APPEND+=" mocinha.aur=$2"; RUN_SUFFIX+="-aur"; shift 2 ;;
         --manifest) EXTRA_APPEND+=" mocinha.manifest=$2"; RUN_SUFFIX+="-$2"; shift 2 ;;
+        --packaged) EXTRA_APPEND+=" mocinha.packaged=1"; RUN_SUFFIX+="-packaged"; shift ;;
         --kernel) EXTRA_APPEND+=" mocinha.kernel=$2"; RUN_SUFFIX+="-$2"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;

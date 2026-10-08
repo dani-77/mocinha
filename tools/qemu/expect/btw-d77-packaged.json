@@ -1,0 +1,52 @@
+{
+  "_comment": "btw-d77.json for the live built from the btw-d77 'mocinha' branch, installed by the Mocinha package on the live: Mocinha must uninstall itself and its manifest from the target.",
+  "hostname": "btw-test",
+  "users": {
+    "dani": "1000"
+  },
+  "groups_of_primary_user": [
+    "wheel",
+    "storage"
+  ],
+  "locale_conf": "LANG=pt_PT.UTF-8",
+  "locale_generated": "pt_PT.utf8",
+  "vconsole_keymap": "KEYMAP=pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "default_target": "graphical.target",
+  "root_locked": true,
+  "enabled_units_present": [
+    "greetd.service",
+    "NetworkManager.service",
+    "systemd-timesyncd.service"
+  ],
+  "enabled_units_absent": [
+    "choose-mirror.service",
+    "pacman-init.service",
+    "livecd-talk.service",
+    "livecd-alsa-unmuter.service",
+    "reflector.service",
+    "systemd-networkd.service",
+    "systemd-networkd-wait-online.service",
+    "systemd-resolved.service",
+    "systemd-time-wait-sync.service",
+    "pcscd.socket",
+    "sshd.service",
+    "iwd.service"
+  ],
+  "greetd_config_absent": [
+    "initial_session",
+    "user = \"live\""
+  ],
+  "system_state": "running",
+  "packages_present": [
+    "d77-qtile-skel",
+    "d77-grub-theme"
+  ],
+  "grub_theme": "GRUB_THEME=\"/boot/grub/themes/d77-grub-theme/theme.txt\"",
+  "skel_owner": "d77-qtile-skel",
+  "build_user_absent": true,
+  "installed_absent": [
+    "mocinha"
+  ],
+  "mocinha_absent": true
+}
