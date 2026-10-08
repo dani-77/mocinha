@@ -1,41 +1,520 @@
-# sysvd77 --- CRUX + sysvinit
+# sysv-d77 --- CRUX 3.8 + sysvinit (Openbox live)
 #
-# DRAFT, NOT DERIVED FROM THE sysvd77 REMASTER YET. Kept valid so the CRUX
-# providers can be unit-tested; it will be rewritten from sysvd77's own
-# installer before any sysvd77 validation (as done for btw-d77 and au-d77).
+# Derived from sysv-d77's own installer (~/Remaster/sysv-d77/overlay/usr/bin):
+# crux-prepare-disk (layout), CRUX setup (core packages), crux-install-boot
+# (kernel, boot tools, desktop, fstab, dracut, GRUB) and crux-configure
+# (rc.conf, accounts, network files). Differences are listed in STATUS.md.
+#
+# Deployment is package-based on purpose: the CRUX live root is an
+# installation environment, not an installed system (its package database
+# lacks the core packages; rc, shadow, GRUB and dracut are not on it), so --
+# like CRUX's setup and sysv-d77's installer -- packages are installed from
+# the medium, offline. The live is only the source of [[live_files]].
 
 [system]
-id = "sysvd77"
-name = "sysvd77 CRUX Live"
-version = "3.7"
+id = "sysv-d77"
+name = "sysv-d77 CRUX Live"
+version = "3.8"
 arch = "x86_64"
 platform = "linux"
 
 [install]
-method = "rsync"
-source = "/"
-min_disk_size_bytes = 8589934592
+method = "packages"
+source = "/media"                    # the CRUX medium, mounted by the live's fstab
+min_disk_size_bytes = 15032385536    # crux-prepare-disk's 14 GiB minimum
 root_filesystem = "ext4"
-root_mount_options = "rw,relatime"
+root_mount_options = "defaults"
+partition_table = "gpt"              # GPT on BIOS too (1 MiB BIOS boot partition)
+swap_size = "8g"
 esp_size = "512m"
 esp_mountpoint = "/boot"
-esp_mount_options = "rw"
+esp_mount_options = "umask=0077"
+fstab_extra = [
+    # Entries the CRUX filesystem package's fstab keeps ("required for proper system operation")
+    "devpts /dev/pts devpts noexec,nosuid,gid=tty,mode=0620 0 0",
+    "shm /dev/shm tmpfs defaults 0 0",
+]
 
 [providers]
 platform = "linux"
 storage = "linux-sfdisk"
 filesystem = "linux-mkfs"
-deployment = "rsync-copy"
+deployment = "crux-pkgadd"
 users = "shadow"
-initramfs = "none"
+initramfs = "dracut"
 services = "crux-sysvinit"
+sysconfig = "crux-rc"
+
+[packages]
+repositories = ["crux/core", "crux/opt", "crux/xorg"]
+dependencies = "crux/setup.dependencies"
+# setup's default selection: the core collection, bootloaders pruned
+collections = ["crux/core"]
+exclude = ["lilo", "grub2", "grub2-efi", "syslinux"]
+# crux-install-boot: boot tools + the live's graphical base (with dependencies)
+install = [
+    "dracut",
+    "linux-firmware",
+    "wpa_supplicant",
+    "openbox",
+    "xorg-server",
+    "xorg-xinit",
+    "xorg-xauth",
+    "xorg-xsetroot",
+    "xorg-setxkbmap",
+    "xorg-xrdb",
+    "xkeyboard-config",
+    "xorg-xkbcomp",
+    "xorg-xf86-input-libinput",
+    "xorg-xf86-video-vesa",
+    "xorg-font-misc-misc",
+    "xorg-font-alias",
+    "xorg-font-bitstream-vera",
+    "xterm",
+    "xorg-xcompmgr",
+    "gdk-pixbuf",
+    "xorg-libxcomposite",
+    "xorg-libxdamage",
+]
+install_bios = ["grub2"]
+install_uefi = ["grub2-efi"]
+# The pinned d77crux-kernel and the d77crux desktop ports (pkgadd -u when already installed)
+local = ["ports"]
+
+[initramfs]
+# crux-install-boot: "dracut --force --no-hostonly --no-hostonly-cmdline --fstab --gzip"
+args = ["--no-hostonly", "--no-hostonly-cmdline", "--fstab", "--gzip"]
 
 [boot]
-available = ["limine", "lilo", "grub"]
-default = "limine"
+available = ["grub"]
+default = "grub"
+efi_id = "d77crux"                   # grub-install --bootloader-id=d77crux
 
 [services]
-required = ["syslog"]
-default_enabled = ["net"]
+# The rc package's SERVICES=(lo net crond), which sysv-d77 leaves as installed
+required = ["lo"]
+default_enabled = ["net", "crond"]
 optional = ["sshd"]
-live_only = ["live-setup"]
+
+[users]
+shell = "/bin/bash"                  # crux-configure: useradd -m -s /bin/bash, no extra groups
+
+# crux-configure --prepare: the live's network configuration, when present
+# (its /etc/wpa_supplicant-*.conf and /etc/wpa_supplicant/*.conf globs are not
+# expressed here). crux-install-boot: the live desktop configuration.
+[[live_files]]
+source = "/etc/resolv.conf"
+optional = true
+
+[[live_files]]
+source = "/etc/hosts"
+optional = true
+
+[[live_files]]
+source = "/etc/dhcpcd.conf"
+optional = true
+
+[[live_files]]
+source = "/etc/dhcpcd/dhcpcd.conf"
+optional = true
+
+[[live_files]]
+source = "/etc/rc.d/net"
+optional = true
+
+[[live_files]]
+source = "/etc/rc.d/wlan"
+optional = true
+
+[[live_files]]
+source = "/etc/rc.d/wpa_supplicant"
+optional = true
+
+[[live_files]]
+source = "/etc/rc.d/dhcpcd"
+optional = true
+
+[[live_files]]
+source = "/lib/dhcpcd/dhcpcd-hooks/10-wpa_supplicant"
+optional = true
+
+[[live_files]]
+source = "/etc/wpa_supplicant.conf"
+optional = true
+mode = "0600"
+
+[[live_files]]
+source = "/usr/share/applications/crux-terminal.desktop"
+mode = "0644"
+
+[[live_files]]
+source = "/usr/share/pixmaps/crux-terminal.png"
+mode = "0644"
+
+[[live_files]]
+source = "/usr/share/pixmaps/crux-terminal.svg"
+mode = "0644"
+
+[[live_files]]
+source = "/usr/share/backgrounds/background3.png"
+mode = "0644"
+
+[[live_files]]
+source = "/root/.config/openbox"
+path = "/etc/skel/.config/openbox"
+
+[[live_files]]
+source = "/root/.config/tint2"
+path = "/etc/skel/.config/tint2"
+
+[[live_files]]
+source = "/root/.xinitrc"
+path = "/etc/skel/.xinitrc"
+mode = "0644"
+
+[[live_files]]
+source = "/root/.bashrc"
+path = "/etc/skel/.bashrc"
+mode = "0644"
+
+[[live_files]]
+source = "/root/.Xresources"
+path = "/etc/skel/.Xresources"
+mode = "0644"
+
+[[live_files]]
+source = "/root/.config/openbox"
+path = "/root/.config/openbox"
+
+[[live_files]]
+source = "/root/.config/tint2"
+path = "/root/.config/tint2"
+
+[[live_files]]
+source = "/root/.xinitrc"
+path = "/root/.xinitrc"
+mode = "0644"
+
+[[live_files]]
+source = "/root/.bashrc"
+path = "/root/.bashrc"
+mode = "0644"
+
+[[live_files]]
+source = "/root/.Xresources"
+path = "/root/.Xresources"
+mode = "0644"
+
+[[target_files]]
+# The live tint2rc without the live-only installer launcher, plus Firefox
+# (crux-install-boot's sed edit).
+path = "/etc/skel/.config/tint2/tint2rc"
+content = '''
+# Adapted from Kwort 4.5; original author credit is retained below.
+# Tint2 config file by Kexolino
+
+# Background definitions
+
+# ID 1
+rounded = 0
+border_width = 0
+background_color = #000000 60
+border_color = #000000 0
+disable_transparency = 0
+
+# ID 2
+rounded = 0
+border_width = 0
+background_color = #000000 30
+border_color = #000000 0
+
+# Panel
+panel_monitor = all
+panel_position =  top center horizontal
+panel_size = 100% 31
+panel_margin = 0 0
+panel_padding = 0 0 0
+panel_dock = 0
+wm_menu = 1
+panel_layer = normal
+panel_background_id = 2
+panel_items = LTESBC
+
+# Panel Autohide
+autohide = 0
+autohide_show_timeout = 0.2
+autohide_hide_timeout = 1
+autohide_height = 0
+strut_policy = follow_size
+
+# Taskbar
+taskbar_mode = single_desktop
+taskbar_padding = 0 0 10
+taskbar_background_id = 0
+taskbar_active_background_id = 0
+
+# Tasks
+urgent_nb_of_blink = 20
+task_icon = 1
+task_text = 1
+task_centered = 0
+task_maximum_size = 200 32
+task_padding = 10 4
+task_background_id = 0
+task_active_background_id = 1
+task_urgent_background_id = 0
+task_iconified_background_id = 0
+
+# Task Icons
+task_icon_asb = 100 0 0
+task_active_icon_asb = 100 0 0
+task_urgent_icon_asb = 100 0 0
+task_iconified_icon_asb = 100 0 0
+
+# Fonts
+task_font = Sans 12
+task_font_color = #dcdcdc 100
+task_active_font_color = #FFFFFF 100
+task_urgent_font_color = #FFFFFF 100
+task_iconified_font_color = #dcdcdc 80
+font_shadow = 0
+
+# System Tray
+systray = 1
+systray_padding = 10 6 15
+systray_sort = left2right
+systray_background_id = 2
+systray_icon_size = 16
+systray_icon_asb = 100 0 0
+
+# Tooltips
+tooltip = 1
+tooltip_padding = 2 2
+tooltip_show_timeout = 0.0
+tooltip_hide_timeout = 0.0
+tooltip_background_id = 2
+tooltip_font = Monospace 8
+tooltip_font_color = #FFFFFF 100
+
+# Mouse
+mouse_middle = none
+mouse_right = close
+mouse_scroll_up = toggle
+mouse_scroll_down = iconify
+
+# Live distribution label
+execp = new
+execp_command = printf 'd77 Crux 3.8'
+execp_background_id = 1
+execp_interval = 3
+execp_markup = 1
+execp_centered = 1
+execp_font = Monospace 12
+execp_font_color = #FFFFFF 100
+execp_padding = 8 0
+
+# Battery
+battery = 1
+battery_low_status = 10
+battery_low_cmd =
+battery_full_cmd =
+battery_hide = 101
+bat1_font = Monospace 12
+bat2_font = Monospace 10
+battery_font_color = #FFFFFF 100
+battery_padding = 1 0
+battery_background_id = 0
+
+# Clock
+time1_format = %H:%M
+time1_font = Sans 12
+time2_format = %d/%m
+time2_font = Sans 12
+clock_font_color = #FFFFFF 100
+clock_tooltip =
+clock_padding = 10 6
+clock_background_id = 0
+time1_timezone =
+time2_timezone =
+clock_tooltip_timezone =
+
+
+# Live application launchers
+launcher_padding = 8 2 6
+launcher_icon_size = 24
+launcher_background_id = 0
+launcher_item_app = /usr/share/applications/crux-terminal.desktop
+launcher_item_app = /usr/share/applications/firefox.desktop
+launcher_tooltip = 1
+'''
+
+[[target_files]]
+path = "/etc/skel/.bash_profile"
+content = '''
+
+# Load ~/.bashrc (aliases, PATH, LANG) in login shells too.
+[[ -r ~/.bashrc ]] && . ~/.bashrc
+
+# D77 desktop: start Openbox on first console login. Log in on another VT (or
+# over SSH) to skip it.
+if [[ $(tty) == /dev/tty1 && -z ${DISPLAY:-} ]]; then
+    startx -- -nolisten tcp
+fi
+'''
+
+[[target_files]]
+# The live tint2rc without the live-only installer launcher, plus Firefox
+# (crux-install-boot's sed edit).
+path = "/root/.config/tint2/tint2rc"
+content = '''
+# Adapted from Kwort 4.5; original author credit is retained below.
+# Tint2 config file by Kexolino
+
+# Background definitions
+
+# ID 1
+rounded = 0
+border_width = 0
+background_color = #000000 60
+border_color = #000000 0
+disable_transparency = 0
+
+# ID 2
+rounded = 0
+border_width = 0
+background_color = #000000 30
+border_color = #000000 0
+
+# Panel
+panel_monitor = all
+panel_position =  top center horizontal
+panel_size = 100% 31
+panel_margin = 0 0
+panel_padding = 0 0 0
+panel_dock = 0
+wm_menu = 1
+panel_layer = normal
+panel_background_id = 2
+panel_items = LTESBC
+
+# Panel Autohide
+autohide = 0
+autohide_show_timeout = 0.2
+autohide_hide_timeout = 1
+autohide_height = 0
+strut_policy = follow_size
+
+# Taskbar
+taskbar_mode = single_desktop
+taskbar_padding = 0 0 10
+taskbar_background_id = 0
+taskbar_active_background_id = 0
+
+# Tasks
+urgent_nb_of_blink = 20
+task_icon = 1
+task_text = 1
+task_centered = 0
+task_maximum_size = 200 32
+task_padding = 10 4
+task_background_id = 0
+task_active_background_id = 1
+task_urgent_background_id = 0
+task_iconified_background_id = 0
+
+# Task Icons
+task_icon_asb = 100 0 0
+task_active_icon_asb = 100 0 0
+task_urgent_icon_asb = 100 0 0
+task_iconified_icon_asb = 100 0 0
+
+# Fonts
+task_font = Sans 12
+task_font_color = #dcdcdc 100
+task_active_font_color = #FFFFFF 100
+task_urgent_font_color = #FFFFFF 100
+task_iconified_font_color = #dcdcdc 80
+font_shadow = 0
+
+# System Tray
+systray = 1
+systray_padding = 10 6 15
+systray_sort = left2right
+systray_background_id = 2
+systray_icon_size = 16
+systray_icon_asb = 100 0 0
+
+# Tooltips
+tooltip = 1
+tooltip_padding = 2 2
+tooltip_show_timeout = 0.0
+tooltip_hide_timeout = 0.0
+tooltip_background_id = 2
+tooltip_font = Monospace 8
+tooltip_font_color = #FFFFFF 100
+
+# Mouse
+mouse_middle = none
+mouse_right = close
+mouse_scroll_up = toggle
+mouse_scroll_down = iconify
+
+# Live distribution label
+execp = new
+execp_command = printf 'd77 Crux 3.8'
+execp_background_id = 1
+execp_interval = 3
+execp_markup = 1
+execp_centered = 1
+execp_font = Monospace 12
+execp_font_color = #FFFFFF 100
+execp_padding = 8 0
+
+# Battery
+battery = 1
+battery_low_status = 10
+battery_low_cmd =
+battery_full_cmd =
+battery_hide = 101
+bat1_font = Monospace 12
+bat2_font = Monospace 10
+battery_font_color = #FFFFFF 100
+battery_padding = 1 0
+battery_background_id = 0
+
+# Clock
+time1_format = %H:%M
+time1_font = Sans 12
+time2_format = %d/%m
+time2_font = Sans 12
+clock_font_color = #FFFFFF 100
+clock_tooltip =
+clock_padding = 10 6
+clock_background_id = 0
+time1_timezone =
+time2_timezone =
+clock_tooltip_timezone =
+
+
+# Live application launchers
+launcher_padding = 8 2 6
+launcher_icon_size = 24
+launcher_background_id = 0
+launcher_item_app = /usr/share/applications/crux-terminal.desktop
+launcher_item_app = /usr/share/applications/firefox.desktop
+launcher_tooltip = 1
+'''
+
+[[target_files]]
+path = "/root/.bash_profile"
+content = '''
+
+# Load ~/.bashrc (aliases, PATH, LANG) in login shells too.
+[[ -r ~/.bashrc ]] && . ~/.bashrc
+
+# D77 desktop: start Openbox on first console login. Log in on another VT (or
+# over SSH) to skip it.
+if [[ $(tty) == /dev/tty1 && -z ${DISPLAY:-} ]]; then
+    startx -- -nolisten tcp
+fi
+'''

@@ -54,7 +54,7 @@ class TestWiring(unittest.TestCase):
         self.assertIn("systemd-boot", str(ctx.exception))
 
     def test_lilo_without_provider_rejected(self) -> None:
-        plan, registry, manifest = resolve("sysvd77", "lilo", FirmwareType.BIOS)
+        plan, registry, manifest = resolve("sysvd77", "lilo", FirmwareType.BIOS, extra_boot=["lilo"])
         with self.assertRaises(ResolutionError):
             wire_plan_providers(plan, registry, manifest)
 

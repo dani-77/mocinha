@@ -32,6 +32,12 @@ class TestCruxProviders(unittest.TestCase):
             },
         )
 
+        rc_d = self.target / "etc" / "rc.d"
+        rc_d.mkdir(parents=True)
+        for srv in ("syslog", "net", "sshd"):
+            (rc_d / srv).write_text("#!/bin/sh\n")
+            (rc_d / srv).chmod(0o755)
+
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
@@ -98,7 +104,7 @@ class TestCruxProviders(unittest.TestCase):
             arch="x86_64",
             firmware=FirmwareType.BIOS,
             disks=disks,
-            running_services=["syslog"],
+            running_services=[],
         )
 
         registry = create_default_registry(self.stream)
@@ -106,7 +112,7 @@ class TestCruxProviders(unittest.TestCase):
 
         choices = UserChoices(
             target_disk="/dev/sda",
-            bootloader="limine",
+            bootloader="grub",
             username="dani",
             password="cruxpassword",
             hostname="sysv-box",
@@ -116,13 +122,21 @@ class TestCruxProviders(unittest.TestCase):
         plan = resolver.resolve(choices)
         self.assertEqual(plan.summary.disk, "/dev/sda")
         self.assertEqual(plan.summary.init, "crux-sysvinit")
-        self.assertIn("syslog", plan.summary.services)
-        self.assertIn("net", plan.summary.services)
-        self.assertIn("live-setup", plan.summary.live_only_removed)
+        self.assertEqual(plan.summary.services, ["lo", "net"])  # lo required, crond deselected
+        self.assertIn("crond", plan.metadata["deselected_services"])
 
         summary_text = plan.to_human_readable()
         self.assertIn("MOCINHA INSTALLATION PLAN", summary_text)
         self.assertIn("crux-sysvinit", summary_text)
+
+    def test_crux_service_without_rc_script_is_refused(self) -> None:
+        """A SERVICES entry without /etc/rc.d/<name> would fail at every boot."""
+        from mocinha.core.errors import ExecutionError
+        provider = CruxSysvServiceProvider("crux-sysvinit", self.stream)
+        (self.target / "etc" / "rc.d" / "sshd").unlink()
+        with self.assertRaises(ExecutionError) as ctx:
+            provider.apply(self.context)
+        self.assertIn("sshd", str(ctx.exception))
 
     def test_crux_rejects_systemd_default_target(self) -> None:
         from mocinha.core.errors import ExecutionError

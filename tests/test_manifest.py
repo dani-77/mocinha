@@ -52,7 +52,8 @@ class TestManifest(unittest.TestCase):
     def test_load_sysvd77_manifest(self) -> None:
         path = self.examples_dir / "sysvd77.toml"
         manifest = Manifest.load_from_file(path)
-        self.assertEqual(manifest.system.id, "sysvd77")
+        self.assertEqual(manifest.system.id, "sysv-d77")
+        self.assertEqual(manifest.providers.deployment, "crux-pkgadd")
         self.assertEqual(manifest.providers.services, "crux-sysvinit")
 
     def test_missing_mandatory_section_raises_error(self) -> None:
@@ -74,7 +75,7 @@ class TestManifest(unittest.TestCase):
             },
             "providers": {k: v for k, v in (
                 ("platform", "linux"), ("storage", "linux-sfdisk"), ("filesystem", "linux-mkfs"),
-                ("deployment", "squashfs-extract"), ("users", "shadow"), ("services", "arch-systemd"),
+                ("deployment", "squashfs-extract"), ("users", "shadow"), ("services", "arch-systemd"), ("sysconfig", "systemd"),
                 ("initramfs", "none"))},
             "boot": {"available": ["grub"], "default": "grub"},
         }

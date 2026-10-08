@@ -8,18 +8,23 @@ from mocinha.core.provider import ProviderRegistry
 from mocinha.providers.boot.freebsd_loader import FreeBSDBootProvider
 from mocinha.providers.boot.grub import GrubBootProvider
 from mocinha.providers.boot.limine import LimineBootProvider
+from mocinha.providers.deployment.crux_pkgadd import CruxPkgaddDeploymentProvider
 from mocinha.providers.deployment.rsync import RsyncDeploymentProvider
 from mocinha.providers.deployment.squashfs import SquashfsDeploymentProvider
 from mocinha.providers.deployment.tar import TarDeploymentProvider
 from mocinha.providers.deployment.tree_copy import TreeCopyDeploymentProvider
 from mocinha.providers.filesystem.mkfs import LinuxMkfsProvider
 from mocinha.providers.filesystem.newfs import FreeBSDNewfsProvider
+from mocinha.providers.initramfs.dracut import DracutProvider
 from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
 from mocinha.providers.platform.freebsd import FreeBSDPlatformProvider
 from mocinha.providers.platform.linux import LinuxPlatformProvider
 from mocinha.providers.services.crux_sysv import CruxSysvServiceProvider
 from mocinha.providers.services.freebsd_rc import FreeBSDServiceProvider
 from mocinha.providers.services.systemd import SystemdServiceProvider
+from mocinha.providers.sysconfig.crux_rc import CruxRcSysconfigProvider
+from mocinha.providers.sysconfig.freebsd_rc import FreeBSDRcSysconfigProvider
+from mocinha.providers.sysconfig.systemd import SystemdSysconfigProvider
 from mocinha.providers.storage.gpart import FreeBSDStorageProvider
 from mocinha.providers.storage.sfdisk import SfdiskStorageProvider
 from mocinha.providers.users.pw import FreeBSDUsersProvider
@@ -42,14 +47,21 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("platform", LinuxPlatformProvider("linux", event_stream))
     registry.register("platform", FreeBSDPlatformProvider("freebsd", event_stream))
 
+    # System settings (hostname, locale, keymap, timezone)
+    registry.register("sysconfig", SystemdSysconfigProvider("systemd", event_stream))
+    registry.register("sysconfig", FreeBSDRcSysconfigProvider("freebsd-rc", event_stream))
+    registry.register("sysconfig", CruxRcSysconfigProvider("crux-rc", event_stream))
+
     # Deployment
     registry.register("deployment", SquashfsDeploymentProvider("squashfs-extract", event_stream))
     registry.register("deployment", TarDeploymentProvider("tar-extract", event_stream))
     registry.register("deployment", RsyncDeploymentProvider("rsync-copy", event_stream))
     registry.register("deployment", TreeCopyDeploymentProvider("tree-copy", event_stream))
+    registry.register("deployment", CruxPkgaddDeploymentProvider("crux-pkgadd", event_stream))
 
     # Initramfs
     registry.register("initramfs", MkinitcpioProvider("mkinitcpio", event_stream))
+    registry.register("initramfs", DracutProvider("dracut", event_stream))
 
     # Services
     registry.register("services", SystemdServiceProvider("arch-systemd", event_stream))
@@ -95,6 +107,7 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
     deploy_prov = require("deployment", manifest.providers.deployment or "squashfs-extract")
     user_prov = require("users", manifest.providers.users)
     srv_prov = require("services", manifest.providers.services)
+    sys_prov = require("sysconfig", manifest.providers.sysconfig)
     boot_prov = require("bootloader", plan.summary.bootloader)
     init_prov = (
         require("initramfs", manifest.providers.initramfs)
@@ -109,9 +122,10 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
         "target_mount": (plat_prov, plat_prov.mount_target, plat_prov.verify_mounted),
         "deployment_copy": (deploy_prov, deploy_prov.apply, deploy_prov.verify),
         "remove_live_only_files": (plat_prov, plat_prov.remove_live_only_files, plat_prov.verify_live_only_files_removed),
+        "copy_live_files": (plat_prov, plat_prov.copy_live_files, plat_prov.verify_live_files),
         "write_target_files": (plat_prov, plat_prov.write_target_files, plat_prov.verify_target_files),
-        "configure_hostname": (plat_prov, plat_prov.configure_hostname, plat_prov.verify_hostname),
-        "configure_locale": (plat_prov, plat_prov.configure_locale, plat_prov.verify_locale),
+        "configure_hostname": (sys_prov, sys_prov.configure_hostname, sys_prov.verify_hostname),
+        "configure_locale": (sys_prov, sys_prov.configure_locale, sys_prov.verify_locale),
         "configure_fstab": (plat_prov, plat_prov.generate_fstab, plat_prov.verify_fstab),
         "configure_user": (user_prov, user_prov.apply, user_prov.verify),
         "configure_services": (srv_prov, srv_prov.apply, srv_prov.verify),

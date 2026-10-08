@@ -1,7 +1,9 @@
 """GRUB bootloader provider (UEFI/BIOS).
 
-Installs GRUB with grub-install and generates the configuration with the
-target's own grub-mkconfig, so the remaster's /etc/default/grub (timeout,
+Installs GRUB with the target's own grub-install and generates the
+configuration with the target's own grub-mkconfig (both inside a chroot of
+the target: the live may not carry GRUB at all, e.g. the CRUX live), so the
+installed GRUB matches the installed grub package, and so the remaster's /etc/default/grub (timeout,
 kernel command line, theme, ...) and its kernels are used as they are.
 Only what the manifest or the user explicitly asks for is changed in
 /etc/default/grub: [boot].timeout and extra kernel arguments.
@@ -15,11 +17,15 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner, chroot_command, read_blkid_uuid, require_pe_binary
+from mocinha.providers.base import CommandRunner, read_blkid_uuid, require_pe_binary, run_in_target
 
 
-def _grub_install_tool() -> Optional[str]:
-    return next((t for t in ("grub-install", "grub2-install") if shutil.which(t)), None)
+def _grub_install_tool(target_root: Path) -> Optional[str]:
+    for tool in ("grub-install", "grub2-install"):
+        for d in ("usr/bin", "usr/sbin", "bin", "sbin"):
+            if (target_root / d / tool).exists():
+                return tool
+    return None
 
 
 def set_default_grub(text: str, key: str, value: str) -> str:
@@ -45,13 +51,6 @@ class GrubBootProvider(ProviderContract):
         return ["bootloader", "grub"]
 
     def validate(self, context: ExecutionContext) -> None:
-        if _grub_install_tool() is None:
-            raise ExecutionError(
-                message="grub-install not found in the live system.",
-                cause="Neither grub-install nor grub2-install is in PATH.",
-                failed_operation="Validate GRUB installer presence",
-                possible_recovery="Install the grub package in the live image or choose another bootloader.",
-            )
         if not (shutil.which("arch-chroot") or shutil.which("chroot")):
             raise ExecutionError(
                 message="No chroot tool found to run grub-mkconfig on the target.",
@@ -70,23 +69,29 @@ class GrubBootProvider(ProviderContract):
             EventPhase.BOOTLOADER,
             f"Installing GRUB on {context.target_disk} (Mode: {'UEFI' if is_uefi else 'BIOS'})",
         )
-        if is_uefi:
-            esp = target_root / context.metadata["esp_mountpoint"].lstrip("/")
-            cmd = [_grub_install_tool(), "--target=x86_64-efi", f"--efi-directory={esp}",
-                   f"--boot-directory={boot_dir}", f"--bootloader-id={context.metadata['system_id']}", "--recheck"]
-        else:
-            cmd = [_grub_install_tool(), "--target=i386-pc", f"--boot-directory={boot_dir}", context.target_disk]
-        self.runner.run(cmd, phase=EventPhase.BOOTLOADER, check=True)
-
-        default_grub = target_root / "etc" / "default" / "grub"
-        if not default_grub.is_file():
+        tool = _grub_install_tool(target_root)
+        if tool is None:
             raise ExecutionError(
-                message="/etc/default/grub not found on the target.",
-                cause="grub-mkconfig needs the target's GRUB defaults (shipped by the grub package).",
-                failed_operation="Configure GRUB",
-                possible_recovery="Check that the grub package is installed in the live image.",
+                message="grub-install not found on the target.",
+                cause="GRUB is installed with the installed system's own grub package.",
+                failed_operation="Locate grub-install on the target",
+                current_state=f"No grub-install/grub2-install under {target_root}",
+                possible_recovery="Make sure the deployment installs the grub package for this firmware "
+                                  "(e.g. [packages].install_bios / install_uefi) or choose another bootloader.",
             )
-        text = default_grub.read_text()
+        # Paths as seen inside the target chroot
+        if is_uefi:
+            cmd = [tool, "--target=x86_64-efi", f"--efi-directory={context.metadata['esp_mountpoint']}",
+                   "--boot-directory=/boot", f"--bootloader-id={context.metadata['efi_id']}", "--recheck"]
+        else:
+            cmd = [tool, "--target=i386-pc", "--boot-directory=/boot", context.target_disk]
+        run_in_target(self.runner, str(target_root), cmd, phase=EventPhase.BOOTLOADER)
+
+        # Some grub packages ship no /etc/default/grub (CRUX's grub2); grub-mkconfig
+        # then uses its built-in defaults. It is only created when something must be set.
+        default_grub = target_root / "etc" / "default" / "grub"
+        original = default_grub.read_text() if default_grub.is_file() else None
+        text = original if original is not None else "# Created by Mocinha: only the settings below differ from grub-mkconfig's defaults\n"
         timeout = context.metadata.get("boot_timeout")
         if timeout is not None:
             text = set_default_grub(text, "GRUB_TIMEOUT", str(timeout))
@@ -94,22 +99,23 @@ class GrubBootProvider(ProviderContract):
         if extra:
             current = get_default_grub(text, "GRUB_CMDLINE_LINUX").split()
             text = set_default_grub(text, "GRUB_CMDLINE_LINUX", " ".join(current + [a for a in extra if a not in current]))
-        if text != default_grub.read_text():
+        if original is None and (timeout is not None or extra):
+            self.events.action(EventPhase.BOOTLOADER, f"Creating /etc/default/grub (timeout={timeout}, extra kernel args={extra})")
+            default_grub.parent.mkdir(parents=True, exist_ok=True)
+            default_grub.write_text(text)
+        elif original is not None and text != original:
             self.events.action(EventPhase.BOOTLOADER, f"Updating /etc/default/grub (timeout={timeout}, extra kernel args={extra})")
             default_grub.write_text(text)
 
-        self.runner.run(
-            chroot_command(str(target_root)) + ["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
-            phase=EventPhase.BOOTLOADER,
-            check=True,
-        )
+        run_in_target(self.runner, str(target_root), ["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
+                      phase=EventPhase.BOOTLOADER)
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
         boot_dir = target_root / "boot"
         if self._is_uefi(context):
             esp = target_root / context.metadata["esp_mountpoint"].lstrip("/")
-            require_pe_binary(esp / "EFI" / context.metadata["system_id"] / "grubx64.efi", "GRUB EFI binary")
+            require_pe_binary(esp / "EFI" / context.metadata["efi_id"] / "grubx64.efi", "GRUB EFI binary")
         else:
             core_img = boot_dir / "grub" / "i386-pc" / "core.img"
             with open(context.target_disk, "rb") as disk:

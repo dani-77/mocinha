@@ -43,6 +43,13 @@ class LinuxMkfsProvider(ProviderContract):
                 failed_operation="Validate mkfs.vfat presence",
                 possible_recovery="Install dosfstools.",
             )
+        if context.metadata.get("swap_size") and not shutil.which("mkswap"):
+            raise ExecutionError(
+                message="mkswap utility not found.",
+                cause="The manifest requests a swap partition (swap_size).",
+                failed_operation="Validate mkswap presence",
+                possible_recovery="Install util-linux in the live image or remove [install].swap_size.",
+            )
 
     def apply(self, context: ExecutionContext) -> None:
         # Format ESP if present
@@ -53,6 +60,11 @@ class LinuxMkfsProvider(ProviderContract):
             esp_label = context.metadata.get("esp_label")
             self.runner.run([fat_tool, "-F32"] + (["-n", esp_label] if esp_label else []) + [esp_dev],
                             phase=EventPhase.PREPARE, check=True)
+
+        if "swap" in context.target_partitions:
+            swap_dev = context.target_partitions["swap"]
+            self.events.action(EventPhase.PREPARE, f"Creating swap on {swap_dev}")
+            self.runner.run(["mkswap", swap_dev], phase=EventPhase.PREPARE, check=True)
 
         # Format Root
         if "root" in context.target_partitions:
@@ -68,7 +80,7 @@ class LinuxMkfsProvider(ProviderContract):
             for role, dev in context.target_partitions.items():
                 proc = self.runner.run(["blkid", dev], phase=EventPhase.VERIFY, check=True)
                 out = proc.stdout.lower()
-                expected = "vfat" if role == "esp" else "ext4"
+                expected = {"esp": "vfat", "swap": 'type="swap"'}.get(role, "ext4")
                 if expected not in out:
                     raise VerificationError(
                         message=f"Filesystem on {dev} does not match expected type {expected}.",

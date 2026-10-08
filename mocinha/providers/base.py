@@ -7,6 +7,7 @@ logging to EventStream, and diagnostic error generation.
 from pathlib import Path
 from typing import List, Optional
 import os
+import shutil
 import subprocess
 
 from mocinha.core.errors import ExecutionError, VerificationError
@@ -28,7 +29,9 @@ class CommandRunner:
         env: Optional[dict] = None,
         cwd: Optional[str] = None,
         input_text: Optional[str] = None,
+        secret_output: bool = False,
     ) -> subprocess.CompletedProcess:
+        """secret_output: the command's stdout is a secret (e.g. a password hash) and is not logged."""
         cmd_str = " ".join(cmd)
         self.events.action(phase, f"Running: {cmd_str}", command=cmd_str)
 
@@ -46,7 +49,7 @@ class CommandRunner:
                 env=run_env,
                 cwd=cwd,
             )
-            out = proc.stdout + proc.stderr
+            out = ("(output withheld: secret)\n" + proc.stderr) if secret_output else proc.stdout + proc.stderr
             self.events.command_result(
                 phase=phase,
                 message=f"Command finished ({'OK' if proc.returncode == 0 else 'FAIL'})",
@@ -58,7 +61,7 @@ class CommandRunner:
             if check and proc.returncode != 0:
                 raise ExecutionError(
                     message=f"Command failed with exit code {proc.returncode}: {cmd_str}",
-                    cause=proc.stderr.strip() or proc.stdout.strip() or f"Process exited with {proc.returncode}",
+                    cause=proc.stderr.strip() or (not secret_output and proc.stdout.strip()) or f"Process exited with {proc.returncode}",
                     failed_operation=f"Execute {cmd[0]}",
                     command=cmd_str,
                     current_state=f"Returncode={proc.returncode}",
@@ -204,12 +207,109 @@ def verify_target_files(target_root: str, files: list, events: EventStream) -> N
     events.info(EventPhase.VERIFY, f"Verified {len(files)} installed-system file(s).")
 
 
-def chroot_command(target_root: str) -> List[str]:
-    """Prefix for running a command inside the target (arch-chroot sets up /proc, /dev, ...)."""
+def _live_tree(live_root: str, source: str) -> Path:
+    return Path(live_root) / source.lstrip("/")
+
+
+def copy_live_files(target_root: str, files: list, events: EventStream, live_root: str = "/") -> None:
+    """Copies manifest-declared live files/directories to the target (symlinks inside trees are kept)."""
+    for lf in files:
+        src = _live_tree(live_root, lf.source)
+        if not src.exists():
+            if lf.optional:
+                events.info(EventPhase.CONFIGURE, f"Skipping optional live file {lf.source} (not present on the live)")
+                continue
+            raise ExecutionError(
+                message=f"Live file {lf.source} does not exist.",
+                cause="The manifest copies it from the live system, but the running live has no such path.",
+                failed_operation="Copy live files to the target",
+                possible_recovery="Fix [[live_files]] in the manifest or mark the entry optional = true.",
+            )
+        dst = target_path(target_root, lf.path)
+        events.action(EventPhase.CONFIGURE, f"Copying live {lf.source} -> target {lf.path}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.is_symlink():
+            dst.unlink()
+        if src.is_dir():
+            shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+            if lf.mode is not None:
+                dst.chmod(lf.mode)
+
+
+def verify_live_files(target_root: str, files: list, events: EventStream, live_root: str = "/") -> None:
+    problems = []
+    for lf in files:
+        src = _live_tree(live_root, lf.source)
+        if not src.exists() and lf.optional:
+            continue
+        dst = target_path(target_root, lf.path)
+        pairs = [(src, dst)] if not src.is_dir() else [
+            (f, dst / f.relative_to(src)) for f in src.rglob("*") if f.is_file() and not f.is_symlink()
+        ]
+        for a, b in pairs:
+            if not b.is_file() or b.read_bytes() != a.read_bytes():
+                problems.append(f"{b.relative_to(target_root)} differs from live {a}")
+        if lf.mode is not None and not src.is_dir() and dst.is_file() and (dst.stat().st_mode & 0o7777) != lf.mode:
+            problems.append(f"{lf.path}: mode {dst.stat().st_mode & 0o7777:04o} != {lf.mode:04o}")
+    if problems:
+        raise VerificationError(
+            message="Files copied from the live system do not match.",
+            cause="; ".join(problems[:20]),
+            failed_operation="Verify live files on the target",
+            current_state=f"{len(problems)} mismatch(es)",
+            possible_recovery="Re-run the copy step and check free space on the target.",
+        )
+    events.info(EventPhase.VERIFY, f"Verified {len(files)} live file entr(y/ies) on the target.")
+
+
+TARGET_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def run_in_target(runner: "CommandRunner", target_root: str, cmd: List[str],
+                  phase: EventPhase = EventPhase.CONFIGURE, check: bool = True,
+                  input_text: Optional[str] = None, secret_output: bool = False) -> subprocess.CompletedProcess:
+    """Runs one of the *target's* own tools inside a chroot of the target.
+
+    Lives do not necessarily carry the tools the installed system needs
+    (e.g. the CRUX live has no useradd, grub-install or dracut), but the
+    deployed target does. arch-chroot is used when available. Otherwise the
+    API filesystems are mounted the way arch-chroot and CRUX's setup-chroot do
+    it -- fresh, non-recursive mounts (so unmounting them cannot propagate to
+    the live's own /dev) -- for the duration of the command only.
+    """
     import shutil
 
-    tool = "arch-chroot" if shutil.which("arch-chroot") else "chroot"
-    return [tool, str(target_root)]
+    env = {"PATH": TARGET_PATH}
+    if shutil.which("arch-chroot"):
+        return runner.run(["arch-chroot", str(target_root)] + cmd, phase=phase, check=check,
+                          input_text=input_text, env=env, secret_output=secret_output)
+
+    root = Path(target_root)
+    mounts = [
+        (["mount", "-t", "proc", "proc"], "proc"),
+        (["mount", "-t", "sysfs", "sysfs"], "sys"),
+        (["mount", "--bind", "/dev"], "dev"),
+        (["mount", "-t", "devpts", "-o", "noexec,nosuid,gid=tty,mode=0620", "devpts"], "dev/pts"),
+        (["mount", "-t", "tmpfs", "tmpfs"], "run"),
+    ]
+    if Path("/sys/firmware/efi/efivars").is_dir():
+        mounts.append((["mount", "-t", "efivarfs", "efivarfs"], "sys/firmware/efi/efivars"))
+    done: List[Path] = []
+    try:
+        for mount_cmd, rel in mounts:
+            point = root / rel
+            if os.path.ismount(point):
+                continue
+            point.mkdir(parents=True, exist_ok=True)
+            runner.run(mount_cmd + [str(point)], phase=phase, check=True)
+            done.append(point)
+        return runner.run(["chroot", str(root)] + cmd, phase=phase, check=check, input_text=input_text, env=env,
+                          secret_output=secret_output)
+    finally:
+        for point in reversed(done):
+            runner.run(["umount", str(point)], phase=phase, check=True)
 
 
 def release_planned_mounts(runner: CommandRunner, context: ExecutionContext, events: EventStream) -> None:

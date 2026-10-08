@@ -1,0 +1,27 @@
+{
+  "_comment": "Expected state derived by reading sysv-d77's installer (crux-prepare-disk, CRUX setup with its default core selection, crux-install-boot, crux-configure); hostname, user, passwords, locale, keymap and timezone are the test's choices, set where crux-configure sets them (rc.conf, localedef, passwd, useradd -m -s /bin/bash). console=ttyS0 is an extra kernel argument chosen by the test.",
+  "hostname": "crux-test",
+  "rc_conf": {
+    "HOSTNAME": "crux-test",
+    "KEYMAP": "pt-latin1",
+    "TIMEZONE": "Europe/Lisbon",
+    "LANG": "pt_PT.UTF-8",
+    "SERVICES": "(lo net crond)"
+  },
+  "users": {"dani": ["1000", "/bin/bash"]},
+  "groups_of_primary_user": ["dani"],
+  "root_status": "P",
+  "locale_generated": "pt_PT.utf8",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "package_count": {"bios": 252, "uefi": 256},
+  "packages_present": ["rc", "shadow", "sysvinit", "dracut", "d77crux-kernel", "openbox", "tint2", "xorg-server", "linux-firmware"],
+  "fstab_mounts": ["/", "none", "/dev/pts", "/dev/shm"],
+  "running": ["crond"],
+  "tint2_launchers": [
+    "launcher_item_app = /usr/share/applications/crux-terminal.desktop",
+    "launcher_item_app = /usr/share/applications/firefox.desktop"
+  ],
+  "tint2_launchers_absent": ["launcher_item_app = /usr/share/applications/crux-installer.desktop"],
+  "bash_profile_tail": "startx -- -nolisten tcp",
+  "efi_id": "d77crux"
+}

@@ -157,6 +157,8 @@ class InstallationResolver:
 
         live_only = self.manifest.live_only
         target_files = self.manifest.target_files
+        live_files = self.manifest.live_files
+        packages = self.manifest.packages
 
         # 5. Build Staged Steps
         steps: List[PlanStep] = [
@@ -183,8 +185,13 @@ class InstallationResolver:
             ),
             PlanStep(
                 step_id="deployment_copy",
-                title=f"Deploy live filesystem via {self.manifest.install.method}",
-                description=f"Transfer live root contents to target mount using {self.manifest.install.method}",
+                title=f"Deploy the system via {self.manifest.install.method}",
+                description=(
+                    f"Install packages from {self.manifest.install.source}: collections {packages.collections}, "
+                    f"extra {packages.install}, local {packages.local}"
+                    if packages else
+                    f"Transfer live root contents to target mount using {self.manifest.install.method}"
+                ),
                 is_destructive=True,
                 provider_name=self.manifest.providers.deployment or "deployment",
             ),
@@ -195,6 +202,16 @@ class InstallationResolver:
                 is_destructive=False,
                 provider_name="platform",
             ),
+        ] + ([
+            PlanStep(
+                step_id="copy_live_files",
+                title="Copy live files to the target",
+                description=f"Copy {len(live_files)} file(s)/directories from the running live system: "
+                            f"{[(f.source, f.path) for f in live_files]}",
+                is_destructive=False,
+                provider_name="platform",
+            ),
+        ] if live_files else []) + [
             PlanStep(
                 step_id="write_target_files",
                 title="Write installed-system configuration files",
@@ -207,7 +224,7 @@ class InstallationResolver:
                 title=f"Set hostname '{choices.hostname}'",
                 description="Write the target hostname configuration",
                 is_destructive=False,
-                provider_name="platform",
+                provider_name="sysconfig",
             ),
             PlanStep(
                 step_id="configure_locale",
@@ -217,7 +234,7 @@ class InstallationResolver:
                 ),
                 description="Generate the locale and write locale, console keymap and timezone configuration",
                 is_destructive=False,
-                provider_name="platform",
+                provider_name="sysconfig",
             ),
             PlanStep(
                 step_id="configure_fstab",
@@ -318,6 +335,10 @@ class InstallationResolver:
             "live_only_users": list(live_only.users),
             "live_only_files": list(live_only.files),
             "target_files": list(target_files),
+            "live_files": list(live_files),
+            "packages": packages,
+            "initramfs_args": list(self.manifest.initramfs.args),
+            "efi_id": self.manifest.boot.efi_id or self.manifest.system.id,
             "lock_root": not choices.root_password,
             "locale": choices.locale,
             "keymap": choices.keymap,

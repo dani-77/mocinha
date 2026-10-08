@@ -1,7 +1,9 @@
 # Mocinha Installer
 
 A small, modular, platform-aware installer for live systems: it installs
-the booted live system to disk, offline, after showing a complete plan.
+the booted live system to disk, offline, after showing a complete plan
+(where the live is only an installation environment, as on CRUX, it
+installs the packages on the live medium instead).
 
 *Knowledgeable, not opinionated.*
 
@@ -12,7 +14,7 @@ Contents:
 -   `STATUS.md` --- what is done and validated (and how), and open issues;
 -   `docs/` --- variability map, language spike, manifest specification;
 -   `examples/manifests/` --- manifests of the reference remasters
-    (btw-d77 and au-d77 derived from their installers; sysvd77 is a draft);
+    (btw-d77, au-d77 and sysvd77, each derived from its remaster's installer);
 -   `tools/qemu/` --- automated QEMU install/boot tests against the real
     remaster images;
 -   `mocinha-logo-mascot.png` --- logo/mascot;

@@ -22,7 +22,7 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 
 | Key | Required | Meaning |
 |---|---|---|
-| `id` | yes | Canonical identifier (`btw-d77`, `au-d77`). Also used for the GRUB EFI bootloader id and FreeBSD GPT label prefixes. |
+| `id` | yes | Canonical identifier (`btw-d77`, `au-d77`, `sysv-d77`). Also the default GRUB EFI bootloader id (see `[boot].efi_id`) and the FreeBSD GPT label prefix. |
 | `name` | yes | Human-readable name (installer title, boot menu entries). |
 | `platform` | yes | `linux` or `freebsd`. Must match the running live. |
 | `version`, `arch` | no | Informational. |
@@ -32,7 +32,7 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 | Key | Required | Meaning |
 |---|---|---|
 | `method` | yes | Name shown in the plan for the deployment step. The deployment provider itself is chosen by `[providers].deployment`. |
-| `source` | yes | What is deployed: the live root image file or tree. Never guessed. The disk holding it (or the running `/`) is treated as the live medium and cannot be selected as target. |
+| `source` | yes | What is deployed: the live root image file or tree, or (package deployments) the mounted install medium. Never guessed. The disk holding it (or the running `/`) is treated as the live medium and cannot be selected as target. |
 | `min_disk_size_bytes` | yes | Minimum target disk size. |
 | `root_filesystem` | yes | e.g. `ext4`, `ufs`. Filesystem providers refuse types they do not implement. |
 | `root_mount_options` | yes | fstab options of the root filesystem. |
@@ -49,7 +49,9 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 
 Maps capabilities to provider names; all keys are required:
 `platform`, `storage`, `filesystem`, `deployment`, `users`, `services`,
-`initramfs` (`none` when the platform needs no initramfs step). A name
+`sysconfig` (hostname/locale/keymap/timezone files: `systemd`,
+`freebsd-rc`, `crux-rc`), `initramfs` (`none` when the platform needs no
+initramfs step). A name
 that is not registered fails plan wiring, before confirmation.
 
 ### `[boot]` (required)
@@ -60,8 +62,10 @@ that is not registered fails plan wiring, before confirmation.
 | `default` | yes | Suggested choice; must be one of `available`. |
 | `timeout` | no | Boot menu timeout; omitted keeps the bootloader's/remaster's own setting. |
 | `kernel_args` | no | Arguments appended to the kernel command line (the user may add more). |
+| `efi_id` | no | Name of the `EFI/<efi_id>` directory and NVRAM entry GRUB installs; default `[system].id`. |
 
-GRUB is configured with the target's own `grub-mkconfig` and
+GRUB is installed with the target's own `grub-install` and configured
+with its own `grub-mkconfig` (in a chroot of the target) and
 `/etc/default/grub`; only `timeout` and extra kernel arguments are
 changed there. Limine entries come from the kernels/initramfs images the
 initramfs provider discovers.
@@ -132,6 +136,43 @@ command = "agreety --cmd /usr/local/bin/qtile-session"
 user = "greeter"
 '''
 ```
+
+### `[packages]` (package-based deployments only)
+
+Used by `crux-pkgadd`. All paths are relative to `[install].source`.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `repositories` | yes | Directories searched for package archives. A name must resolve to exactly one archive. |
+| `collections` | no | Every package in these directories is installed (CRUX `setup`'s collection selection). |
+| `exclude` | no | Names dropped from the collections. |
+| `install` | no | Extra packages, each with its dependency closure. |
+| `install_bios`, `install_uefi` | no | Extra packages for that firmware only (e.g. `grub2` / `grub2-efi`). |
+| `local` | no | Every archive in these directories is installed, or upgraded (`pkgadd -u`) when that name is already installed. |
+| `dependencies` | no | Dependency list, one `name: dep ... name` line per package (CRUX `setup.dependencies`). |
+
+Unknown or ambiguous names fail during validation, before confirmation.
+
+### `[initramfs]` (optional)
+
+| Key | Meaning |
+|---|---|
+| `args` | Options passed to the initramfs generator (`dracut`). |
+
+### `[[live_files]]` (optional)
+
+Files or directories copied from the running live system to the target,
+for deployments that do not copy the live tree (e.g. a remaster installer
+that carries its live desktop configuration over). Copied after the
+live-only files are removed and before `[[target_files]]` are written, so a
+target file can override part of a copied directory. Verified byte for byte.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `source` | yes | Absolute path on the live. |
+| `path` | no | Absolute path on the target; default `source`. Same restrictions as target files. |
+| `optional` | no | `true`: skipped when the live has no such path; otherwise a missing source fails. |
+| `mode` | no | Octal mode for a copied file; default keeps the live file's mode. |
 
 ---
 

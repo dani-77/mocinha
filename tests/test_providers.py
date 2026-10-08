@@ -12,6 +12,7 @@ from mocinha.core.provider import ExecutionContext
 from mocinha.providers.boot.limine import LimineBootProvider
 from mocinha.providers.deployment.squashfs import SquashfsDeploymentProvider
 from mocinha.providers.platform.linux import LinuxPlatformProvider
+from mocinha.providers.sysconfig.systemd import SystemdSysconfigProvider
 from mocinha.providers.services.systemd import SystemdServiceProvider
 from mocinha.providers.users.shadow import ShadowUsersProvider
 
@@ -136,7 +137,7 @@ class TestProviders(unittest.TestCase):
     @mock.patch("mocinha.providers.platform.linux.read_blkid_uuid", side_effect=lambda r, dev: f"UUID-{dev[-3:]}")
     def test_linux_platform_fstab_and_hostname(self, _uuid) -> None:
         provider = LinuxPlatformProvider("linux", self.stream)
-        provider.configure_hostname(self.context)
+        SystemdSysconfigProvider("systemd", self.stream).configure_hostname(self.context)
         provider.generate_fstab(self.context)
 
         # Verify hostname
@@ -268,7 +269,7 @@ class TestProviders(unittest.TestCase):
             base.target_path(str(self.target), "/etc/evil/passwd")
 
     def test_linux_hostname_verification(self) -> None:
-        provider = LinuxPlatformProvider("linux", self.stream)
+        provider = SystemdSysconfigProvider("systemd", self.stream)
         (self.target / "etc").mkdir()
         (self.target / "etc" / "hostname").write_text("d77 archiso\n")
         with self.assertRaises(VerificationError):
@@ -289,13 +290,13 @@ class TestProviders(unittest.TestCase):
         self.assertFalse(os.path.lexists(wants / "vboxservice.service"))
 
     def test_locale_helpers(self) -> None:
-        from mocinha.providers.platform.linux import _locale_charset, _normalized_locale
+        from mocinha.providers.sysconfig.systemd import _locale_charset, _normalized_locale
         self.assertEqual(_locale_charset("pt_PT.UTF-8"), "UTF-8")
         self.assertEqual(_normalized_locale("pt_PT.UTF-8"), "pt_PT.utf8")
         self.assertEqual(_normalized_locale("sr_RS.UTF-8@latin"), "sr_RS.utf8@latin")
 
     def test_linux_locale_files_written(self) -> None:
-        provider = LinuxPlatformProvider("linux", self.stream)
+        provider = SystemdSysconfigProvider("systemd", self.stream)
         etc = self.target / "etc"
         etc.mkdir()
         (etc / "localtime").symlink_to("/usr/share/zoneinfo/UTC")

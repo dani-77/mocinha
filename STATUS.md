@@ -1,6 +1,6 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-07 (VM results below obtained with the code of the disk-safety commit that follows `2329999`, unless stated otherwise)
+**Date:** 2026-10-08. VM results were obtained with the code of the sysvd77 commit (the one following `54917c4`) unless stated otherwise; the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4` and not repeated after the sysvd77 changes.
 **Branch:** `main` (private GitHub repository `dani-77/mocinha`)
 
 This file records what has actually been done and validated, and how. If
@@ -14,12 +14,12 @@ something is not listed as validated here, assume it is not.
 |---|---|
 | btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO, BIOS/GRUB and UEFI/GRUB. Never run on real hardware. GUI never run on the live. |
 | au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
-| sysvd77 (CRUX + sysvinit) | **Not started.** CRUX providers are unit-tested only; `examples/manifests/sysvd77.toml` is a draft not derived from the remaster. Never run on CRUX. |
+| sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
 installed system with an expected state that was **derived by reading** each
 remaster's own installer (`d77-install` + `d77-archinstall.json`,
-`au-d77-install`). Those installers were **not run** to produce a reference
+`au-d77-install`, sysv-d77's `crux-*` scripts). Those installers were **not run** to produce a reference
 system. Known points where the checked state differs from what those
 installers produce are listed below.
 
@@ -36,7 +36,7 @@ GUI: the GTK3 frontend has never driven an installation.
 - Diagnostic errors and an event stream (Details view / logs).
 - Strict manifest (`manifest.py`): required keys, type checks, unknown keys and
   sections rejected, no invented defaults. Specification: `docs/manifest-schema.md`.
-- Probe (`probe.py`): Linux via sysfs and `/proc/mounts`; FreeBSD via
+- Probe (`probe.py`): Linux via sysfs and `/proc/mounts` (floppies skipped); FreeBSD via
   `kern.disks`, `diskinfo`, `mount -p` and `glabel` (labels resolved to disks).
 - Service graph (`services.py`): `requires`, `conflicts`, `after`, cycles,
   live-only, not-selected services disabled. `wants` and `before` are parsed
@@ -53,6 +53,10 @@ GUI: the GTK3 frontend has never driven an installation.
   mounts/swap/holders (`plan.revalidate`, mandatory).
 - Provider `validate()` checks (read-only) run **before confirmation** in the
   CLI and the GUI (`executor.preflight`), and again right before execution.
+- The target's own tools (account tools, GRUB, dracut, mkinitcpio, localedef)
+  run in a chroot of the target (`run_in_target`: arch-chroot when present,
+  otherwise fresh non-recursive proc/sysfs/dev/devpts/run/efivarfs mounts,
+  always released), because a live need not carry them (the CRUX live does not).
 - Executor: explicit confirmation; refuses plans with steps lacking an action
   or a verification, or without the target re-check; re-check -> validate ->
   prepare -> apply -> verify -> cleanup.
@@ -61,19 +65,24 @@ GUI: the GTK3 frontend has never driven an installation.
 
 | Provider | Validated in VM against a real remaster | Notes |
 |---|---|---|
-| `linux-sfdisk` | yes (btw-d77) | DOS on BIOS, GPT + ESP on UEFI; refuses other layouts and swap. |
-| `linux-mkfs` | yes (btw-d77) | ext4 + FAT32 ESP only. |
+| `linux-sfdisk` | yes (btw-d77; sysv-d77) | DOS on BIOS; GPT + ESP on UEFI; GPT on BIOS with a 1 MiB BIOS boot partition; optional swap partition. Refuses DOS on UEFI. |
+| `linux-mkfs` | yes (btw-d77; sysv-d77) | ext4 + FAT32 ESP + swap only. |
 | `squashfs-extract` | yes (btw-d77) | |
+| `crux-pkgadd` | yes (sysv-d77) | `pkgadd -r` from the medium: collections, extra packages with their `setup.dependencies` closure, firmware-specific packages, local archives (`-u` when already installed). The resolved set matches sysv-d77's installer exactly (241 BIOS / 245 UEFI packages + 11 local; checked by script against the ISO). |
 | `mkinitcpio` | yes (btw-d77) | Kernels/images discovered from presets. |
+| `dracut` | yes (sysv-d77) | Kernels discovered from `/lib/modules` + `/boot/vmlinuz-<v>`; `depmod` + `dracut` with `[initramfs].args`. |
 | `arch-systemd` | yes (btw-d77) | Initializes `/etc/machine-id`. |
-| `shadow` | yes (btw-d77) | |
-| `linux` platform | yes (btw-d77) | Writes systemd-style files (`/etc/hostname`, `/etc/locale.conf`, `/etc/vconsole.conf`). |
-| `grub` | yes (btw-d77, BIOS and UEFI) | `grub-install` + target's `grub-mkconfig`. |
-| `freebsd-gpart`, `freebsd-newfs`, `tree-copy`, `pw`, `freebsd-rc`, `freebsd-loader`, `freebsd` platform | yes (au-d77) | Hybrid GPT only (no MBR). FreeBSD locale/keymap/timezone changes refused. |
+| `crux-sysvinit` | yes (sysv-d77) | `SERVICES=(...)` in `rc.conf`; refuses services without an executable `/etc/rc.d` script. |
+| `shadow` | yes (btw-d77; sysv-d77) | Target's own tools in a chroot. Without `chpasswd` (CRUX) the password is hashed with the target's `openssl passwd -6` when the target's PAM uses `sha512`, and written to `/etc/shadow`; other PAM methods are refused. |
+| `linux` platform | yes (btw-d77; sysv-d77) | Mounts, fstab, live-only/live/target files, unmount. |
+| `systemd` sysconfig | yes (btw-d77) | `/etc/hostname`, `/etc/hosts`, `locale.conf` + `locale-gen`, `vconsole.conf`, `/etc/localtime`. |
+| `crux-rc` sysconfig | yes (sysv-d77) | `rc.conf` `HOSTNAME`, `LANG`, `KEYMAP`, `TIMEZONE`; `localedef`. The timezone cannot be checked before confirmation (the live has no zoneinfo); it is checked on the target after deployment. |
+| `freebsd-rc` sysconfig | yes (au-d77) | `rc.conf` hostname; locale/keymap/timezone changes refused. |
+| `grub` | yes (btw-d77, sysv-d77; BIOS and UEFI) | Target's `grub-install` + `grub-mkconfig`; EFI directory from `[boot].efi_id`. `/etc/default/grub` created only when a timeout or kernel arguments are requested and the package ships none (CRUX). |
+| `freebsd-gpart`, `freebsd-newfs`, `tree-copy`, `pw`, `freebsd-rc`, `freebsd-loader`, `freebsd` platform | yes (au-d77) | Hybrid GPT only (no MBR). |
 | `limine` | **no** --- unit tests only | UEFI only; never booted in a VM (the btw-d77 live does not ship Limine). |
-| `rsync-copy` | **no** --- unit tests only | Only referenced by the draft sysvd77 manifest. |
+| `rsync-copy` | **no** --- unit tests only | Not referenced by any manifest. |
 | `tar-extract` | **no** --- unit tests only | Not referenced by any manifest. |
-| `crux-sysvinit` | **no** --- unit tests only | |
 
 Plan wiring fails on unregistered providers or unknown steps before
 confirmation. No placeholder binaries are written anywhere.
@@ -88,11 +97,15 @@ confirmation. No placeholder binaries are written anywhere.
   password confirmation fields; no locale, keymap, timezone or kernel-argument
   fields (the live's settings are kept). The hostname is pre-filled with
   `[system].id`.
+- The CRUX live runs Python 3.12, which evaluates annotations at import time;
+  the development host has 3.14 (lazy), so a forward reference passed the unit
+  tests and failed in the VM. `tests/test_import_portability.py` now checks
+  this statically.
 - `bin/mocinha` uses `python3`; FreeBSD only ships `python3.12` by default, so
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 91 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 109 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -101,7 +114,11 @@ confirmation. No placeholder binaries are written anywhere.
 
 ### Packaging
 - **None.** Mocinha is not packaged for any live; the VM tests deliver it over
-  9p (btw-d77) or HTTP (au-d77). It does not remove itself from the target.
+  9p (btw-d77, sysv-d77) or HTTP (au-d77). It does not remove itself from the
+  target. With `crux-pkgadd` it never reaches the target unless the manifest
+  lists it; with live copies (btw-d77, au-d77) removing a packaged Mocinha
+  would need package removal through the target's package manager, which does
+  not exist yet (`[live_only].files` would leave the package registered).
 
 ---
 
@@ -158,7 +175,10 @@ links; not-selected services left enabled; `uninitialized` machine-id
 re-enabling units on first boot; dangling `/etc/resolv.conf`; hostname never
 written.
 
-### Disk-safety adversarial runs (code of this commit)
+Re-run with the sysvd77 code (target tools in a chroot, sysconfig split):
+BIOS + GRUB and UEFI + GRUB, install, boot and equivalence pass.
+
+### Disk-safety adversarial runs (code of `54917c4`; not repeated after the sysvd77 changes)
 
 `tools/qemu/run_automated_test.sh --firmware bios --script adversarial.sh` and
 `tools/qemu/run_au_d77_test.sh --firmware bios --script adversarial-freebsd.sh`
@@ -192,9 +212,9 @@ chosen at install time, and diagnostics read in single-user mode.
 
 | Run | Install | Boot | Equivalence check |
 |---|---|---|---|
-| BIOS live -> install | pass (14 steps verified) | --- | --- |
-| Installed disk, BIOS | --- | pass | pass |
-| Installed disk, UEFI (empty NVRAM, removable path) | --- | pass (run 3 times) | pass |
+| BIOS live -> install | pass (14 steps verified; re-run with the sysvd77 code) | --- | --- |
+| Installed disk, BIOS | --- | pass (re-run with the sysvd77 code) | pass |
+| Installed disk, UEFI (empty NVRAM, removable path) | --- | pass (run 3 times, code of `54917c4`) | pass |
 
 The **au-d77 live image does not boot under OVMF**: its 32 MiB ESP is
 formatted FAT32 with ~64 496 clusters, below the 65 525 FAT32 requires, and
@@ -226,6 +246,75 @@ partitions.
 The Wasp desktop could not be shown in QEMU: FreeBSD's drm-kmod has no KMS
 driver for QEMU's virtual GPUs, so the live session falls back to a shell.
 
+### sysv-d77 --- CRUX 3.8 ISO `sysv-d77-3.8-x86_64.iso` built 2026-09-28 from `~/Remaster/sysv-d77` (repository untouched)
+
+Harness:
+
+```
+tools/qemu/run_sysvd77_test.sh --firmware bios|uefi [--iso PATH]
+tools/qemu/test_boot_crux.py --firmware bios|uefi --disk tools/qemu/work/target-sysv-<fw>-grub.qcow2 \
+    --expect tools/qemu/expect/sysv-d77.json
+```
+
+The live is booted from the ISO's kernel/initramfs with `crux.text` (the
+ISO's isolinux/GRUB menus are not exercised); Mocinha runs as root on the
+live's serial getty, from 9p. The installed CRUX has no serial getty (neither
+the `rc` package nor sysv-d77 adds one) and is not changed for the test: the
+boot proof logs in as root on tty2 of the VGA console with QEMU `sendkey`,
+typing for the installed `pt-latin1` keymap (so the keymap is in effect),
+and sends the diagnostics to the serial port.
+
+| Run | Install | Boot | Equivalence check |
+|---|---|---|---|
+| BIOS + GRUB (GPT, BIOS boot partition) | pass (16 steps verified) | pass | pass |
+| UEFI + GRUB | pass | pass (NVRAM from the install) | pass |
+
+One UEFI boot-proof attempt failed before QEMU's monitor socket accepted a
+connection while another VM was running; the cause was not identified and the
+repeated run passed.
+
+Checked on the installed system: running hostname and `rc.conf`
+(`HOSTNAME`, `KEYMAP=pt-latin1`, `TIMEZONE=Europe/Lisbon`, `LANG=pt_PT.UTF-8`,
+`SERVICES=(lo net crond)`); runlevel 2; `crond` running; swap active; fstab by
+UUID (root, ESP at `/boot` with `umask=0077` on UEFI, swap, devpts, shm);
+`pt_PT.utf8` compiled; `/etc/localtime`; only user `dani` (uid 1000,
+`/bin/bash`, own group only); root password set; 252 (BIOS) / 256 (UEFI)
+packages registered; kernel 6.12.109 with its dracut initramfs; desktop
+configuration in `/etc/skel` and `/root`; tint2 launchers without the
+installer entry and with Firefox; `.bash_profile` starting X on tty1;
+`EFI/d77crux` on UEFI.
+
+**Deployment differs from the other targets on purpose:** the CRUX live root
+is an installation environment (its package database lacks the core packages;
+`rc`, `shadow`, GRUB and dracut are absent), so, like sysv-d77's installer,
+Mocinha installs the medium's packages offline (`plano.md` §7).
+
+Differences from what sysv-d77's installer produces:
+1. Interactive steps of `crux-configure` are not reproduced: editing
+   fstab/`rc.conf`/network files in vim and enabling the ports collections
+   (option 7, optional there too).
+2. The `d77crux-kernel` archive is not checked against the sha256 in
+   `/sysv-d77/kernel.release` (pkgadd validates the archive only).
+3. The installer's own tools and state (`crux-install-boot`,
+   `crux-configure`, `d77crux.httpup`, `/var/lib/sysv-d77/*`, fstab and
+   network-file backups) are not written to the target.
+4. Network files: the fixed paths are copied when present; the
+   `/etc/wpa_supplicant-*.conf` and `/etc/wpa_supplicant/*.conf` globs are not.
+5. `/etc/fstab` is generated whole (the comments of the `filesystem`
+   package's fstab are not kept); the entries are the same.
+6. `/root/.config` is created with mode 0755 (sysv-d77: 0700); `/root`
+   itself is 0700.
+7. Passwords are hashed with `openssl passwd -6` (SHA-512, the scheme the
+   target's PAM uses for `passwd`) instead of running `passwd`.
+8. The test adds `console=tty0 console=ttyS0,38400`, so `/etc/default/grub`
+   exists on the test target; without extra arguments none is created, as
+   with sysv-d77.
+
+Problems found by the sysv-d77 runs and fixed: annotation evaluated at import
+on Python 3.12; timezone validated against the live (which has no zoneinfo);
+no `chpasswd` in CRUX's shadow; no `/etc/default/grub` in CRUX's grub2; a
+floppy listed as a disk by the probe.
+
 ---
 
 ## Open issues and debt
@@ -233,7 +322,8 @@ driver for QEMU's virtual GPUs, so the live session falls back to a shell.
 - GUI: never exercised in a live; no locale/keymap/timezone/kernel-argument fields.
 - Packaging for the lives, `python3` vs `python3.12` on FreeBSD, and removing
   Mocinha from the installed target: not done.
-- Limine, `rsync-copy`, `tar-extract`, `crux-sysvinit`: never validated in a VM.
+- Limine, `rsync-copy`, `tar-extract`: never validated in a VM.
+- Disk-safety adversarial scenarios not run on the sysv-d77 live.
 - `[install].method` is only a label in the plan; the deployment provider is
   chosen by `[providers].deployment`.
 - Bootloader/firmware compatibility (lilo/syslinux vs UEFI, systemd-boot vs
@@ -246,6 +336,6 @@ driver for QEMU's virtual GPUs, so the live session falls back to a shell.
 - `plano.md` §5 describes the administrator as an intention resolved by a
   provider; today the remaster declares the administrator group in
   `[users].groups` and sudo/doas rules as `[[target_files]]`. To be decided.
-- Linux platform provider is systemd-style (`/etc/hostname`, `locale.conf`,
-  `vconsole.conf`); CRUX uses `/etc/rc.conf`. Expected to surface with sysvd77.
+- Package-based deployment checks values whose data the live lacks (CRUX:
+  timezone) only after deployment.
 - Future idea, not planned: optional online components (`plano.md` §22.1).

@@ -1,6 +1,10 @@
-"""Storage provider using sfdisk (Linux / btw-d77).
+"""Storage provider using sfdisk (Linux).
 
-Creates GPT or MBR partition tables cleanly.
+Layouts (partition_table from the manifest, default GPT on UEFI, DOS on BIOS):
+
+    UEFI + GPT:  ESP, [swap], root
+    BIOS + GPT:  1 MiB BIOS boot partition (GRUB core.img), [swap], root
+    BIOS + DOS:  [swap], root (bootable flag)
 """
 
 from pathlib import Path
@@ -42,21 +46,19 @@ class SfdiskStorageProvider(ProviderContract):
             )
         firmware = context.metadata["firmware"].upper()
         table = context.metadata.get("partition_table")
-        supported = {"UEFI": "gpt", "BIOS": "dos"}.get(firmware)
-        if table and table != supported:
+        if firmware == "UEFI" and table == "dos":
             raise ExecutionError(
-                message=f"The sfdisk provider cannot make a bootable {table.upper()} layout on {firmware} firmware.",
-                cause=f"It supports GPT+ESP on UEFI and DOS on BIOS (GPT on BIOS would need a BIOS boot partition).",
+                message="The sfdisk provider cannot make a bootable DOS layout on UEFI firmware.",
+                cause="It creates an EFI system partition only on GPT.",
                 failed_operation="Validate partition layout",
                 current_state=f"Requested partition_table={table}, firmware={firmware}",
-                possible_recovery="Remove [install].partition_table from the manifest or implement that layout.",
+                possible_recovery="Use partition_table = \"gpt\" (or remove it) in the manifest.",
             )
-        if swap := context.metadata.get("swap_size"):
+        if table not in (None, "gpt", "dos"):
             raise ExecutionError(
-                message="The sfdisk provider does not create swap partitions.",
-                cause=f"The manifest requests swap_size={swap}.",
+                message=f"Unknown partition table {table!r}.",
+                cause="The sfdisk provider implements gpt and dos.",
                 failed_operation="Validate partition layout",
-                possible_recovery="Remove [install].swap_size from the manifest or implement swap in sfdisk.",
             )
         # Disk-level safety (live medium, critical mounts, swap/LVM/LUKS, identity) is checked
         # by the resolver at planning time and again from a fresh probe right before execution.
@@ -70,25 +72,29 @@ class SfdiskStorageProvider(ProviderContract):
         is_uefi = context.metadata["firmware"].upper() == "UEFI"
         self.events.action(
             EventPhase.PREPARE,
-            f"Partitioning disk {disk} (Mode: {'UEFI/GPT' if is_uefi else 'BIOS/MBR'})",
+            f"Partitioning disk {disk} (firmware: {'UEFI' if is_uefi else 'BIOS'})",
         )
 
+        table = context.metadata.get("partition_table") or ("gpt" if is_uefi else "dos")
+        swap_size = context.metadata.get("swap_size")
+        gpt = table == "gpt"
+        # Layout: [ESP (UEFI) | BIOS boot partition (GPT on BIOS)] [swap] root
+        roles = []
+        lines = [f"label: {table}"]
         if is_uefi:
-            # Layout:
-            # Part 1: 512MiB EFI System Partition (type: U = C12A7328-F81F-11D2-BA4B-00A0C93EC93B)
-            # Part 2: Remainder Linux Root (type: L = 4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709)
-            sfdisk_script = (
-                "label: gpt\n"
-                f"size={context.metadata['esp_size'].upper()}, type=U\n"
-                "type=L\n"
-            )
-        else:
-            # BIOS / MBR Layout:
-            # Part 1: Root partition with boot flag
-            sfdisk_script = (
-                "label: dos\n"
-                "type=83, bootable\n"
-            )
+            lines.append(f"size={context.metadata['esp_size'].upper()}, type=U")
+            roles.append("esp")
+        elif gpt:
+            # GRUB's core.img goes here on BIOS+GPT (no filesystem)
+            lines.append("size=1M, type=21686148-6449-6E6F-744E-656564454649")
+            roles.append("bios_boot")
+        if swap_size:
+            lines.append(f"size={swap_size.upper()}, type={'S' if gpt else '82'}")
+            roles.append("swap")
+        lines.append("type=L" if gpt else "type=83, bootable")
+        roles.append("root")
+        sfdisk_script = "\n".join(lines) + "\n"
+        self.events.info(EventPhase.PREPARE, f"sfdisk layout: {sfdisk_script.strip()!r}")
 
         # Pipe sfdisk_script into sfdisk --wipe always --wipe-partitions always <disk>
         proc = self.runner.run(
@@ -108,11 +114,14 @@ class SfdiskStorageProvider(ProviderContract):
         # Determine partition device naming:
         # e.g. /dev/nvme0n1 -> /dev/nvme0n1p1, /dev/sda -> /dev/sda1
         sep = "p" if disk[-1].isdigit() else ""
-        if is_uefi:
-            context.target_partitions["esp"] = f"{disk}{sep}1"
-            context.target_partitions["root"] = f"{disk}{sep}2"
-        else:
-            context.target_partitions["root"] = f"{disk}{sep}1"
+        for index, role in enumerate(roles, start=1):
+            if role != "bios_boot":
+                context.target_partitions[role] = f"{disk}{sep}{index}"
+        context.metadata["bios_boot_partition"] = f"{disk}{sep}1" if "bios_boot" in roles else None
+        # udev creates the nodes asynchronously after the kernel re-reads the table
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not all(Path(p).exists() for p in context.target_partitions.values()):
+            time.sleep(0.5)
 
     def verify(self, context: ExecutionContext) -> None:
         disk = context.target_disk

@@ -49,6 +49,7 @@ class ProvidersConfig:
     deployment: str
     users: str
     services: str
+    sysconfig: str  # hostname/locale/keymap/timezone files
     initramfs: str  # "none" when the platform needs no initramfs step
 
 
@@ -58,6 +59,7 @@ class BootConfig:
     default: str
     timeout: Optional[int] = None    # None: bootloader/remaster default
     kernel_args: List[str] = field(default_factory=list)  # appended to the kernel command line
+    efi_id: Optional[str] = None     # EFI/<efi_id> directory and NVRAM entry name; None: [system].id
 
 
 @dataclass
@@ -201,6 +203,77 @@ def _parse_target_files(entries: Any) -> List["TargetFile"]:
     return result
 
 
+def _parse_live_files(entries: Any) -> List["LiveFile"]:
+    if not isinstance(entries, list):
+        raise ManifestError(
+            message="Invalid [[live_files]]",
+            cause="live_files must be an array of tables.",
+            failed_operation="Validate [[live_files]]",
+            current_state=f"live_files={entries!r}",
+        )
+    result = []
+    for entry in entries:
+        t = _Table(entry, "[[live_files]]", {"source": str}, {"path": str, "optional": bool, "mode": str})
+        mode = None
+        if t.get("mode") is not None:
+            try:
+                mode = int(t.get("mode"), 8)
+            except ValueError:
+                mode = -1
+            if not 0 <= mode <= 0o7777:
+                raise ManifestError(
+                    message=f"[[live_files]] entry {t.get('source')!r} has an invalid mode {t.get('mode')!r}.",
+                    cause="mode must be an octal string such as \"0644\".",
+                    failed_operation="Validate [[live_files]]",
+                )
+        source = t.get("source")
+        if not source.startswith("/") or ".." in Path(source).parts:
+            raise ManifestError(
+                message=f"Invalid source in [[live_files]]: {source!r}",
+                cause="source must be an absolute live path without '..'.",
+                failed_operation="Validate [[live_files]]",
+            )
+        result.append(LiveFile(source=source,
+                               path=_validate_target_path(t.get("path", source), "[[live_files]]"),
+                               optional=t.get("optional", False), mode=mode))
+    return result
+
+
+def _parse_packages(data: Any) -> "PackagesConfig":
+    lists = ("collections", "exclude", "install", "install_bios", "install_uefi", "local")
+    t = _Table(data, "[packages]", {"repositories": list}, {**{k: list for k in lists}, "dependencies": str})
+    config = PackagesConfig(repositories=t.get("repositories"), dependencies=t.get("dependencies"),
+                            **{k: t.get(k, []) for k in lists})
+    for key in ("repositories", "collections", "local") + (("dependencies",) if config.dependencies else ()):
+        values = getattr(config, key)
+        for rel in values if isinstance(values, list) else [values]:
+            if not isinstance(rel, str) or not rel or rel.startswith("/") or ".." in Path(rel).parts:
+                raise ManifestError(
+                    message=f"Invalid [packages].{key} entry {rel!r}",
+                    cause="Paths are relative to [install].source and may not contain '..'.",
+                    failed_operation="Validate [packages]",
+                )
+    if not config.repositories:
+        raise ManifestError(
+            message="[packages].repositories is empty",
+            cause="At least one package directory is needed.",
+            failed_operation="Validate [packages]",
+        )
+    return config
+
+
+def _parse_initramfs(data: Any) -> "InitramfsConfig":
+    t = _Table(data, "[initramfs]", {}, {"args": list})
+    args = t.get("args", [])
+    if not all(isinstance(a, str) and a for a in args):
+        raise ManifestError(
+            message="Invalid [initramfs].args",
+            cause="args must be a list of non-empty strings.",
+            failed_operation="Validate [initramfs]",
+        )
+    return InitramfsConfig(args=args)
+
+
 class _Table:
     """Typed, strict access to one manifest table."""
 
@@ -266,7 +339,45 @@ def _validate_install(install: "InstallConfig") -> None:
         )
 
 
-SECTIONS = {"system", "install", "providers", "boot", "services", "users", "live_only", "target_files"}
+@dataclass
+class LiveFile:
+    """A file or directory copied from the running live system to the target.
+
+    Needed when the deployment does not copy the live tree itself (e.g. a
+    package-based deployment) but the remaster's installer carries over some
+    live files, such as its desktop configuration.
+    """
+
+    source: str                      # absolute path on the live system
+    path: str                        # absolute path on the target
+    optional: bool = False           # True: skipped when the live has no such path
+    mode: Optional[int] = None       # files only; None: keep the live file's mode
+
+
+@dataclass
+class PackagesConfig:
+    """Package set for package-based deployment providers (e.g. crux-pkgadd).
+
+    All directories are relative to [install].source (the mounted install medium).
+    """
+
+    repositories: List[str]          # directories searched for package archives, in order
+    collections: List[str] = field(default_factory=list)   # every package in these is installed
+    exclude: List[str] = field(default_factory=list)       # names dropped from the collections
+    install: List[str] = field(default_factory=list)       # extra packages (plus their dependencies)
+    install_bios: List[str] = field(default_factory=list)  # extra packages on BIOS firmware only
+    install_uefi: List[str] = field(default_factory=list)  # extra packages on UEFI firmware only
+    local: List[str] = field(default_factory=list)         # every archive here is installed or upgraded
+    dependencies: Optional[str] = None                     # file: "name: dep dep ... name" per line
+
+
+@dataclass
+class InitramfsConfig:
+    args: List[str] = field(default_factory=list)  # options passed to the initramfs generator
+
+
+SECTIONS = {"system", "install", "providers", "boot", "services", "users", "live_only", "target_files",
+            "live_files", "packages", "initramfs"}
 
 
 @dataclass
@@ -279,6 +390,9 @@ class Manifest:
     users: UsersConfig = field(default_factory=UsersConfig)
     live_only: LiveOnlyConfig = field(default_factory=LiveOnlyConfig)
     target_files: List[TargetFile] = field(default_factory=list)
+    live_files: List[LiveFile] = field(default_factory=list)
+    packages: Optional[PackagesConfig] = None
+    initramfs: InitramfsConfig = field(default_factory=InitramfsConfig)
     raw_path: Optional[Path] = None
 
     @classmethod
@@ -342,12 +456,19 @@ class Manifest:
         _validate_install(install)
 
         t = _Table(data["providers"], "[providers]",
-                   {k: str for k in ("platform", "storage", "filesystem", "deployment", "users", "services", "initramfs")}, {})
+                   {k: str for k in ("platform", "storage", "filesystem", "deployment", "users", "services", "sysconfig", "initramfs")}, {})
         providers = ProvidersConfig(**t.data)
 
-        t = _Table(data["boot"], "[boot]", {"available": list, "default": str}, {"timeout": int, "kernel_args": list})
+        t = _Table(data["boot"], "[boot]", {"available": list, "default": str},
+                   {"timeout": int, "kernel_args": list, "efi_id": str})
         boot = BootConfig(available=t.get("available"), default=t.get("default"),
-                          timeout=t.get("timeout"), kernel_args=t.get("kernel_args", []))
+                          timeout=t.get("timeout"), kernel_args=t.get("kernel_args", []), efi_id=t.get("efi_id"))
+        if boot.efi_id is not None and not re.fullmatch(r"[A-Za-z0-9._-]+", boot.efi_id):
+            raise ManifestError(
+                message=f"Invalid [boot].efi_id {boot.efi_id!r}",
+                cause="efi_id names a directory under EFI/ and may only contain letters, digits, '.', '_' and '-'.",
+                failed_operation="Validate [boot].efi_id",
+            )
         if not boot.available or boot.default not in boot.available or (boot.timeout is not None and boot.timeout < 0):
             raise ManifestError(
                 message="Invalid [boot] section",
@@ -390,5 +511,8 @@ class Manifest:
             users=users,
             live_only=_parse_live_only(data.get("live_only", {})),
             target_files=_parse_target_files(data.get("target_files", [])),
+            live_files=_parse_live_files(data.get("live_files", [])),
+            packages=_parse_packages(data["packages"]) if "packages" in data else None,
+            initramfs=_parse_initramfs(data.get("initramfs", {})),
             raw_path=raw_path,
         )

@@ -294,7 +294,7 @@ class SystemProbe:
         devices: List[DiskDevice] = []
         for dev_entry in sorted(sys_block.iterdir()) if sys_block.is_dir() else []:
             dev_name = dev_entry.name
-            if dev_name.startswith(("loop", "ram", "zram", "sr", "dm-", "md")):
+            if dev_name.startswith(("loop", "ram", "zram", "sr", "dm-", "md", "fd")):
                 continue
             dev_path = f"/dev/{dev_name}"
             size_bytes = int(self._read(dev_entry / "size") or 0) * 512

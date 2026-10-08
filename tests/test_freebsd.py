@@ -14,6 +14,7 @@ from mocinha.core.resolver import InstallationResolver, UserChoices
 from mocinha.providers import create_default_registry
 from mocinha.providers.boot.freebsd_loader import FreeBSDBootProvider
 from mocinha.providers.platform.freebsd import FreeBSDPlatformProvider
+from mocinha.providers.sysconfig.freebsd_rc import FreeBSDRcSysconfigProvider
 from mocinha.providers.services.freebsd_rc import FreeBSDServiceProvider
 from mocinha.providers.users.pw import FreeBSDUsersProvider
 
@@ -78,14 +79,15 @@ class TestFreeBSDProviders(unittest.TestCase):
         )
         (self.target / "etc").mkdir(parents=True)
         (self.target / "etc" / "rc.conf").write_text('hostname="au-d77"\nseatd_enable="YES"\n')
-        provider.configure_hostname(self.context)
+        sysconfig = FreeBSDRcSysconfigProvider("freebsd-rc", self.stream)
+        sysconfig.configure_hostname(self.context)
         provider.generate_fstab(self.context)
 
         rc_conf = (self.target / "etc" / "rc.conf").read_text()
         self.assertEqual(rc_conf.count("hostname="), 1)
         self.assertIn('hostname="aubox"', rc_conf)
         self.assertIn('seatd_enable="YES"', rc_conf)
-        provider.verify_hostname(self.context)
+        sysconfig.verify_hostname(self.context)
 
         # Durable names only (disk renumbering: ada0 vs nvd0 vs da0)
         fstab = (self.target / "etc" / "fstab").read_text()

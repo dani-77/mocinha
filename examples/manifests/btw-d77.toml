@@ -35,6 +35,7 @@ deployment = "squashfs-extract"
 users = "shadow"
 initramfs = "mkinitcpio"
 services = "arch-systemd"
+sysconfig = "systemd"
 
 [boot]
 # The live ships grub + efibootmgr only (packages.x86_64), as d77-install uses GRUB.

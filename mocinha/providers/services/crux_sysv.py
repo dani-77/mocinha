@@ -55,6 +55,15 @@ class CruxSysvServiceProvider(ProviderContract):
             f"Configuring CRUX /etc/rc.conf SERVICES array with: {enabled_services}",
         )
 
+        missing_scripts = [srv for srv in enabled_services if not self._script_ok(target_root, srv)]
+        if missing_scripts:
+            raise ExecutionError(
+                message=f"Services without an rc script on the target: {missing_scripts}",
+                cause="CRUX starts each SERVICES entry as /etc/rc.d/<name>; these do not exist or are not executable.",
+                failed_operation="Configure CRUX services",
+                current_state=f"Requested: {enabled_services}",
+                possible_recovery="Install the package that ships the rc script or drop the service from the manifest.",
+            )
         existing = rc_conf.read_text() if rc_conf.is_file() else ""
 
         # Parse existing SERVICES=(...) if present
@@ -80,6 +89,11 @@ class CruxSysvServiceProvider(ProviderContract):
 
         rc_conf.write_text(new_content)
         self.events.info(EventPhase.CONFIGURE, f"Wrote CRUX SERVICES: {active_list}")
+
+    @staticmethod
+    def _script_ok(target_root: Path, service: str) -> bool:
+        script = target_root / "etc" / "rc.d" / service
+        return script.is_file() and bool(script.stat().st_mode & 0o111)
 
     def verify(self, context: ExecutionContext) -> None:
         target_root = Path(context.target_mount)
@@ -111,6 +125,14 @@ class CruxSysvServiceProvider(ProviderContract):
                 message=f"Live-only or not-selected services still in SERVICES array: {leftover}",
                 cause="They were not filtered out of /etc/rc.conf.",
                 failed_operation="Verify disabled CRUX services",
+                current_state=f"Found: {registered}",
+            )
+        no_script = [s for s in registered if not self._script_ok(target_root, s)]
+        if no_script:
+            raise VerificationError(
+                message=f"SERVICES entries without an executable /etc/rc.d script: {no_script}",
+                cause="CRUX's /etc/rc would fail to start them at boot.",
+                failed_operation="Verify CRUX rc scripts",
                 current_state=f"Found: {registered}",
             )
         if missing:

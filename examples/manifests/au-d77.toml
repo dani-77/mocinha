@@ -41,6 +41,7 @@ deployment = "tree-copy"
 users = "pw"
 initramfs = "none"
 services = "freebsd-rc"
+sysconfig = "freebsd-rc"
 
 [boot]
 available = ["freebsd-loader"]

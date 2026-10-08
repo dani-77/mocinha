@@ -22,7 +22,7 @@ import shutil
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.base import CommandRunner, chroot_command
+from mocinha.providers.base import CommandRunner, run_in_target
 
 ASSIGN = re.compile(r"""^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$""")
 
@@ -83,11 +83,7 @@ class MkinitcpioProvider(ProviderContract):
         self._ensure_kernels(target_root)
 
         self.events.action(EventPhase.CONFIGURE, "Generating target initramfs via mkinitcpio")
-        self.runner.run(
-            chroot_command(str(target_root)) + ["mkinitcpio", "-P"],
-            phase=EventPhase.CONFIGURE,
-            check=True,
-        )
+        run_in_target(self.runner, str(target_root), ["mkinitcpio", "-P"])
         context.metadata["boot_entries"] = boot_entries(target_root)
 
     def _restore_stock_presets(self, target_root: Path) -> None:

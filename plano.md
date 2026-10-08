@@ -387,7 +387,19 @@ Possible providers:
 
 -   squashfs extraction/copy;
 -   rsync/filesystem copy;
--   tar extraction.
+-   tar extraction;
+-   offline package installation from the install medium (`crux-pkgadd`).
+
+**Decision (2026-10-08, sysvd77):** the CRUX live root is an installation
+environment, not an installed system: its package database registers only
+the packages the remaster added, and packages every installed CRUX needs
+(`rc`, `shadow`, GRUB, dracut) are absent. Copying it would produce a
+system without init configuration, account tools or bootloader. Like
+CRUX's `setup` and sysv-d77's own installer, sysvd77 is therefore
+installed by `pkgadd` from the packages on the medium --- offline, never
+from the network. This is a provider boundary, not a core special case:
+the package set is remaster policy (`[packages]`), and files the remaster
+installer carries over from the live are declared as `[[live_files]]`.
 
 Generic flow:
 
