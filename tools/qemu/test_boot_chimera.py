@@ -76,6 +76,10 @@ def check(sections: dict, expect: dict, firmware: str) -> list:
         problems.append(f"nested dev directory missing: {get('tree_check')}")
     if any("AutomaticLoginEnable=true" in l or l.startswith("User=") for l in get("autologin")):
         problems.append(f"live autologin carried over: {get('autologin')}")
+    if expect.get("mocinha_absent"):
+        left = [l for l in get("mocinha_files") if l != "end" and "No such file" not in l and "cannot access" not in l]
+        if left:
+            problems.append(f"Mocinha left on the target: {left}")
     if get("live_user") != ["0"]:
         problems.append("live user anon present on the target")
     return problems

@@ -18,4 +18,5 @@ echo '### mirror'; cat /etc/apk/repositories.d/00-chimera-mirror.list 2>&1
 echo '### tree_check'; ls /usr/lib/modules/*/kernel/drivers/net/can/dev/can-dev.ko.zst 2>&1; ls -d /usr/include/dev 2>&1 | head -1
 echo '### live_user'; grep -c '^anon:' /etc/passwd
 echo '### autologin'; grep -rh 'AutomaticLogin\|^User=' /etc/gdm/custom.conf /etc/sddm.conf.d 2>/dev/null; echo end
+echo '### mocinha_files'; apk info -e mocinha h77-mocinha; ls -d /etc/mocinha.toml /usr/share/mocinha /usr/bin/mocinha 2>&1; echo end
 echo ===MOCINHA_""BOOT_PROOF_END===

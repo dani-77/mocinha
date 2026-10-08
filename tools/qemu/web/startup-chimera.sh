@@ -16,12 +16,23 @@ cmdline_param() {
 MANIFEST_NAME="$(cmdline_param mocinha.manifest || echo hybrid-d77)"
 LOGREL="$(cmdline_param mocinha.logdir || echo tools/qemu/logs/chimera-default)"
 MIRROR="$(cmdline_param mocinha.mirror || true)"
+# mocinha.packaged=1: the Mocinha package of the live, with its /etc/mocinha.toml
+PACKAGED="$(cmdline_param mocinha.packaged || true)"
 REPO=/root/mocinha
 cd "$REPO" || exit 1
 LOGDIR="$REPO/$LOGREL"
 mkdir -p "$LOGDIR"
 
-set -- --manifest "examples/manifests/$MANIFEST_NAME.toml" --disk /dev/vda --bootloader grub \
+MANIFEST="examples/manifests/$MANIFEST_NAME.toml"
+MOCINHA="python3 ./bin/mocinha"
+if [ "$PACKAGED" = 1 ]; then
+    MANIFEST=/etc/mocinha.toml
+    MOCINHA=mocinha
+    { echo "### package"; apk info -v mocinha h77-mocinha; which mocinha
+      echo "### manifest identical to the repository's?"
+      sed '1,4d' /etc/mocinha.toml | cmp - "examples/manifests/$MANIFEST_NAME.toml" && echo yes; } > "$LOGDIR/package.log" 2>&1
+fi
+set -- --manifest "$MANIFEST" --disk /dev/vda --bootloader grub \
     --user dani --password mocinha-test --root-password mocinha-root --hostname hybrid-test \
     --keymap pt-latin1 --timezone Europe/Lisbon --kernel-args "console=tty0 console=ttyS0,115200"
 [ -n "$MIRROR" ] && set -- "$@" --mirror "$MIRROR"
@@ -33,11 +44,11 @@ set -- --manifest "examples/manifests/$MANIFEST_NAME.toml" --disk /dev/vda --boo
     echo "### dinit boot"; ls /etc/dinit.d/boot.d /usr/lib/dinit.d/boot.d
 } > "$LOGDIR/live-facts.log" 2>&1
 
-python3 ./bin/mocinha probe > "$LOGDIR/probe.log" 2>&1
-python3 ./bin/mocinha network status > "$LOGDIR/network.log" 2>&1
-python3 ./bin/mocinha mirrors --manifest "examples/manifests/$MANIFEST_NAME.toml" > "$LOGDIR/mirrors.log" 2>&1
-python3 ./bin/mocinha plan "$@" > "$LOGDIR/plan.log" 2>&1
-python3 ./bin/mocinha install "$@" --confirm > "$LOGDIR/install.log" 2>&1
+$MOCINHA probe > "$LOGDIR/probe.log" 2>&1
+$MOCINHA network status > "$LOGDIR/network.log" 2>&1
+$MOCINHA mirrors --manifest "$MANIFEST" > "$LOGDIR/mirrors.log" 2>&1
+$MOCINHA plan "$@" > "$LOGDIR/plan.log" 2>&1
+$MOCINHA install "$@" --confirm > "$LOGDIR/install.log" 2>&1
 RES=$?
 tail -n 30 "$LOGDIR/install.log"
 if [ "$RES" -eq 0 ]; then echo SUCCESS > "$LOGDIR/result.status"; else echo FAILED > "$LOGDIR/result.status"; fi
