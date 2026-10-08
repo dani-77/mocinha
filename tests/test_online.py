@@ -17,7 +17,8 @@ from mocinha.providers import create_default_registry, wire_plan_providers
 from mocinha.providers.network import select_network_provider
 from mocinha.providers.network.iwd import IwdProvider, has_default_route, psk_file_name, table_rows
 from mocinha.providers.network.networkmanager import NetworkManagerProvider, split_terse
-from mocinha.providers.online.pacman import BUILD_USER, PacmanOnlineProvider, configured_repositories
+from mocinha.providers.online.pacman import BUILD_USER, PacmanOnlineProvider
+from mocinha.providers.pacman_common import configured_repositories
 
 BTW = Path(__file__).parent.parent / "examples" / "manifests" / "btw-d77.toml"
 

@@ -18,6 +18,10 @@ LOGREL="$(cmdline_param mocinha.logdir || echo tools/qemu/logs/default)"
 # mocinha.offline=1: decline the manifest's online components; mocinha.aur=<pkg>: add an AUR build
 OFFLINE="$(cmdline_param mocinha.offline || true)"
 AUR="$(cmdline_param mocinha.aur || true)"
+# mocinha.manifest=<name>: examples/manifests/<name>.toml (default btw-d77); mocinha.kernel=<pkg> (bootstrap profiles)
+MANIFEST_NAME="$(cmdline_param mocinha.manifest || echo btw-d77)"
+KERNEL="$(cmdline_param mocinha.kernel || true)"
+case "$MANIFEST_NAME" in arch-bootstrap) TEST_HOSTNAME=arch-test ;; *) TEST_HOSTNAME=btw-test ;; esac
 
 echo "=== MOCINHA AUTOMATED TEST (bootloader=$BOOTLOADER) ==="
 
@@ -27,13 +31,14 @@ cd /mnt/mocinha
 LOGDIR="/mnt/mocinha/$LOGREL"
 mkdir -p "$LOGDIR"
 
-MANIFEST=examples/manifests/btw-d77.toml
+MANIFEST="examples/manifests/$MANIFEST_NAME.toml"
 COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
-        --user dani --password mocinha-test --hostname btw-test
+        --user dani --password mocinha-test --hostname "$TEST_HOSTNAME"
         --locale pt_PT.UTF-8 --keymap pt-latin1 --timezone Europe/Lisbon
         --kernel-args "console=tty1 console=ttyS0,115200")
 [ "$OFFLINE" = 1 ] && COMMON+=(--offline)
 [ -n "$AUR" ] && COMMON+=(--aur "$AUR")
+[ -n "$KERNEL" ] && COMMON+=(--kernel "$KERNEL")
 
 # Live facts useful for reconciling the manifest with the real remaster
 {

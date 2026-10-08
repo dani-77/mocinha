@@ -314,6 +314,38 @@ def _parse_online(data: Any) -> "OnlineConfig":
                         overwrite=list(overwrite))
 
 
+def _parse_bootstrap(data: Any) -> "BootstrapConfig":
+    if not isinstance(data, dict):
+        raise ManifestError(message="Invalid [bootstrap]", cause="[bootstrap] must be a table.",
+                            failed_operation="Validate [bootstrap]")
+    tables = {k: data.get(k, {}) for k in ("bootloader_packages", "service_packages")}
+    t = _Table({k: v for k, v in data.items() if k not in tables}, "[bootstrap]",
+               {"packages": list, "kernels": list}, {})
+    problems = []
+    names = list(t.get("packages")) + list(t.get("kernels"))
+    boot = {}
+    for loader, by_fw in (tables["bootloader_packages"] or {}).items():
+        b = _Table(by_fw, f"[bootstrap.bootloader_packages.{loader}]", {"bios": list, "uefi": list}, {})
+        boot[loader] = {"bios": b.get("bios"), "uefi": b.get("uefi")}
+        names += b.get("bios") + b.get("uefi")
+    services = {}
+    for srv, pkgs in (tables["service_packages"] or {}).items():
+        if not isinstance(pkgs, list) or not all(isinstance(p, str) for p in pkgs):
+            problems.append(f"service_packages.{srv} must be a list of package names")
+            continue
+        services[srv] = list(pkgs)
+        names += pkgs
+    if not t.get("kernels"):
+        problems.append("kernels must offer at least one kernel package")
+    bad = [n for n in names if not PACKAGE_NAME.match(n)]
+    if bad:
+        problems.append(f"invalid package names: {bad}")
+    if problems:
+        raise ManifestError(message="Invalid [bootstrap]", cause="; ".join(problems), failed_operation="Validate [bootstrap]")
+    return BootstrapConfig(packages=list(t.get("packages")), kernels=list(t.get("kernels")),
+                           bootloader_packages=boot, service_packages=services)
+
+
 class _Table:
     """Typed, strict access to one manifest table."""
 
@@ -436,8 +468,22 @@ class OnlineConfig:
     overwrite: List[str] = field(default_factory=list)  # deployed files the packages may take over (pacman --overwrite)
 
 
+@dataclass
+class BootstrapConfig:
+    """A system composed at install time from remote repositories (AGENTS.md "Online rules", level B).
+
+    Shipped as a Mocinha bootstrap profile instead of a remaster manifest; the
+    user chooses the kernel, extra packages and services on top of it.
+    """
+
+    packages: List[str]                          # always installed (the distribution's documented minimum + profile)
+    kernels: List[str]                           # offered; the first one is the default
+    bootloader_packages: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)  # bootloader -> {bios, uefi}
+    service_packages: Dict[str, List[str]] = field(default_factory=dict)  # service -> packages it needs
+
+
 SECTIONS = {"system", "install", "providers", "boot", "services", "users", "live_only", "target_files",
-            "live_files", "packages", "initramfs", "online"}
+            "live_files", "packages", "initramfs", "online", "bootstrap"}
 
 
 @dataclass
@@ -454,6 +500,7 @@ class Manifest:
     packages: Optional[PackagesConfig] = None
     initramfs: InitramfsConfig = field(default_factory=InitramfsConfig)
     online: Optional[OnlineConfig] = None
+    bootstrap: Optional[BootstrapConfig] = None
     raw_path: Optional[Path] = None
 
     @classmethod
@@ -583,5 +630,6 @@ class Manifest:
             packages=_parse_packages(data["packages"]) if "packages" in data else None,
             initramfs=_parse_initramfs(data.get("initramfs", {})),
             online=_parse_online(data["online"]) if "online" in data else None,
+            bootstrap=_parse_bootstrap(data["bootstrap"]) if "bootstrap" in data else None,
             raw_path=raw_path,
         )

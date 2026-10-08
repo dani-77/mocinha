@@ -99,6 +99,7 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
         online=False if args.offline else None,
         online_packages=list(args.online_package or []),
         aur_packages=list(args.aur or []),
+        kernel=args.kernel,
     )
     plan = resolver.resolve(choices)
     wire_plan_providers(plan, registry, manifest)
@@ -155,6 +156,33 @@ def cmd_network(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_packages(args: argparse.Namespace) -> int:
+    """Searches the repositories the target would use, in a throwaway database (never the live's)."""
+    import shutil
+    import tempfile
+    from mocinha.providers.base import CommandRunner
+    from mocinha.providers.pacman_common import scratch_db, search_packages, sync_scratch
+
+    if not shutil.which("pacman"):
+        print("Package search needs pacman (Arch family lives).", file=sys.stderr)
+        return 1
+    stream = EventStream()
+    if args.verbose:
+        stream.subscribe(print_event)
+    runner = CommandRunner(stream)
+    try:
+        with tempfile.TemporaryDirectory(prefix="mocinha-search-") as tmp:
+            opts = scratch_db(Path(tmp), Path("/etc/pacman.conf"))
+            sync_scratch(runner, opts)
+            results = search_packages(runner, opts, args.term)
+    except Exception as e:
+        print(f"\n{e}\n", file=sys.stderr)
+        return 1
+    for r in results:
+        print(f"{r['repo']}/{r['name']} {r['version']}\n    {r['description']}")
+    return 0 if results else 1
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     stream = EventStream()
     if args.verbose:
@@ -199,6 +227,7 @@ def add_online_arguments(p: argparse.ArgumentParser) -> None:
                    help="Decline the manifest's optional online components (listed as skipped in the plan)")
     p.add_argument("--online-package", action="append", metavar="PKG", help="Extra package from the repositories (repeatable)")
     p.add_argument("--aur", action="append", metavar="PKG", help="Extra package built from the AUR (repeatable)")
+    p.add_argument("--kernel", help="Bootstrap profiles: kernel package among [bootstrap].kernels (default: the first)")
 
 
 def main() -> None:
@@ -254,6 +283,12 @@ def main() -> None:
     p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
     p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")
     p_inst.set_defaults(func=cmd_install)
+
+    # packages
+    p_pkg = subparsers.add_parser("packages", help="Search the repositories (throwaway database; nothing is installed)")
+    p_pkg.add_argument("action", choices=["search"])
+    p_pkg.add_argument("term")
+    p_pkg.set_defaults(func=cmd_packages)
 
     # network
     p_net = subparsers.add_parser("network", help="Show or set up the live's network connection")

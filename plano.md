@@ -1011,7 +1011,7 @@ A `network` capability lets every frontend show the connection state and
 connect (wired/Wi-Fi) through the live's own network stack (NetworkManager
 via `nmcli`, iwd via `iwctl`), chosen by what the live actually runs.
 
-### Level B --- bootstrap install (objective, not implemented yet)
+### Level B --- bootstrap install (first version implemented for the Arch family, 2026-10-08)
 
 A deployment mode where the target is composed from remote repositories
 (`pacstrap` on Arch; `pkg`/`bsdinstall distfetch` on FreeBSD; `prt-get`
@@ -1031,6 +1031,16 @@ before code:
 
 Level B must not leak into level A or into the live-copy providers: it is
 one more deployment provider.
+
+*Implemented (Arch):* a bootstrap profile is a manifest with `[bootstrap]`
+shipped with Mocinha (`examples/manifests/arch-bootstrap.toml`, derived from
+the Arch Installation Guide); deployment provider `pacstrap` (`pacstrap -K`,
+the live's pacman.conf and mirrorlist, mirrors reported in order and never
+re-ranked); kernel, extra packages and services chosen by the user; the
+whole transaction resolved on a throwaway database before confirmation; AUR
+packages built on top by the level-A provider; package search in the CLI
+and the GUI. *Not implemented:* package groups browsing, other families
+(FreeBSD `pkg`/distfetch), microcode detection.
 
 ## 23. Philosophy in short
 

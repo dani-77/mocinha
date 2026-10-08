@@ -9,6 +9,7 @@ from mocinha.providers.boot.freebsd_loader import FreeBSDBootProvider
 from mocinha.providers.boot.grub import GrubBootProvider
 from mocinha.providers.boot.limine import LimineBootProvider
 from mocinha.providers.deployment.crux_pkgadd import CruxPkgaddDeploymentProvider
+from mocinha.providers.deployment.pacstrap import PacstrapDeploymentProvider
 from mocinha.providers.deployment.rsync import RsyncDeploymentProvider
 from mocinha.providers.deployment.squashfs import SquashfsDeploymentProvider
 from mocinha.providers.deployment.tar import TarDeploymentProvider
@@ -61,6 +62,7 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("deployment", RsyncDeploymentProvider("rsync-copy", event_stream))
     registry.register("deployment", TreeCopyDeploymentProvider("tree-copy", event_stream))
     registry.register("deployment", CruxPkgaddDeploymentProvider("crux-pkgadd", event_stream))
+    registry.register("deployment", PacstrapDeploymentProvider("pacstrap", event_stream))
 
     # Initramfs
     registry.register("initramfs", MkinitcpioProvider("mkinitcpio", event_stream))

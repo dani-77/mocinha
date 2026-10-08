@@ -51,6 +51,7 @@ DIAGNOSTICS = (
     "echo '### pacman_repos'; grep '^\\[' /etc/pacman.conf; "
     "echo '### online_packages'; LC_ALL=C pacman -Q d77-qtile-skel d77-grub-theme yay-bin 2>&1; "
     "echo '### grub_theme'; grep '^GRUB_THEME=' /etc/default/grub; grep -c 'theme' /boot/grub/grub.cfg; "
+    "echo '### pkg_probe'; LC_ALL=C pacman -Q base linux linux-lts grub efibootmgr networkmanager sudo qtile greetd archinstall 2>&1; "
     "echo '### skel_owner'; LC_ALL=C pacman -Qqo /etc/skel/.config/qtile/config.py 2>&1; "
     "echo '### build_user'; getent passwd mocinha-build || echo absent; ls -d /var/tmp/mocinha-build 2>&1; "
     "echo ===MOCINHA_\"\"BOOT_PROOF_END==="
@@ -126,6 +127,15 @@ def check_expectations(sections: dict, expect: dict) -> list:
     for pkg in expect.get("packages_absent", []):
         if pkg in installed:
             problems.append(f"package {pkg} installed, expected absent")
+    probed = {l.split()[0] for l in get("pkg_probe") if len(l.split()) == 2 and not l.startswith("error")}
+    for pkg in expect.get("installed_present", []):
+        if pkg not in probed:
+            problems.append(f"package {pkg} not installed (probe: {get('pkg_probe')})")
+    for pkg in expect.get("installed_absent", []):
+        if pkg in probed:
+            problems.append(f"package {pkg} installed, expected absent (not a copy of the live)")
+    if "pacman_repos_exact" in expect and get("pacman_repos") != expect["pacman_repos_exact"]:
+        problems.append(f"pacman.conf repositories {get('pacman_repos')}, expected {expect['pacman_repos_exact']}")
     if "grub_theme" in expect:
         theme = " ".join(get("grub_theme"))
         wrong = (expect["grub_theme"] not in theme) if expect["grub_theme"] else ("GRUB_THEME=" in theme)

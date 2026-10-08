@@ -40,6 +40,8 @@ class UserChoices:
     online: Optional[bool] = None
     online_packages: List[str] = field(default_factory=list)
     aur_packages: List[str] = field(default_factory=list)
+    # Bootstrap installs (level B): kernel package among [bootstrap].kernels; None = the first one
+    kernel: Optional[str] = None
 
 
 HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
@@ -164,6 +166,7 @@ class InstallationResolver:
         target_files = self.manifest.target_files
         live_files = self.manifest.live_files
         packages = self.manifest.packages
+        bootstrap = self._resolve_bootstrap(choices, service_res.enabled_services)
 
         # 5. Build Staged Steps
         steps: List[PlanStep] = [
@@ -190,8 +193,12 @@ class InstallationResolver:
             ),
             PlanStep(
                 step_id="deployment_copy",
-                title=f"Deploy the system via {self.manifest.install.method}",
+                title=(f"Bootstrap the system from the repositories via {self.manifest.providers.deployment} (requires network)"
+                       if bootstrap else f"Deploy the system via {self.manifest.install.method}"),
                 description=(
+                    f"Install {len(bootstrap['packages'])} packages (and their dependencies) from the live's mirrors: "
+                    f"{bootstrap['packages']}"
+                    if bootstrap else
                     f"Install packages from {self.manifest.install.source}: collections {packages.collections}, "
                     f"extra {packages.install}, local {packages.local}"
                     if packages else
@@ -356,6 +363,7 @@ class InstallationResolver:
             "initramfs_args": list(self.manifest.initramfs.args),
             "efi_id": self.manifest.boot.efi_id or self.manifest.system.id,
             "online": online,
+            "bootstrap": bootstrap,
             "lock_root": not choices.root_password,
             "locale": choices.locale,
             "keymap": choices.keymap,
@@ -382,7 +390,12 @@ class InstallationResolver:
         metadata["release_mounts"] = self._releasable_mounts(disk)
         summary.release_mounts = [mp for _, mp in metadata["release_mounts"]]
 
-        if online and online["enabled"]:
+        if bootstrap:
+            summary.online = (f"bootstrap: kernel {bootstrap['kernel']}, {len(bootstrap['packages'])} packages from the "
+                              f"repositories (mirrors and dependencies in the preflight report)")
+            if online and online["enabled"]:
+                summary.online += "; " + self._describe_online(online)
+        elif online and online["enabled"]:
             summary.online = self._describe_online(online)
         elif online and online["skipped"]:
             summary.online_skipped = f"packages {online['skipped']['packages']}, AUR {online['skipped']['aur']}"
@@ -460,9 +473,51 @@ class InstallationResolver:
             )
         return disk
 
+    def _resolve_bootstrap(self, choices: UserChoices, enabled_services: List[str]) -> Optional[Dict[str, Any]]:
+        """Package set of a bootstrap install (level B), or None for live/medium deployments."""
+        cfg = self.manifest.bootstrap
+        if cfg is None:
+            if choices.kernel:
+                raise ResolutionError(message="A kernel can only be chosen for bootstrap installs.",
+                                      cause="This manifest installs the live system, with its own kernel.",
+                                      failed_operation="Resolve bootstrap choices")
+            return None
+        if choices.online is False:
+            raise ResolutionError(
+                message="A bootstrap install cannot be offline.",
+                cause="The whole system is downloaded from the repositories.",
+                failed_operation="Resolve bootstrap choices",
+                possible_recovery="Connect to a network, or use a remaster manifest that installs the live system.",
+            )
+        kernel = choices.kernel or cfg.kernels[0]
+        if kernel not in cfg.kernels:
+            raise ResolutionError(message=f"Kernel {kernel!r} is not offered by this profile.",
+                                  cause=f"Offered kernels: {cfg.kernels}", failed_operation="Resolve bootstrap choices")
+        firmware = "uefi" if self.facts.firmware == FirmwareType.UEFI else "bios"
+        loader = cfg.bootloader_packages.get(choices.bootloader)
+        if loader is None:
+            raise ResolutionError(
+                message=f"The profile does not say which packages provide bootloader {choices.bootloader!r}.",
+                cause=f"[bootstrap.bootloader_packages] covers {sorted(cfg.bootloader_packages)}.",
+                failed_operation="Resolve bootstrap choices",
+            )
+        bad = [p for p in choices.online_packages if not PACKAGE_NAME.match(p)]
+        if bad:
+            raise ResolutionError(message=f"Invalid package names: {bad}", cause="Package names are checked before use.",
+                                  failed_operation="Resolve bootstrap choices")
+        packages: List[str] = []
+        for p in cfg.packages + [kernel] + loader[firmware] + \
+                [p for srv in enabled_services for p in cfg.service_packages.get(srv, [])] + list(choices.online_packages):
+            if p not in packages:
+                packages.append(p)
+        return {"kernel": kernel, "packages": packages, "firmware": firmware}
+
     def _resolve_online(self, choices: UserChoices) -> Optional[Dict[str, Any]]:
         """The online components of this install, or None when there are none at all."""
         cfg = self.manifest.online
+        if self.manifest.bootstrap is not None:
+            # Extra repository packages are part of the bootstrap transaction; only AUR builds remain here
+            choices = UserChoices(**{**vars(choices), "online_packages": []})
         extra = list(choices.online_packages) + list(choices.aur_packages)
         if cfg is None and not extra:
             return None
@@ -498,7 +553,8 @@ class InstallationResolver:
             "repositories": declared["repositories"],
             "packages": declared["packages"] + [p for p in choices.online_packages if p not in declared["packages"]],
             "aur": declared["aur"] + [p for p in choices.aur_packages if p not in declared["aur"]],
-            "upgrade": cfg.upgrade if cfg else False,
+            # A freshly bootstrapped target is current: -Syu there only re-syncs, never a partial upgrade
+            "upgrade": cfg.upgrade if cfg else self.manifest.bootstrap is not None,
             "grub_defaults": dict(cfg.grub_defaults) if cfg else {},
             "overwrite": list(cfg.overwrite) if cfg else [],
         }

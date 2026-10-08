@@ -1,11 +1,11 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-08. VM results were obtained with the code of the online (level A) commit that follows `49d6236`, unless a run says otherwise; the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
+**Date:** 2026-10-08. VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
 
 **Contract change (2026-10-08):** Mocinha is no longer 100% offline. It is
 offline-first, with online components where they are declared or chosen
 (level A, implemented) and a bootstrap mode composed at install time
-(level B, objective, not implemented). See `AGENTS.md` "Online rules" and
+(level B, first version implemented for the Arch family). See `AGENTS.md` "Online rules" and
 `plano.md` §22.1.
 **Branch:** `main` (private GitHub repository `dani-77/mocinha`)
 
@@ -20,6 +20,7 @@ something is not listed as validated here, assume it is not.
 |---|---|
 | btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
 | au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
+| Arch bootstrap (level B) | **CLI install + boot validated in QEMU**: a fresh Arch bootstrapped with `pacstrap` from the btw-d77 live (its content is not copied) with the `arch-bootstrap` profile, BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`). **Not run from an upstream archiso.** Never run on real hardware. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
@@ -91,6 +92,7 @@ GUI: the GTK3 frontend has never driven an installation.
 | `tar-extract` | **no** --- unit tests only | Not referenced by any manifest. |
 
 | `pacman` (online, level A) | yes (btw-d77, BIOS, network through QEMU user networking) | Preflight on a throwaway package database (temporary `--dbpath`); repositories added to the target's `pacman.conf`; keyring initialized when absent; `pacman -Syu` with the packages and `--overwrite` for declared paths; AUR builds as a temporary user at the revision shown in the plan (`yay-bin` built), user and build tree removed. AUR packages whose dependencies are other AUR packages must all be listed; `check()` is skipped (`makepkg --nocheck`). |
+| `pacstrap` (deployment, level B) | yes (from the btw-d77 live, BIOS and UEFI) | `pacstrap -K` with the live's pacman.conf and mirrorlist; mirrors reported in order, never re-ranked; the whole transaction (178/180 packages) resolved on a throwaway database before confirmation; verify: every resolved package installed, mirrorlist and keyring present. |
 | `networkmanager` (network) | partly | `status` read in the btw-d77 live (wired); `status` and `scan` against the development host's real NetworkManager and Wi-Fi. **`connect` never run** (it would change the host's connection; QEMU has no Wi-Fi). The password goes through `nmcli --ask` on stdin. |
 | `iwd` (network) | **no** --- unit tests only | Passphrase written to `/var/lib/iwd/<ssid>.psk` (0600) in the live, never on a command line. |
 
@@ -98,7 +100,7 @@ Plan wiring fails on unregistered providers or unknown steps before
 confirmation. No placeholder binaries are written anywhere.
 
 ### Frontends
-- **CLI** (`probe`, `check-manifest`, `plan`, `install`, `network`): used for every VM validation.
+- **CLI** (`probe`, `check-manifest`, `plan`, `install`, `network`, `packages search`): used for every VM validation.
   Online: `--offline`, `--online-package`, `--aur`; the online preflight
   report is printed with the plan.
   User, password and hostname are required; passwords are given on the
@@ -110,8 +112,9 @@ confirmation. No placeholder binaries are written anywhere.
   fields (the live's settings are kept). The hostname is pre-filled with
   `[system].id`. A "Network & Online Components" page (connection state,
   Wi-Fi list and connect, decline/extra/AUR packages) appears for remasters
-  with an online provider; it too was only rendered offscreen with simulated
-  network data.
+  with an online provider; for bootstrap profiles it also has the kernel
+  choice and a package search. Only rendered offscreen with simulated
+  network/search data.
 - The CRUX live runs Python 3.12, which evaluates annotations at import time;
   the development host has 3.14 (lazy), so a forward reference passed the unit
   tests and failed in the VM. `tests/test_import_portability.py` now checks
@@ -120,7 +123,7 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 125 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 133 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -157,8 +160,9 @@ over serial.
 
 | Run | Install | Boot | Equivalence check |
 |---|---|---|---|
-| BIOS + GRUB, online components + `--aur yay-bin` | pass (16 steps verified) | pass | pass (`btw-d77-aur.json`) |
-| UEFI + GRUB, `--offline` (online components declined) | pass | pass | pass (`btw-d77-offline.json`) |
+| BIOS + GRUB, online components (level-B code) | pass | pass | pass (`btw-d77.json`) |
+| BIOS + GRUB, online components + `--aur yay-bin` (level-A code, `64d1990`) | pass (16 steps verified) | pass | pass (`btw-d77-aur.json`) |
+| UEFI + GRUB, `--offline` (online components declined; level-A code, `64d1990`) | pass | pass | pass (`btw-d77-offline.json`) |
 | BIOS + GRUB / UEFI + GRUB without online components (sysvd77 code, `49d6236`) | pass | pass | pass |
 | UEFI + Limine (earlier code, `e8bd6ee`) | refused at validation, before any disk write (no Limine in the live) | --- | --- |
 
@@ -274,6 +278,31 @@ partitions.
 The Wasp desktop could not be shown in QEMU: FreeBSD's drm-kmod has no KMS
 driver for QEMU's virtual GPUs, so the live session falls back to a shell.
 
+### Arch bootstrap (level B) --- from the btw-d77 2026.10.07 live, profile `examples/manifests/arch-bootstrap.toml`
+
+Harness: `tools/qemu/run_automated_test.sh --manifest arch-bootstrap [--kernel PKG] [--aur PKG]`,
+expectations `tools/qemu/expect/arch-bootstrap.json` /
+`arch-bootstrap-uefi-aur.json`. The btw-d77 live is only the bootstrap
+environment (pacstrap, pacman.conf, mirrorlist); the checks prove that
+nothing of it reached the target.
+
+| Run | Install | Boot | Equivalence check |
+|---|---|---|---|
+| BIOS + GRUB, kernel `linux-lts` | pass (15 steps verified; 178 packages) | pass | pass |
+| UEFI + GRUB, kernel `linux` + AUR `yay-bin` | pass (180 packages) | pass | pass |
+
+Checked: hostname, user `dani` (wheel), root locked, locale/keymap/timezone,
+`NetworkManager` and `systemd-timesyncd` enabled, `greetd`/`sshd`/
+`systemd-networkd` not enabled, chosen kernel installed and the other one
+absent, `efibootmgr` only on UEFI, `qtile`/`greetd`/`archinstall` (live
+packages) absent, stock `pacman.conf` (`[core]`, `[extra]` only, none of the
+live's extra repositories), `systemctl is-system-running` = running, no
+failed units.
+
+The profile is not derived from a remaster: it follows the Arch Installation
+Guide (`base`, kernel, `linux-firmware`) plus `sudo` (for its wheel rule) and
+`nano`. Microcode is not detected; it is an extra package.
+
 ### sysv-d77 --- CRUX 3.8 ISO `sysv-d77-3.8-x86_64.iso` built 2026-09-28 from `~/Remaster/sysv-d77` (repository untouched)
 
 Harness:
@@ -367,8 +396,8 @@ floppy listed as a disk by the probe.
   `[users].groups` and sudo/doas rules as `[[target_files]]`. To be decided.
 - Package-based deployment checks values whose data the live lacks (CRUX:
   timezone) only after deployment.
-- Level B (bootstrap install from a clean archiso, packages chosen at
-  install time): objective in the contract, not implemented.
+- Level B: never run from an upstream archiso (validated from the btw-d77
+  live only); no package-group browsing; Arch family only.
 - Online: Wi-Fi `connect` never validated (NetworkManager or iwd); no network
   providers for FreeBSD or CRUX; Limine still has to be in the live (the
   bootloader provider does not use online packages yet).

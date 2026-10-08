@@ -2,7 +2,8 @@
 # run_automated_test.sh --- Automated QEMU install test of Mocinha from a btw-d77 live ISO.
 #
 #   tools/qemu/run_automated_test.sh [--firmware bios|uefi] [--bootloader NAME] [--iso PATH] [--script adversarial.sh]
-#                                    [--offline] [--aur PKG]
+#                                    [--offline] [--aur PKG] [--manifest NAME] [--kernel PKG]
+# --manifest arch-bootstrap: level B, a fresh Arch bootstrapped with pacstrap from this live
 #
 # Boots the btw-d77 live (kernel/initramfs extracted from the ISO itself, the
 # ISO attached as CD-ROM so archiso mounts its real airootfs), logs in as root
@@ -37,6 +38,8 @@ while [ $# -gt 0 ]; do
         --script) SCRIPT="$2"; shift 2 ;;
         --offline) EXTRA_APPEND+=" mocinha.offline=1"; RUN_SUFFIX+="-offline"; shift ;;
         --aur) EXTRA_APPEND+=" mocinha.aur=$2"; RUN_SUFFIX+="-aur"; shift 2 ;;
+        --manifest) EXTRA_APPEND+=" mocinha.manifest=$2"; RUN_SUFFIX+="-$2"; shift 2 ;;
+        --kernel) EXTRA_APPEND+=" mocinha.kernel=$2"; RUN_SUFFIX+="-$2"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac

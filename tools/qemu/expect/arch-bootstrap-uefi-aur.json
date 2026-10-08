@@ -1,0 +1,48 @@
+{
+  "_comment": "arch-bootstrap.json for the UEFI run: default kernel (linux), efibootmgr, and yay-bin built from the AUR on top (level A on level B).",
+  "hostname": "arch-test",
+  "users": {
+    "dani": "1000"
+  },
+  "groups_of_primary_user": [
+    "wheel"
+  ],
+  "locale_conf": "LANG=pt_PT.UTF-8",
+  "locale_generated": "pt_PT.utf8",
+  "vconsole_keymap": "KEYMAP=pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "root_locked": true,
+  "enabled_units_present": [
+    "NetworkManager.service",
+    "systemd-timesyncd.service"
+  ],
+  "enabled_units_absent": [
+    "greetd.service",
+    "sshd.service",
+    "systemd-networkd.service"
+  ],
+  "installed_present": [
+    "base",
+    "linux",
+    "grub",
+    "efibootmgr",
+    "networkmanager",
+    "sudo"
+  ],
+  "installed_absent": [
+    "linux-lts",
+    "qtile",
+    "greetd",
+    "archinstall"
+  ],
+  "pacman_repos_exact": [
+    "[options]",
+    "[core]",
+    "[extra]"
+  ],
+  "system_state": "running",
+  "packages_present": [
+    "yay-bin"
+  ],
+  "build_user_absent": true
+}

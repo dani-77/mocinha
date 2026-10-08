@@ -1,0 +1,17 @@
+{
+  "_comment": "Level B: a fresh Arch bootstrapped with pacstrap from the btw-d77 live using examples/manifests/arch-bootstrap.toml (kernel linux-lts chosen by the test). Nothing of the live may be on the target: no qtile, greetd or archinstall, and the stock pacman.conf without the live's [custom]/[chaotic-aur].",
+  "hostname": "arch-test",
+  "users": {"dani": "1000"},
+  "groups_of_primary_user": ["wheel"],
+  "locale_conf": "LANG=pt_PT.UTF-8",
+  "locale_generated": "pt_PT.utf8",
+  "vconsole_keymap": "KEYMAP=pt-latin1",
+  "localtime_suffix": "zoneinfo/Europe/Lisbon",
+  "root_locked": true,
+  "enabled_units_present": ["NetworkManager.service", "systemd-timesyncd.service"],
+  "enabled_units_absent": ["greetd.service", "sshd.service", "systemd-networkd.service"],
+  "installed_present": ["base", "linux-lts", "grub", "networkmanager", "sudo"],
+  "installed_absent": ["linux", "qtile", "greetd", "archinstall"],
+  "pacman_repos_exact": ["[options]", "[core]", "[extra]"],
+  "system_state": "running"
+}

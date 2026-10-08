@@ -34,6 +34,9 @@ from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.manifest import PACKAGE_NAME
 from mocinha.core.provider import ExecutionContext, ProviderContract
 from mocinha.providers.base import CommandRunner, run_in_target
+from mocinha.providers.pacman_common import (
+    configured_repositories, repository_block, resolve_packages, scratch_db, sync_scratch,
+)
 
 AUR_RPC = "https://aur.archlinux.org/rpc/v5/info"
 AUR_GIT = "https://aur.archlinux.org/{}.git"
@@ -41,14 +44,6 @@ BUILD_USER = "mocinha-build"
 BUILD_HOME = "/var/tmp/mocinha-build"
 # What makepkg itself needs on the target (the AUR's documented prerequisite), not remaster policy
 BUILD_TOOLS = ["base-devel", "git"]
-
-
-def repository_block(repo: Dict[str, Any]) -> str:
-    return f"\n[{repo['name']}]\nSigLevel = {repo['siglevel']}\n" + "".join(f"Server = {s}\n" for s in repo["servers"])
-
-
-def configured_repositories(pacman_conf: str) -> List[str]:
-    return [m.group(1) for m in re.finditer(r"^\s*\[([^\]]+)\]\s*$", pacman_conf, re.M) if m.group(1) != "options"]
 
 
 def aur_info(names: List[str], opener=urllib.request.urlopen) -> Dict[str, Dict[str, Any]]:
@@ -83,23 +78,6 @@ class PacmanOnlineProvider(ProviderContract):
         return online if online and online.get("enabled") else None
 
     # ------------------------------------------------------------ preflight
-    def _scratch_db(self, workdir: Path, online: Dict[str, Any]) -> List[str]:
-        """pacman options for a throwaway sync database; the live's own database is not touched."""
-        live_conf = self.live_pacman_conf
-        if not live_conf.is_file():
-            raise ExecutionError(message="/etc/pacman.conf not found in the live system.",
-                                 cause="The target's repositories are the live's (the target is a copy of it).",
-                                 failed_operation="Prepare package preflight")
-        text = live_conf.read_text()
-        present = configured_repositories(text)
-        text += "".join(repository_block(r) for r in online["repositories"] if r["name"] not in present)
-        conf = workdir / "pacman.conf"
-        conf.write_text(text)
-        (workdir / "db").mkdir()
-        (workdir / "cache").mkdir()
-        return ["--config", str(conf), "--dbpath", str(workdir / "db"), "--cachedir", str(workdir / "cache"),
-                "--logfile", str(workdir / "pacman.log"), "--noconfirm"]
-
     def validate(self, context: ExecutionContext) -> None:
         online = self._online(context)
         if online is None:
@@ -110,16 +88,8 @@ class PacmanOnlineProvider(ProviderContract):
                                  failed_operation="Validate online components")
         report: List[str] = []
         with tempfile.TemporaryDirectory(prefix="mocinha-pacman-") as tmp:
-            opts = self._scratch_db(Path(tmp), online)
-            proc = self.runner.run(["pacman"] + opts + ["-Sy"], phase=EventPhase.PLAN, check=False)
-            if proc.returncode != 0:
-                raise ExecutionError(
-                    message="Synchronizing the package databases failed (network or repository problem).",
-                    cause=(proc.stderr or proc.stdout).strip()[-800:],
-                    failed_operation="Synchronize a temporary package database",
-                    current_state="No disk has been modified.",
-                    possible_recovery="Connect to a network (mocinha network) or install without the online components.",
-                )
+            opts = scratch_db(Path(tmp), self.live_pacman_conf, online["repositories"])
+            sync_scratch(self.runner, opts)
             report.append("repositories reachable: " + ", ".join(
                 configured_repositories(Path(tmp, "pacman.conf").read_text())))
 
@@ -135,18 +105,8 @@ class PacmanOnlineProvider(ProviderContract):
             repo_deps = [d for d in aur_deps if d not in online["aur"]]
             wanted = list(online["packages"]) + repo_deps + (BUILD_TOOLS if online["aur"] else [])
             if wanted:
-                proc = self.runner.run(["pacman"] + opts + ["-Sp", "--print-format", "%n %v %r"] + wanted,
-                                       phase=EventPhase.PLAN, check=False)
-                if proc.returncode != 0:
-                    raise ExecutionError(
-                        message="Some online packages or AUR build dependencies cannot be resolved.",
-                        cause=(proc.stderr or proc.stdout).strip()[-800:],
-                        failed_operation="Resolve online packages",
-                        current_state="No disk has been modified.",
-                        possible_recovery="Fix the package names; AUR dependencies that are themselves AUR "
-                                          "packages must be listed as AUR packages too.",
-                    )
-                report.append(f"{len(proc.stdout.split(chr(10))) - 1} packages resolve from the repositories")
+                resolved = resolve_packages(self.runner, opts, wanted)
+                report.append(f"{len(resolved)} packages resolve from the repositories")
 
         revisions: Dict[str, str] = {}
         for name in online["aur"]:
@@ -176,7 +136,9 @@ class PacmanOnlineProvider(ProviderContract):
         context.metadata["aur_revisions"] = revisions
         context.metadata["aur_order"] = self._build_order(online["aur"], info)
         context.metadata["aur_info"] = info  # the build uses what the plan showed, not a later lookup
-        context.metadata["online_report"] = report
+        # Keep what the bootstrap deployment reported in the same preflight
+        context.metadata["online_report"] = [l for l in context.metadata.get("online_report", [])
+                                             if l.startswith("bootstrap:")] + report
         for line in report:
             self.events.info(EventPhase.PLAN, f"Online preflight: {line}")
 

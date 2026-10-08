@@ -192,6 +192,24 @@ the primary user). Every online action is shown in the plan; the preflight
 | `[[online.repositories]]` | no | `name`, `servers` (https only), `siglevel`: appended to the target's `pacman.conf` when not already there; the signature policy is shown in the plan. |
 | `[online.grub_defaults]` | no | `/etc/default/grub` settings that only make sense with the online components (e.g. `GRUB_THEME`); applied only when they are installed, and the theme file must exist. |
 
+### `[bootstrap]` (bootstrap profiles only; AGENTS.md "Online rules", level B)
+
+A **profile** shipped with Mocinha (e.g. `examples/manifests/arch-bootstrap.toml`)
+instead of a remaster manifest: the system is composed from the
+repositories (`[providers].deployment = "pacstrap"`) and nothing of the live
+is copied. The package set is the profile's packages + the chosen kernel +
+the chosen bootloader's packages for this firmware + the packages of the
+enabled services + the user's extra packages; the whole transaction is
+resolved (throwaway database) before confirmation. AUR packages are built on
+top by the online provider.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `packages` | yes | Always installed (e.g. Arch's documented `base linux-firmware`, plus what the profile's own choices need). |
+| `kernels` | yes | Kernel packages offered; the first is the default. |
+| `[bootstrap.bootloader_packages.<name>]` | no | `bios`, `uefi`: packages that provide that bootloader. A bootloader without an entry cannot be chosen. |
+| `[bootstrap.service_packages]` | no | `<service> = [packages]`: installed when the service is enabled. |
+
 ---
 
 ## 3. User choices (not in the manifest)
@@ -203,7 +221,9 @@ arguments and locale/keymap/timezone (unset: keep the live's settings;
 providers that cannot apply a requested change refuse it during
 validation, before any disk is modified). Online: decline the optional
 online components (`--offline`; GUI checkbox), extra repository packages
-(`--online-package`) and AUR packages (`--aur`). The network can be set up
+(`--online-package`; part of the bootstrap transaction for profiles) and AUR
+packages (`--aur`); for bootstrap profiles also the kernel (`--kernel`) and a
+package search (`mocinha packages search <term>`, GUI search box). The network can be set up
 from Mocinha itself (`mocinha network status|scan|connect`; GUI page
 "Network & Online Components").
 

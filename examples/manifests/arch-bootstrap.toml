@@ -1,0 +1,76 @@
+# arch-bootstrap --- Mocinha bootstrap profile for Arch Linux (level B)
+#
+# Not a remaster manifest: a profile shipped with Mocinha for installing Arch
+# from the repositories, e.g. from a clean archiso (or any Arch-based live
+# with pacstrap), with the packages chosen at install time. Nothing of the
+# live is copied; the live only provides pacstrap, its pacman.conf and its
+# mirrorlist.
+#
+# Package policy:
+# - [bootstrap].packages: the Arch Installation Guide's "pacstrap -K /mnt base
+#   linux linux-firmware" (the kernel is the user's choice among
+#   [bootstrap].kernels), plus what this profile's own choices need: sudo for
+#   the wheel rule below and a console editor (the guide says to install one).
+# - microcode (intel-ucode / amd-ucode) is hardware-specific: add it as an
+#   extra package when needed.
+# Edit this profile, or write another, to change the policy.
+
+[system]
+id = "arch-bootstrap"
+name = "Arch Linux (bootstrap)"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "pacstrap"
+source = "/etc/pacman.d/mirrorlist"   # what the target is installed from: the live's mirrors
+min_disk_size_bytes = 10737418240
+root_filesystem = "ext4"
+root_mount_options = "rw,relatime"
+esp_size = "1g"
+esp_mountpoint = "/boot"
+esp_mount_options = "rw,relatime,fmask=0022,dmask=0022"
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "pacstrap"
+users = "shadow"
+initramfs = "mkinitcpio"
+services = "arch-systemd"
+sysconfig = "systemd"
+online = "pacman"                     # AUR packages on top (level A)
+
+[bootstrap]
+packages = ["base", "linux-firmware", "sudo", "nano"]
+kernels = ["linux", "linux-lts", "linux-zen", "linux-hardened"]
+
+[bootstrap.bootloader_packages.grub]
+bios = ["grub"]
+uefi = ["grub", "efibootmgr"]
+
+[bootstrap.service_packages]
+NetworkManager = ["networkmanager"]
+sshd = ["openssh"]
+
+[boot]
+available = ["grub"]
+default = "grub"
+
+[services]
+required = []
+default_enabled = ["NetworkManager", "systemd-timesyncd"]
+optional = ["sshd", "systemd-networkd", "systemd-resolved"]
+
+[services.metadata.NetworkManager]
+conflicts = ["systemd-networkd"]
+
+[users]
+groups = ["wheel"]
+
+[[target_files]]
+path = "/etc/sudoers.d/10-wheel"
+mode = "0440"
+content = """%wheel ALL=(ALL:ALL) ALL
+"""

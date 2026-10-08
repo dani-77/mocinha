@@ -240,7 +240,43 @@ class MocinhaGTKApp(Gtk.Window):
         )
         grid.attach(note, 0, len(rows), 2, 1)
         box.pack_start(grid, False, False, 0)
+
         return box
+
+    def _on_package_search(self, entry: Gtk.SearchEntry) -> None:
+        term = entry.get_text().strip()
+        if not term:
+            return
+
+        def work() -> None:
+            import tempfile
+            from mocinha.providers.base import CommandRunner
+            from mocinha.providers.pacman_common import scratch_db, search_packages, sync_scratch
+            try:
+                with tempfile.TemporaryDirectory(prefix="mocinha-search-") as tmp:
+                    runner = CommandRunner(self.events)
+                    opts = scratch_db(Path(tmp), Path("/etc/pacman.conf"))
+                    sync_scratch(runner, opts)
+                    results = search_packages(runner, opts, term)
+                GLib.idle_add(self._show_search_results, results, None)
+            except MocinhaError as err:
+                GLib.idle_add(self._show_search_results, [], str(err))
+
+        self._network_task(work)
+
+    def _show_search_results(self, results, error) -> bool:
+        self.search_store.clear()
+        if error:
+            self.net_status.set_text(f"Package search failed:\n{error}")
+        for r in results[:200]:
+            self.search_store.append([f"{r['repo']}/{r['name']}", r["version"], r["description"]])
+        return False
+
+    def _on_search_result_activated(self, view, path, _column) -> None:
+        name = self.search_store[path][0].split("/", 1)[1]
+        current = self.entry_online_packages.get_text().split()
+        if name not in current:
+            self.entry_online_packages.set_text(" ".join(current + [name]))
 
     def _create_services_page(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -380,6 +416,11 @@ class MocinhaGTKApp(Gtk.Window):
             self.online_check.set_sensitive(online.optional)
             if not online.optional:
                 self.online_check.set_tooltip_text("Required by this remaster")
+        elif self.manifest.bootstrap:
+            self.online_check.set_label("Bootstrap install: the whole system is downloaded from the repositories "
+                                        "(network required)")
+            self.online_check.set_active(True)
+            self.online_check.set_sensitive(False)
         else:
             self.online_check.set_label("This remaster declares no online components")
             self.online_check.set_sensitive(False)
@@ -399,6 +440,32 @@ class MocinhaGTKApp(Gtk.Window):
             grid.attach(lbl, 0, i, 1, 1)
             grid.attach(entry, 1, i, 1, 1)
         box.pack_start(grid, False, False, 0)
+
+        # --- bootstrap profiles (level B): kernel and package search
+        self.kernel_combo = None
+        if self.manifest.bootstrap:
+            krow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            klbl = Gtk.Label(label="Kernel:")
+            krow.pack_start(klbl, False, False, 0)
+            self.kernel_combo = Gtk.ComboBoxText()
+            for k in self.manifest.bootstrap.kernels:
+                self.kernel_combo.append_text(k)
+            self.kernel_combo.set_active(0)
+            krow.pack_start(self.kernel_combo, False, False, 0)
+            self.entry_search = Gtk.SearchEntry()
+            self.entry_search.set_placeholder_text("search packages (double-click a result to add it)")
+            self.entry_search.connect("activate", self._on_package_search)
+            krow.pack_start(self.entry_search, True, True, 0)
+            box.pack_start(krow, False, False, 0)
+            self.search_store = Gtk.ListStore(str, str, str)  # name, version, description
+            sview = Gtk.TreeView(model=self.search_store)
+            for i, col in enumerate(("Package", "Version", "Description")):
+                sview.append_column(Gtk.TreeViewColumn(col, Gtk.CellRendererText(), text=i))
+            sview.connect("row-activated", self._on_search_result_activated)
+            sscroll = Gtk.ScrolledWindow()
+            sscroll.set_min_content_height(110)
+            sscroll.add(sview)
+            box.pack_start(sscroll, True, True, 0)
         return box
 
     # Network calls block (subprocesses); they run in a thread and touch widgets via idle_add only
@@ -611,6 +678,8 @@ class MocinhaGTKApp(Gtk.Window):
             choices.online = None if self.online_check.get_active() or not self.manifest.online else False
             choices.online_packages = self.entry_online_packages.get_text().split()
             choices.aur_packages = self.entry_aur_packages.get_text().split()
+            if self.kernel_combo is not None:
+                choices.kernel = self.kernel_combo.get_active_text()
 
         from mocinha.providers import wire_plan_providers
 
