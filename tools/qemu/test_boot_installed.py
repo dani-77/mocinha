@@ -48,6 +48,11 @@ DIAGNOSTICS = (
     "echo '### vconsole'; cat /etc/vconsole.conf; "
     "echo '### localtime'; readlink /etc/localtime; "
     "echo '### default_target'; systemctl get-default; "
+    "echo '### pacman_repos'; grep '^\\[' /etc/pacman.conf; "
+    "echo '### online_packages'; LC_ALL=C pacman -Q d77-qtile-skel d77-grub-theme yay-bin 2>&1; "
+    "echo '### grub_theme'; grep '^GRUB_THEME=' /etc/default/grub; grep -c 'theme' /boot/grub/grub.cfg; "
+    "echo '### skel_owner'; LC_ALL=C pacman -Qqo /etc/skel/.config/qtile/config.py 2>&1; "
+    "echo '### build_user'; getent passwd mocinha-build || echo absent; ls -d /var/tmp/mocinha-build 2>&1; "
     "echo ===MOCINHA_\"\"BOOT_PROOF_END==="
 )
 
@@ -114,6 +119,22 @@ def check_expectations(sections: dict, expect: dict) -> list:
         problems.append(f"/etc/localtime -> {get('localtime')}, expected ...{expect['localtime_suffix']}")
     if "default_target" in expect and " ".join(get("default_target")).strip() != expect["default_target"]:
         problems.append(f"default target is {get('default_target')}, expected {expect['default_target']}")
+    installed = {l.split()[0] for l in get("online_packages") if len(l.split()) == 2 and "error" not in l}
+    for pkg in expect.get("packages_present", []):
+        if pkg not in installed:
+            problems.append(f"package {pkg} not installed: {get('online_packages')}")
+    for pkg in expect.get("packages_absent", []):
+        if pkg in installed:
+            problems.append(f"package {pkg} installed, expected absent")
+    if "grub_theme" in expect:
+        theme = " ".join(get("grub_theme"))
+        wrong = (expect["grub_theme"] not in theme) if expect["grub_theme"] else ("GRUB_THEME=" in theme)
+        if wrong:
+            problems.append(f"GRUB_THEME: {get('grub_theme')}, expected {expect['grub_theme']!r}")
+    if "skel_owner" in expect and expect["skel_owner"] not in " ".join(get("skel_owner")):
+        problems.append(f"/etc/skel owner {get('skel_owner')}, expected {expect['skel_owner']}")
+    if expect.get("build_user_absent") and "absent" not in " ".join(get("build_user")):
+        problems.append(f"temporary build user left behind: {get('build_user')}")
     state = " ".join(get("system_state")).strip()
     if state != expect.get("system_state", state):
         problems.append(f"system state is {state!r}; failed units: {get('failed_units')}")

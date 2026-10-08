@@ -51,7 +51,8 @@ Maps capabilities to provider names; all keys are required:
 `platform`, `storage`, `filesystem`, `deployment`, `users`, `services`,
 `sysconfig` (hostname/locale/keymap/timezone files: `systemd`,
 `freebsd-rc`, `crux-rc`), `initramfs` (`none` when the platform needs no
-initramfs step). A name
+initramfs step). Optional: `online` (e.g. `pacman`), required when the
+manifest has `[online]` and needed for any user-requested online package. A name
 that is not registered fails plan wiring, before confirmation.
 
 ### `[boot]` (required)
@@ -174,6 +175,23 @@ target file can override part of a copied directory. Verified byte for byte.
 | `optional` | no | `true`: skipped when the live has no such path; otherwise a missing source fails. |
 | `mode` | no | Octal mode for a copied file; default keeps the live file's mode. |
 
+### `[online]` (optional; AGENTS.md "Online rules", level A)
+
+Components installed from the network on top of the deployed system,
+after the initramfs and before the accounts (so skel files they ship reach
+the primary user). Every online action is shown in the plan; the preflight
+(before confirmation) uses a throwaway package database, never the live's.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `optional` | yes | `true`: the user may decline them (offline install; the plan lists them as skipped). |
+| `upgrade` | yes | `true`: full upgrade together with them (`pacman -Syu`); `false` risks a partial upgrade and says so in the plan. |
+| `packages` | no | Packages from the repositories. |
+| `aur` | no | Packages built from the AUR by a temporary unprivileged user at the git revision shown before confirmation; a different revision at execution time stops the install. |
+| `overwrite` | no | Absolute path globs of deployed files the packages may take over (`pacman --overwrite`), e.g. files a live copied from its airootfs that a package also ships. Never the whole tree. |
+| `[[online.repositories]]` | no | `name`, `servers` (https only), `siglevel`: appended to the target's `pacman.conf` when not already there; the signature policy is shown in the plan. |
+| `[online.grub_defaults]` | no | `/etc/default/grub` settings that only make sense with the online components (e.g. `GRUB_THEME`); applied only when they are installed, and the theme file must exist. |
+
 ---
 
 ## 3. User choices (not in the manifest)
@@ -183,7 +201,11 @@ Shown in the plan. In the GUI and on the CLI: target disk, bootloader
 locked), hostname, optional services. On the CLI only: extra kernel
 arguments and locale/keymap/timezone (unset: keep the live's settings;
 providers that cannot apply a requested change refuse it during
-validation, before any disk is modified).
+validation, before any disk is modified). Online: decline the optional
+online components (`--offline`; GUI checkbox), extra repository packages
+(`--online-package`) and AUR packages (`--aur`). The network can be set up
+from Mocinha itself (`mocinha network status|scan|connect`; GUI page
+"Network & Online Components").
 
 ---
 

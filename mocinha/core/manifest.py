@@ -51,6 +51,7 @@ class ProvidersConfig:
     services: str
     sysconfig: str  # hostname/locale/keymap/timezone files
     initramfs: str  # "none" when the platform needs no initramfs step
+    online: Optional[str] = None  # online components provider (e.g. "pacman"); required with [online]
 
 
 @dataclass
@@ -274,6 +275,45 @@ def _parse_initramfs(data: Any) -> "InitramfsConfig":
     return InitramfsConfig(args=args)
 
 
+PACKAGE_NAME = re.compile(r"^[a-z0-9@._+][a-z0-9@._+-]*$")
+
+
+def _parse_online(data: Any) -> "OnlineConfig":
+    if not isinstance(data, dict) or not isinstance(data.get("repositories", []), list):
+        raise ManifestError(message="Invalid [online]", cause="[online] must be a table and repositories an array of tables.",
+                            failed_operation="Validate [online]")
+    t = _Table({k: v for k, v in data.items() if k != "repositories"}, "[online]", {"optional": bool, "upgrade": bool},
+               {"packages": list, "aur": list, "grub_defaults": dict, "overwrite": list})
+    repos = []
+    for entry in data.get("repositories", []):
+        r = _Table(entry, "[[online.repositories]]", {"name": str, "servers": list, "siglevel": str}, {})
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", r.get("name")) or not r.get("servers") or \
+                not all(s.startswith("https://") for s in r.get("servers")):
+            raise ManifestError(
+                message=f"Invalid [[online.repositories]] entry {r.get('name')!r}",
+                cause="name must be a pacman section name and servers a non-empty list of https:// URLs.",
+                failed_operation="Validate [[online.repositories]]",
+            )
+        repos.append(OnlineRepository(name=r.get("name"), servers=r.get("servers"), siglevel=r.get("siglevel")))
+    names = [n for k in ("packages", "aur") for n in t.get(k, [])]
+    bad = [n for n in names if not PACKAGE_NAME.match(n)]
+    grub = t.get("grub_defaults", {})
+    if bad or not all(re.fullmatch(r"GRUB_[A-Z_]+", k) and isinstance(v, str) for k, v in grub.items()):
+        raise ManifestError(
+            message="Invalid [online] package names or grub_defaults",
+            cause=f"Invalid package names: {bad}; grub_defaults keys must be GRUB_* with string values.",
+            failed_operation="Validate [online]",
+        )
+    overwrite = t.get("overwrite", [])
+    if not all(o.startswith("/") and ".." not in o and o not in ("/", "/*", "*") for o in overwrite):
+        raise ManifestError(message="Invalid [online].overwrite",
+                            cause="Entries are absolute path globs (e.g. \"/etc/skel/*\"), never the whole tree.",
+                            failed_operation="Validate [online]")
+    return OnlineConfig(optional=t.get("optional"), upgrade=t.get("upgrade"), repositories=repos,
+                        packages=t.get("packages", []), aur=t.get("aur", []), grub_defaults=dict(grub),
+                        overwrite=list(overwrite))
+
+
 class _Table:
     """Typed, strict access to one manifest table."""
 
@@ -376,8 +416,28 @@ class InitramfsConfig:
     args: List[str] = field(default_factory=list)  # options passed to the initramfs generator
 
 
+@dataclass
+class OnlineRepository:
+    name: str
+    servers: List[str]
+    siglevel: str                    # the native signature policy, shown in the plan
+
+
+@dataclass
+class OnlineConfig:
+    """Online components installed on top of the deployed system (AGENTS.md "Online rules", level A)."""
+
+    optional: bool                   # True: the user may decline them (offline install, listed as skipped)
+    upgrade: bool                    # True: full upgrade with the online packages (pacman -Syu)
+    repositories: List[OnlineRepository] = field(default_factory=list)  # added to the target
+    packages: List[str] = field(default_factory=list)
+    aur: List[str] = field(default_factory=list)     # built from the AUR at the revision shown in the plan
+    grub_defaults: Dict[str, str] = field(default_factory=dict)  # /etc/default/grub settings needing them
+    overwrite: List[str] = field(default_factory=list)  # deployed files the packages may take over (pacman --overwrite)
+
+
 SECTIONS = {"system", "install", "providers", "boot", "services", "users", "live_only", "target_files",
-            "live_files", "packages", "initramfs"}
+            "live_files", "packages", "initramfs", "online"}
 
 
 @dataclass
@@ -393,6 +453,7 @@ class Manifest:
     live_files: List[LiveFile] = field(default_factory=list)
     packages: Optional[PackagesConfig] = None
     initramfs: InitramfsConfig = field(default_factory=InitramfsConfig)
+    online: Optional[OnlineConfig] = None
     raw_path: Optional[Path] = None
 
     @classmethod
@@ -456,8 +517,15 @@ class Manifest:
         _validate_install(install)
 
         t = _Table(data["providers"], "[providers]",
-                   {k: str for k in ("platform", "storage", "filesystem", "deployment", "users", "services", "sysconfig", "initramfs")}, {})
+                   {k: str for k in ("platform", "storage", "filesystem", "deployment", "users", "services", "sysconfig", "initramfs")},
+                   {"online": str})
         providers = ProvidersConfig(**t.data)
+        if "online" in data and not providers.online:
+            raise ManifestError(
+                message="[online] needs [providers].online",
+                cause="Online components are installed by an online provider (e.g. \"pacman\").",
+                failed_operation="Validate [providers]",
+            )
 
         t = _Table(data["boot"], "[boot]", {"available": list, "default": str},
                    {"timeout": int, "kernel_args": list, "efi_id": str})
@@ -514,5 +582,6 @@ class Manifest:
             live_files=_parse_live_files(data.get("live_files", [])),
             packages=_parse_packages(data["packages"]) if "packages" in data else None,
             initramfs=_parse_initramfs(data.get("initramfs", {})),
+            online=_parse_online(data["online"]) if "online" in data else None,
             raw_path=raw_path,
         )

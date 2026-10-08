@@ -5,12 +5,12 @@ Produces a validated, staged, non-destructive InstallationPlan.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 import re
 
 from mocinha.core.errors import ResolutionError
 from mocinha.core.events import EventPhase, EventStream
-from mocinha.core.manifest import Manifest
+from mocinha.core.manifest import PACKAGE_NAME, Manifest
 from mocinha.core.plan import InstallationPlan, PlanStep, TargetSummary
 from mocinha.core.probe import DiskDevice, FirmwareType, SystemFacts, SystemProbe
 from mocinha.core.provider import ProviderRegistry
@@ -35,6 +35,11 @@ class UserChoices:
     keymap: Optional[str] = None
     timezone: Optional[str] = None
     selected_services: Set[str] = field(default_factory=set)
+    # Online components (AGENTS.md "Online rules"): None = as the manifest declares;
+    # False = decline optional ones; extra packages/AUR packages chosen by the user
+    online: Optional[bool] = None
+    online_packages: List[str] = field(default_factory=list)
+    aur_packages: List[str] = field(default_factory=list)
 
 
 HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
@@ -243,16 +248,6 @@ class InstallationResolver:
                 is_destructive=False,
                 provider_name="platform",
             ),
-            PlanStep(
-                step_id="configure_user",
-                title=f"Create primary user '{choices.username}' and grant admin capability",
-                description=(
-                    f"Remove live-only users {live_only.users}; create user account in groups "
-                    f"{self.manifest.users.groups}; root account: {root_account}"
-                ),
-                is_destructive=False,
-                provider_name=self.manifest.providers.users,
-            ),
         ]
 
         if self.manifest.providers.initramfs and self.manifest.providers.initramfs.lower() != "none":
@@ -266,7 +261,28 @@ class InstallationResolver:
                 )
             )
 
+        online = self._resolve_online(choices)
+        if online and online["enabled"]:
+            steps.append(PlanStep(
+                step_id="install_online_components",
+                title="Install online components (requires network)",
+                description=self._describe_online(online),
+                is_destructive=False,
+                provider_name=self.manifest.providers.online,
+            ))
+
+        # Accounts after the online components, so skel files they ship reach the primary user
         steps.extend([
+            PlanStep(
+                step_id="configure_user",
+                title=f"Create primary user '{choices.username}' and grant admin capability",
+                description=(
+                    f"Remove live-only users {live_only.users}; create user account in groups "
+                    f"{self.manifest.users.groups}; root account: {root_account}"
+                ),
+                is_destructive=False,
+                provider_name=self.manifest.providers.users,
+            ),
             PlanStep(
                 step_id="configure_services",
                 title="Configure persistent services",
@@ -339,6 +355,7 @@ class InstallationResolver:
             "packages": packages,
             "initramfs_args": list(self.manifest.initramfs.args),
             "efi_id": self.manifest.boot.efi_id or self.manifest.system.id,
+            "online": online,
             "lock_root": not choices.root_password,
             "locale": choices.locale,
             "keymap": choices.keymap,
@@ -365,6 +382,10 @@ class InstallationResolver:
         metadata["release_mounts"] = self._releasable_mounts(disk)
         summary.release_mounts = [mp for _, mp in metadata["release_mounts"]]
 
+        if online and online["enabled"]:
+            summary.online = self._describe_online(online)
+        elif online and online["skipped"]:
+            summary.online_skipped = f"packages {online['skipped']['packages']}, AUR {online['skipped']['aur']}"
         plan = InstallationPlan(summary=summary, steps=steps, metadata=metadata)
         plan.revalidate = lambda: self.revalidate(plan)
         self.events.info(EventPhase.RESOLVE, "Installation plan resolved successfully.")
@@ -438,6 +459,62 @@ class InstallationResolver:
                 possible_recovery="Select a disk with sufficient capacity.",
             )
         return disk
+
+    def _resolve_online(self, choices: UserChoices) -> Optional[Dict[str, Any]]:
+        """The online components of this install, or None when there are none at all."""
+        cfg = self.manifest.online
+        extra = list(choices.online_packages) + list(choices.aur_packages)
+        if cfg is None and not extra:
+            return None
+        if not self.manifest.providers.online:
+            raise ResolutionError(
+                message="Online packages were requested, but this remaster declares no online provider.",
+                cause="[providers].online is not set in the manifest.",
+                failed_operation="Resolve online components",
+                current_state=f"Requested: {extra}",
+                possible_recovery="Use a manifest with an online provider, or install without extra packages.",
+            )
+        bad = [n for n in extra if not PACKAGE_NAME.match(n)]
+        if bad:
+            raise ResolutionError(message=f"Invalid package names: {bad}", cause="Package names are checked before use.",
+                                  failed_operation="Resolve online components")
+        declined = choices.online is False
+        if declined and cfg is not None and not cfg.optional:
+            raise ResolutionError(
+                message="This remaster's online components are required and cannot be declined.",
+                cause="[online].optional = false in the manifest.",
+                failed_operation="Resolve online components",
+                current_state=f"Declared: packages {cfg.packages}, AUR {cfg.aur}",
+                possible_recovery="Connect to a network and install with the online components.",
+            )
+        if declined and extra:
+            raise ResolutionError(message="Extra online packages were requested together with an offline install.",
+                                  cause="The two choices contradict each other.", failed_operation="Resolve online components")
+        declared = {"repositories": [vars(r) for r in cfg.repositories] if cfg else [],
+                    "packages": list(cfg.packages) if cfg else [], "aur": list(cfg.aur) if cfg else []}
+        return {
+            "enabled": not declined,
+            "skipped": declared if declined else None,
+            "repositories": declared["repositories"],
+            "packages": declared["packages"] + [p for p in choices.online_packages if p not in declared["packages"]],
+            "aur": declared["aur"] + [p for p in choices.aur_packages if p not in declared["aur"]],
+            "upgrade": cfg.upgrade if cfg else False,
+            "grub_defaults": dict(cfg.grub_defaults) if cfg else {},
+            "overwrite": list(cfg.overwrite) if cfg else [],
+        }
+
+    @staticmethod
+    def _describe_online(online: Dict[str, Any]) -> str:
+        repos = "; ".join(f"[{r['name']}] SigLevel={r['siglevel']} {r['servers']}" for r in online["repositories"])
+        parts = [f"repositories added to the target: {repos or 'none'}",
+                 f"packages: {online['packages']}",
+                 f"AUR builds (unsigned PKGBUILDs, revisions checked before confirmation): {online['aur']}",
+                 "full upgrade (-Syu) with them" if online["upgrade"] else "no full upgrade (partial upgrade risk)"]
+        if online["overwrite"]:
+            parts.append(f"packages may take over these deployed files: {online['overwrite']}")
+        if online["grub_defaults"]:
+            parts.append(f"/etc/default/grub: {online['grub_defaults']}")
+        return "; ".join(parts)
 
     def revalidate(self, plan: InstallationPlan) -> None:
         """Re-probes the machine right before execution and refuses if the target changed.

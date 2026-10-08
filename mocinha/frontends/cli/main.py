@@ -96,6 +96,9 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
         keymap=args.keymap,
         timezone=args.timezone,
         selected_services=selected_services(manifest, args),
+        online=False if args.offline else None,
+        online_packages=list(args.online_package or []),
+        aur_packages=list(args.aur or []),
     )
     plan = resolver.resolve(choices)
     wire_plan_providers(plan, registry, manifest)
@@ -105,16 +108,64 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
     return plan, context, executor
 
 
+def print_online_report(context) -> None:
+    report = context.metadata.get("online_report")
+    if report:
+        print("ONLINE PREFLIGHT (checked now, before confirmation):")
+        for line in report:
+            print(f"  - {line}")
+        print()
+
+
+def cmd_network(args: argparse.Namespace) -> int:
+    from mocinha.providers.network import select_network_provider
+
+    stream = EventStream()
+    if args.verbose:
+        stream.subscribe(print_event)
+    provider = select_network_provider(create_default_registry(stream))
+    if provider is None:
+        print("No supported network stack is running in this live (NetworkManager, iwd).", file=sys.stderr)
+        return 1
+    try:
+        if args.action == "connect":
+            if not args.ssid:
+                print("connect needs --ssid", file=sys.stderr)
+                return 2
+            password = None
+            if not args.open:
+                import getpass
+                password = getpass.getpass(f"Password for {args.ssid}: ")
+            provider.connect(args.ssid, password, args.device)
+        if args.action == "scan":
+            for net in provider.scan():
+                mark = "*" if net.connected else " "
+                signal = f"{net.signal:>3}%" if net.signal is not None else "   ?"
+                print(f" {mark} {signal}  {net.security:<10} {net.ssid}")
+            return 0
+        st = provider.status()
+        print(f"{st.detail}\nConnected: {'yes' if st.connected else 'no'}")
+        for c in st.connections:
+            print(f"  - {c}")
+        if st.wifi_devices:
+            print(f"Wi-Fi devices: {', '.join(st.wifi_devices)}")
+        return 0 if st.connected or args.action != "status" else 1
+    except Exception as e:
+        print(f"\n{e}\n", file=sys.stderr)
+        return 1
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     stream = EventStream()
     if args.verbose:
         stream.subscribe(print_event)
     try:
-        plan, _, _ = prepare_plan(args, stream)
+        plan, context, _ = prepare_plan(args, stream)
     except Exception as e:
         print(f"\n{e}\n", file=sys.stderr)
         return 1
     print("\n" + plan.to_human_readable() + "\n")
+    print_online_report(context)
     print("Plan validated by all providers (read-only checks).")
     return 0
 
@@ -128,6 +179,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         print(f"Planning failed (no disk was modified):\n{e}", file=sys.stderr)
         return 1
     print("\n" + plan.to_human_readable() + "\n")
+    print_online_report(context)
 
     if not args.confirm:
         print("To proceed with destructive execution, pass --confirm.", file=sys.stderr)
@@ -140,6 +192,13 @@ def cmd_install(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"\n✗ Installation failed:\n{e}\n", file=sys.stderr)
         return 1
+
+
+def add_online_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--offline", action="store_true",
+                   help="Decline the manifest's optional online components (listed as skipped in the plan)")
+    p.add_argument("--online-package", action="append", metavar="PKG", help="Extra package from the repositories (repeatable)")
+    p.add_argument("--aur", action="append", metavar="PKG", help="Extra package built from the AUR (repeatable)")
 
 
 def main() -> None:
@@ -174,6 +233,7 @@ def main() -> None:
     p_plan.add_argument("--keymap", default=None, help="Console keymap; default: keep the live setting")
     p_plan.add_argument("--timezone", default=None, help="Timezone (e.g. Europe/Lisbon); default: keep the live setting")
     p_plan.add_argument("--services", help="Comma-separated requested services")
+    add_online_arguments(p_plan)
     p_plan.set_defaults(func=cmd_plan)
 
     # install
@@ -190,9 +250,18 @@ def main() -> None:
     p_inst.add_argument("--keymap", default=None, help="Console keymap; default: keep the live setting")
     p_inst.add_argument("--timezone", default=None, help="Timezone (e.g. Europe/Lisbon); default: keep the live setting")
     p_inst.add_argument("--services", help="Comma-separated requested services")
+    add_online_arguments(p_inst)
     p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
     p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")
     p_inst.set_defaults(func=cmd_install)
+
+    # network
+    p_net = subparsers.add_parser("network", help="Show or set up the live's network connection")
+    p_net.add_argument("action", choices=["status", "scan", "connect"], nargs="?", default="status")
+    p_net.add_argument("--ssid", help="Wi-Fi network to connect to")
+    p_net.add_argument("--device", help="Wi-Fi device (default: the first one)")
+    p_net.add_argument("--open", action="store_true", help="Open network: do not ask for a password")
+    p_net.set_defaults(func=cmd_network)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

@@ -269,7 +269,8 @@ TARGET_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 def run_in_target(runner: "CommandRunner", target_root: str, cmd: List[str],
                   phase: EventPhase = EventPhase.CONFIGURE, check: bool = True,
-                  input_text: Optional[str] = None, secret_output: bool = False) -> subprocess.CompletedProcess:
+                  input_text: Optional[str] = None, secret_output: bool = False,
+                  network: bool = False) -> subprocess.CompletedProcess:
     """Runs one of the *target's* own tools inside a chroot of the target.
 
     Lives do not necessarily carry the tools the installed system needs
@@ -278,6 +279,9 @@ def run_in_target(runner: "CommandRunner", target_root: str, cmd: List[str],
     API filesystems are mounted the way arch-chroot and CRUX's setup-chroot do
     it -- fresh, non-recursive mounts (so unmounting them cannot propagate to
     the live's own /dev) -- for the duration of the command only.
+
+    network: the live's /etc/resolv.conf is bind-mounted over the target's for
+    the command (arch-chroot always does this), so the target's tools resolve names.
     """
     import shutil
 
@@ -296,6 +300,21 @@ def run_in_target(runner: "CommandRunner", target_root: str, cmd: List[str],
     ]
     if Path("/sys/firmware/efi/efivars").is_dir():
         mounts.append((["mount", "-t", "efivarfs", "efivarfs"], "sys/firmware/efi/efivars"))
+    created_resolv = False
+    if network and Path("/etc/resolv.conf").exists():
+        resolv = root / "etc" / "resolv.conf"
+        if not resolv.exists() and not resolv.is_symlink():
+            resolv.parent.mkdir(parents=True, exist_ok=True)
+            resolv.touch()
+            created_resolv = True
+        if resolv.is_symlink():
+            raise ExecutionError(
+                message="The target's /etc/resolv.conf is a symlink; it cannot be bind-mounted safely.",
+                cause="Binding over a symlink would follow it outside the target file.",
+                failed_operation="Prepare network access in the target chroot",
+                possible_recovery="Declare /etc/resolv.conf as a regular file in [[target_files]].",
+            )
+        mounts.append((["mount", "--bind", "/etc/resolv.conf"], "etc/resolv.conf"))
     done: List[Path] = []
     try:
         for mount_cmd, rel in mounts:
@@ -310,6 +329,8 @@ def run_in_target(runner: "CommandRunner", target_root: str, cmd: List[str],
     finally:
         for point in reversed(done):
             runner.run(["umount", str(point)], phase=phase, check=True)
+        if created_resolv:
+            (root / "etc" / "resolv.conf").unlink()
 
 
 def release_planned_mounts(runner: CommandRunner, context: ExecutionContext, events: EventStream) -> None:

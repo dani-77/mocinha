@@ -10,15 +10,21 @@
 Mocinha is a simple, modular graphical installer, designed primarily for
 distributions, remasters and live systems.
 
-The goal is **not** to rebuild the installed system from the Internet,
-nor to run `debootstrap`, `pacstrap`, `xbps-install` or equivalents to
-obtain a fresh installation.
-
 The base principle is:
 
 **BOOTED LIVE → THE LIVE'S SYSTEM → DISK**
 
-A normal installation must work completely offline. The installed system
+A normal installation must work completely offline when the live ships
+everything it needs. Network is used where it is a real need, and only
+when declared or chosen (revised 2026-10-08, see §22.1):
+
+-   **level A** --- online components on top of a normal install (extra
+    repositories, packages, AUR builds), e.g. what btw-d77's own installer
+    fetches;
+-   **level B** --- a bootstrap install composed at install time (e.g.
+    `pacstrap` from a clean archiso), for distributions designed for
+    online installation, where a purely offline installer would be an
+    obstacle rather than a help. The installed system
 must correspond to the system provided by the live, with only the changes
 needed to turn it into a persistent installation suited to the target
 machine.
@@ -660,7 +666,8 @@ Initially:
 -   not a distro builder;
 -   not an ISO builder;
 -   not a replacement for xbps/pacman/apt/pkgtools;
--   does not install the base from the Internet;
+-   does not install the base from the Internet, except in the explicit
+    bootstrap mode (level B, §22.1);
 -   does not try to support every distribution;
 -   not a general configuration framework;
 -   does not embed distro-specific policies in the core.
@@ -967,31 +974,63 @@ the core, we have work to redo.
 
 Answer with prototypes and real cases, not just architecture on paper.
 
-## 22.1. Future ideas (not planned for implementation)
+## 22.1. Online installation (revised 2026-10-08)
 
-### Optional online components (e.g. a bootloader missing from the live)
+*Why the contract changed:* being 100% offline made Mocinha fall short of
+the remasters' own installers (btw-d77's `d77-install` adds two pacman
+repositories and installs its GRUB theme, skel and extra packages online)
+and made it useless on distributions prepared for online installation,
+such as a clean archiso, where the packages are chosen at install time.
+The rules are in `AGENTS.md` ("Online rules"); the design:
 
-*Context:* a user may want a bootloader the live image does not ship (e.g.
-Limine on btw-d77, whose live only has GRUB). The preferred answer is for the
-remaster to include it in the live image, keeping installation offline.
+### Level A --- online components (implemented first)
 
-*Idea:* let a manifest declare components that may be fetched online when
-absent from the live, e.g. a bootloader package installed into the target
-with the target's own package manager (pacman, pkg, prt-get).
+Manifest `[online]` (plus user additions): extra repositories with their
+signature policy, packages, AUR packages, and settings that only make
+sense with those components (e.g. `GRUB_THEME`). An `online` provider per
+package family (`pacman` first) runs after deployment and before the
+accounts are created, so new skel files reach the primary user:
 
-Constraints if it is ever implemented:
+1.  preflight (before confirmation): connectivity; a throwaway package
+    database (temporary `--dbpath`/config, never the live's) synced with
+    the target's repositories plus the declared ones, proving every
+    package and every AUR build dependency resolves; AUR RPC lookup and
+    the git revision of each AUR package, which the plan shows;
+2.  apply: repositories added to the target's `pacman.conf`, keyring
+    initialized if the target has none, `pacman -S` in the target; AUR
+    packages built by a temporary unprivileged user at the planned
+    revision, installed with `pacman -U`, user removed;
+3.  verify: every package registered, repositories present, build user
+    and build tree gone.
 
--   strictly opt-in and never part of the normal, offline install path;
--   the plan states it explicitly ("requires network: installs `limine`
-    on the target via pacman") and validation fails before any disk is
-    touched if the network or the package is unavailable;
--   native package manager with signature verification only; no raw
-    binary downloads;
--   one mechanism per distribution family, inside the right provider;
-    it must not turn Mocinha into a package manager or bootstrap installer.
+Optional online components can be declined by the user (offline install,
+listed as skipped). Online failure stops the install with a diagnostic
+error.
 
-Open question before any code: does more than one reference target
-need it, and is it cheaper than adding the package to the live image?
+A `network` capability lets every frontend show the connection state and
+connect (wired/Wi-Fi) through the live's own network stack (NetworkManager
+via `nmcli`, iwd via `iwctl`), chosen by what the live actually runs.
+
+### Level B --- bootstrap install (objective, not implemented yet)
+
+A deployment mode where the target is composed from remote repositories
+(`pacstrap` on Arch; `pkg`/`bsdinstall distfetch` on FreeBSD; `prt-get`
+is not a bootstrap tool, so CRUX stays at the offline medium). Needed
+before code:
+
+-   where intent comes from without a remaster manifest: a minimal
+    built-in "bootstrap profile" per family (kernel, base, bootloader
+    package names discovered from the repository, not hard-coded as
+    policy) plus the user's package selection;
+-   package selection UI (groups, search) in the frontends, backed by the
+    same temporary-database queries as level A;
+-   mirrors (keep the live's mirrorlist; never rank silently), keyring
+    initialization, and verification of the bootstrapped base;
+-   the same plan, confirmation, re-check and verify rules as every other
+    install.
+
+Level B must not leak into level A or into the live-copy providers: it is
+one more deployment provider.
 
 ## 23. Philosophy in short
 

@@ -99,12 +99,24 @@ class GrubBootProvider(ProviderContract):
         if extra:
             current = get_default_grub(text, "GRUB_CMDLINE_LINUX").split()
             text = set_default_grub(text, "GRUB_CMDLINE_LINUX", " ".join(current + [a for a in extra if a not in current]))
-        if original is None and (timeout is not None or extra):
+        online = context.metadata.get("online") or {}
+        grub_defaults = online.get("grub_defaults", {}) if online.get("enabled") else {}
+        for key, value in grub_defaults.items():
+            if key == "GRUB_THEME" and not (target_root / value.lstrip("/")).is_file():
+                raise ExecutionError(
+                    message=f"GRUB theme {value} not found on the target.",
+                    cause="[online].grub_defaults sets GRUB_THEME, but the online components did not install it.",
+                    failed_operation="Configure GRUB",
+                    possible_recovery="Check the online package that ships the theme.",
+                )
+            text = set_default_grub(text, key, value)
+        if original is None and (timeout is not None or extra or grub_defaults):
             self.events.action(EventPhase.BOOTLOADER, f"Creating /etc/default/grub (timeout={timeout}, extra kernel args={extra})")
             default_grub.parent.mkdir(parents=True, exist_ok=True)
             default_grub.write_text(text)
         elif original is not None and text != original:
-            self.events.action(EventPhase.BOOTLOADER, f"Updating /etc/default/grub (timeout={timeout}, extra kernel args={extra})")
+            self.events.action(EventPhase.BOOTLOADER, f"Updating /etc/default/grub (timeout={timeout}, extra kernel args={extra}, "
+                                                      f"online settings={grub_defaults})")
             default_grub.write_text(text)
 
         run_in_target(self.runner, str(target_root), ["grub-mkconfig", "-o", "/boot/grub/grub.cfg"],
@@ -133,10 +145,14 @@ class GrubBootProvider(ProviderContract):
         root_uuid = read_blkid_uuid(self.runner, context.target_partitions["root"], EventPhase.VERIFY)
         # Kernel paths in grub.cfg are relative to the filesystem holding /boot
         boot_fs_root = boot_dir if boot_dir.is_mount() else target_root
-        kernels = re.findall(r"^\s*linux\s+(\S+)\s+(.*)$", cfg, re.M)
+        # Only entries of the system's kernels must boot the target root; other 'linux'
+        # entries (e.g. memtest86+'s EFI binary) are tools without a root= argument.
+        kernel_names = {Path(str(e["kernel"])).name for e in context.metadata.get("boot_entries") or []}
+        is_kernel = (lambda p: Path(p).name in kernel_names) if kernel_names else (lambda p: Path(p).name.startswith("vmlinuz"))
+        kernels = [(p, a) for p, a in re.findall(r"^\s*linux\s+(\S+)\s*(.*)$", cfg, re.M) if is_kernel(p)]
         problems = []
         if not kernels:
-            problems.append("no 'linux' entry in grub.cfg")
+            problems.append(f"no 'linux' entry for the system's kernels {sorted(kernel_names) or 'vmlinuz*'} in grub.cfg")
         for path, args in kernels:
             if not (boot_fs_root / path.lstrip("/")).is_file():
                 problems.append(f"kernel {path} referenced by grub.cfg does not exist")

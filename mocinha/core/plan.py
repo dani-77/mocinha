@@ -46,6 +46,8 @@ class TargetSummary:
     keymap: Optional[str] = None
     timezone: Optional[str] = None
     live_only_users: List[str] = field(default_factory=list)
+    online: Optional[str] = None           # what will be fetched, or None when nothing is online
+    online_skipped: Optional[str] = None   # declared online components the user declined
 
 
 @dataclass
@@ -88,6 +90,11 @@ class InstallationPlan:
             lines.append(f"Live-only Users:  {', '.join(self.summary.live_only_users)} (removed)")
         if self.summary.live_only_removed:
             lines.append(f"Live-only Clean:  {', '.join(self.summary.live_only_removed)}")
+
+        if self.summary.online:
+            lines.append(f"Online (network): {self.summary.online}")
+        if self.summary.online_skipped:
+            lines.append(f"Online SKIPPED:   {self.summary.online_skipped} (declined by the user)")
 
         lines.append("\nSTAGED EXECUTION STEPS:")
         lines.append("------------------------------------------------------------")

@@ -15,6 +15,9 @@ cmdline_param() {
 
 BOOTLOADER="$(cmdline_param mocinha.bootloader || echo grub)"
 LOGREL="$(cmdline_param mocinha.logdir || echo tools/qemu/logs/default)"
+# mocinha.offline=1: decline the manifest's online components; mocinha.aur=<pkg>: add an AUR build
+OFFLINE="$(cmdline_param mocinha.offline || true)"
+AUR="$(cmdline_param mocinha.aur || true)"
 
 echo "=== MOCINHA AUTOMATED TEST (bootloader=$BOOTLOADER) ==="
 
@@ -29,6 +32,8 @@ COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
         --user dani --password mocinha-test --hostname btw-test
         --locale pt_PT.UTF-8 --keymap pt-latin1 --timezone Europe/Lisbon
         --kernel-args "console=tty1 console=ttyS0,115200")
+[ "$OFFLINE" = 1 ] && COMMON+=(--offline)
+[ -n "$AUR" ] && COMMON+=(--aur "$AUR")
 
 # Live facts useful for reconciling the manifest with the real remaster
 {
@@ -39,6 +44,7 @@ COMMON=(--manifest "$MANIFEST" --disk /dev/vda --bootloader "$BOOTLOADER"
 } > "$LOGDIR/live-facts.log" 2>&1
 
 ./bin/mocinha probe > "$LOGDIR/probe.log" 2>&1 || true
+./bin/mocinha network status > "$LOGDIR/network.log" 2>&1 || true
 ./bin/mocinha plan "${COMMON[@]}" > "$LOGDIR/plan.log" 2>&1 || true
 
 ./bin/mocinha install "${COMMON[@]}" --confirm 2>&1 | tee "$LOGDIR/install.log"

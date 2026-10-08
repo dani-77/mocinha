@@ -74,6 +74,8 @@ class MocinhaGTKApp(Gtk.Window):
         self._page_user = self._create_user_page()
         self._page_services = self._create_services_page()
         self._page_boot = self._create_boot_page()
+        # Only for remasters with an online provider (AGENTS.md "Online rules")
+        self._page_online = self._create_online_page() if self.manifest.providers.online else None
         self._page_summary = self._create_summary_page()
         self._page_progress = self._create_progress_page()
         self._page_finish = self._create_finish_page()
@@ -84,6 +86,7 @@ class MocinhaGTKApp(Gtk.Window):
             ("user", self._page_user),
             ("services", self._page_services),
             ("boot", self._page_boot),
+        ] + ([("online", self._page_online)] if self._page_online else []) + [
             ("summary", self._page_summary),
             ("progress", self._page_progress),
             ("finish", self._page_finish),
@@ -318,6 +321,135 @@ class MocinhaGTKApp(Gtk.Window):
         box.pack_start(self.boot_combo, False, False, 0)
         return box
 
+    def _create_online_page(self) -> Gtk.Widget:
+        from mocinha.providers.network import select_network_provider
+
+        self.network_provider = select_network_provider(self.registry)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{side}")(20 if side in ("top", "bottom") else 30)
+
+        title = Gtk.Label()
+        title.set_markup("<span size='x-large' weight='bold'>Network &amp; Online Components</span>")
+        title.set_alignment(0, 0.5)
+        box.pack_start(title, False, False, 0)
+
+        # --- network connection (the live's own stack)
+        self.net_status = Gtk.Label(label="Checking the network...")
+        self.net_status.set_alignment(0, 0.5)
+        self.net_status.set_line_wrap(True)
+        box.pack_start(self.net_status, False, False, 0)
+
+        self.wifi_store = Gtk.ListStore(str, str, str)  # ssid, signal, security
+        wifi_view = Gtk.TreeView(model=self.wifi_store)
+        for i, col in enumerate(("Wi-Fi network", "Signal", "Security")):
+            wifi_view.append_column(Gtk.TreeViewColumn(col, Gtk.CellRendererText(), text=i))
+        self.wifi_view = wifi_view
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_height(120)
+        scroll.add(wifi_view)
+        box.pack_start(scroll, True, True, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.wifi_password = Gtk.Entry()
+        self.wifi_password.set_visibility(False)
+        self.wifi_password.set_placeholder_text("Wi-Fi password (empty for open networks)")
+        row.pack_start(self.wifi_password, True, True, 0)
+        self.btn_connect = Gtk.Button(label="Connect")
+        self.btn_connect.connect("clicked", self._on_wifi_connect)
+        row.pack_start(self.btn_connect, False, False, 0)
+        btn_scan = Gtk.Button(label="Scan")
+        btn_scan.connect("clicked", lambda _b: self._network_task(self._network_refresh_work))
+        row.pack_start(btn_scan, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        if self.network_provider is None:
+            self.net_status.set_text("No supported network stack is running in this live (NetworkManager, iwd). "
+                                     "Online components need a working connection.")
+            for w in (wifi_view, self.wifi_password, self.btn_connect, btn_scan):
+                w.set_sensitive(False)
+        else:
+            GLib.idle_add(lambda: self._network_task(self._network_refresh_work) and False)
+
+        # --- online components
+        online = self.manifest.online
+        self.online_check = Gtk.CheckButton()
+        if online:
+            names = ", ".join(online.packages + [f"{a} (AUR)" for a in online.aur])
+            self.online_check.set_label(f"Install the online components of {self.manifest.system.name}: {names}")
+            self.online_check.set_active(True)
+            self.online_check.set_sensitive(online.optional)
+            if not online.optional:
+                self.online_check.set_tooltip_text("Required by this remaster")
+        else:
+            self.online_check.set_label("This remaster declares no online components")
+            self.online_check.set_sensitive(False)
+        self.online_check.get_child().set_line_wrap(True)
+        box.pack_start(self.online_check, False, False, 0)
+
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6)
+        self.entry_online_packages = Gtk.Entry()
+        self.entry_online_packages.set_placeholder_text("extra packages from the repositories, space-separated")
+        self.entry_aur_packages = Gtk.Entry()
+        self.entry_aur_packages.set_placeholder_text("packages built from the AUR (unsigned PKGBUILDs)")
+        for i, (label, entry) in enumerate((("Extra packages:", self.entry_online_packages),
+                                            ("AUR packages:", self.entry_aur_packages))):
+            lbl = Gtk.Label(label=label)
+            lbl.set_alignment(0, 0.5)
+            entry.set_hexpand(True)
+            grid.attach(lbl, 0, i, 1, 1)
+            grid.attach(entry, 1, i, 1, 1)
+        box.pack_start(grid, False, False, 0)
+        return box
+
+    # Network calls block (subprocesses); they run in a thread and touch widgets via idle_add only
+    def _network_task(self, work) -> bool:
+        threading.Thread(target=work, daemon=True).start()
+        return False
+
+    def _network_refresh_work(self) -> None:
+        try:
+            status = self.network_provider.status()
+            nets = self.network_provider.scan() if status.wifi_devices else []
+            GLib.idle_add(self._network_show, status, nets, None)
+        except MocinhaError as err:
+            GLib.idle_add(self._network_show, None, [], str(err))
+
+    def _network_show(self, status, nets, error) -> bool:
+        if error:
+            self.net_status.set_text(f"Network error:\n{error}")
+            return False
+        state = "Connected" if status.connected else "Not connected"
+        conns = "; ".join(status.connections) or "no active connection"
+        wifi = "" if status.wifi_devices else " No Wi-Fi device."
+        self.net_status.set_text(f"{state} ({status.detail}): {conns}.{wifi}")
+        self.wifi_store.clear()
+        for n in nets:
+            self.wifi_store.append([("● " if n.connected else "") + n.ssid,
+                                    f"{n.signal}%" if n.signal is not None else "?", n.security])
+        return False
+
+    def _on_wifi_connect(self, _button: Gtk.Button) -> None:
+        model, it = self.wifi_view.get_selection().get_selected()
+        if it is None:
+            self._show_error_dialog("Wi-Fi", "Select a network first.")
+            return
+        ssid = model[it][0].removeprefix("● ")
+        password = self.wifi_password.get_text() or None
+        self.net_status.set_text(f"Connecting to {ssid}...")
+        self.btn_connect.set_sensitive(False)
+
+        def work() -> None:
+            try:
+                self.network_provider.connect(ssid, password)
+                GLib.idle_add(self.wifi_password.set_text, "")
+            except MocinhaError as err:
+                GLib.idle_add(self._network_show, None, [], str(err))
+            finally:
+                GLib.idle_add(self.btn_connect.set_sensitive, True)
+            self._network_refresh_work()
+
+        self._network_task(work)
+
     def _create_summary_page(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         box.set_margin_top(20)
@@ -408,7 +540,8 @@ class MocinhaGTKApp(Gtk.Window):
                 return
 
         # Before entering Summary, resolve the plan!
-        if current_name == "boot":
+        next_name = self.pages[self.current_step_index + 1][0] if self.current_step_index + 1 < len(self.pages) else None
+        if next_name == "summary":
             try:
                 self._resolve_and_update_summary()
             except MocinhaError as err:
@@ -474,6 +607,10 @@ class MocinhaGTKApp(Gtk.Window):
             hostname=hostname,
             selected_services=selected_srvs,
         )
+        if self._page_online is not None:
+            choices.online = None if self.online_check.get_active() or not self.manifest.online else False
+            choices.online_packages = self.entry_online_packages.get_text().split()
+            choices.aur_packages = self.entry_aur_packages.get_text().split()
 
         from mocinha.providers import wire_plan_providers
 
@@ -486,7 +623,11 @@ class MocinhaGTKApp(Gtk.Window):
         self.executor.preflight(plan, self.execution_context)
         self.resolved_plan = plan
         buf = self.summary_text_view.get_buffer()
-        buf.set_text(self.resolved_plan.to_human_readable())
+        report = self.execution_context.metadata.get("online_report")
+        text = self.resolved_plan.to_human_readable()
+        if report:
+            text += "\n\nONLINE PREFLIGHT (checked now, before confirmation):\n" + "\n".join(f"  - {l}" for l in report)
+        buf.set_text(text)
 
     def _confirm_destruction_dialog(self) -> bool:
         disk = self.resolved_plan.summary.disk if self.resolved_plan else "target disk"
@@ -507,7 +648,7 @@ class MocinhaGTKApp(Gtk.Window):
         return response == Gtk.ResponseType.OK
 
     def _start_execution(self) -> None:
-        self.current_step_index = 6  # Progress page
+        self.current_step_index = [name for name, _ in self.pages].index("progress")
         self.stack.set_visible_child_name("progress")
         self._update_nav_buttons()
 

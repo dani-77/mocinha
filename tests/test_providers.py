@@ -436,7 +436,9 @@ class TestProviders(unittest.TestCase):
         (grub / "i386-pc").mkdir(parents=True)
         (grub / "i386-pc" / "core.img").write_bytes(b"core")
         (self.target / "boot" / "vmlinuz-linux").write_bytes(b"k")
-        good = "linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw console=ttyS0 loglevel=3 quiet\n"
+        good = ("linux /boot/vmlinuz-linux root=UUID=1234-ROOT rw console=ttyS0 loglevel=3 quiet\n"
+                "linux /boot/memtest86+/memtest86x64.efi\n")  # regression (btw-d77 online): tools have no root=
+        self.context.metadata["boot_entries"] = [{"name": "linux", "kernel": "/boot/vmlinuz-linux", "initrd": "/boot/initramfs-linux.img"}]
         (grub / "grub.cfg").write_text(good)
         provider.verify(self.context)
         for bad in ("linux /boot/vmlinuz-missing root=UUID=1234-ROOT rw console=ttyS0\n",

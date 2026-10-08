@@ -1,9 +1,11 @@
 # Mocinha Installer
 
 A small, modular, platform-aware installer for live systems: it installs
-the booted live system to disk, offline, after showing a complete plan
-(where the live is only an installation environment, as on CRUX, it
-installs the packages on the live medium instead).
+the booted live system to disk after showing a complete plan --- offline
+when the live ships everything (where the live is only an installation
+environment, as on CRUX, from the packages on the live medium), plus
+online components only where the remaster declares them or the user asks
+for them (e.g. btw-d77's extra repositories, AUR packages).
 
 *Knowledgeable, not opinionated.*
 

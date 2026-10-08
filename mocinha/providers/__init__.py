@@ -17,6 +17,9 @@ from mocinha.providers.filesystem.mkfs import LinuxMkfsProvider
 from mocinha.providers.filesystem.newfs import FreeBSDNewfsProvider
 from mocinha.providers.initramfs.dracut import DracutProvider
 from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
+from mocinha.providers.network.iwd import IwdProvider
+from mocinha.providers.network.networkmanager import NetworkManagerProvider
+from mocinha.providers.online.pacman import PacmanOnlineProvider
 from mocinha.providers.platform.freebsd import FreeBSDPlatformProvider
 from mocinha.providers.platform.linux import LinuxPlatformProvider
 from mocinha.providers.services.crux_sysv import CruxSysvServiceProvider
@@ -72,6 +75,13 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("bootloader", LimineBootProvider("limine", event_stream))
     registry.register("bootloader", GrubBootProvider("grub", event_stream))
     registry.register("bootloader", FreeBSDBootProvider("freebsd-loader", event_stream))
+
+    # Online components (AGENTS.md "Online rules", level A)
+    registry.register("online", PacmanOnlineProvider("pacman", event_stream))
+
+    # Network connection in the live (rule 7); NetworkManager first: it may drive iwd as its backend
+    registry.register("network", NetworkManagerProvider("networkmanager", event_stream))
+    registry.register("network", IwdProvider("iwd", event_stream))
 
     # Users
     registry.register("users", ShadowUsersProvider("shadow", event_stream))
@@ -133,6 +143,9 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
         "target_verify": (plat_prov, None, plat_prov.verify),
         "target_unmount": (plat_prov, plat_prov.unmount_target, plat_prov.verify_unmounted),
     }
+    if any(step.step_id == "install_online_components" for step in plan.steps):
+        online_prov = require("online", manifest.providers.online)
+        bindings["install_online_components"] = (online_prov, online_prov.apply, online_prov.verify)
     if init_prov is not None:
         bindings["configure_initramfs"] = (init_prov, init_prov.apply, init_prov.verify)
 

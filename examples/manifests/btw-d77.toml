@@ -36,6 +36,7 @@ users = "shadow"
 initramfs = "mkinitcpio"
 services = "arch-systemd"
 sysconfig = "systemd"
+online = "pacman"
 
 [boot]
 # The live ships grub + efibootmgr only (packages.x86_64), as d77-install uses GRUB.
@@ -292,3 +293,47 @@ content = '''
 path = "/etc/motd"
 mode = "0644"
 content = ""
+
+# Online components: what d77-install's archinstall custom-commands fetch.
+# d77-install adds [custom] and [chaotic-aur] to the target's pacman.conf and
+# runs "pacman -S d77-qtile-skel d77-grub-theme qtile-extras arc-gtk-theme
+# nwg-launchers otf-font-awesome-4 ttf-font-awesome-4" (with "|| true": a
+# network failure there is silent; here it stops the install), then sets
+# GRUB_THEME. The live already has both repositories in its pacman.conf and
+# all of these packages except d77-qtile-skel and d77-grub-theme.
+[online]
+optional = true        # the user may install offline (no GRUB theme, live skel)
+upgrade = true         # d77-install pacstraps current packages; no partial upgrade
+packages = [
+    "d77-qtile-skel", "d77-grub-theme", "qtile-extras", "arc-gtk-theme",
+    "nwg-launchers", "otf-font-awesome-4", "ttf-font-awesome-4",
+]
+# The live already holds most of d77-qtile-skel's files, copied from its
+# airootfs and owned by no package: 234 under /etc/skel plus the 9 below
+# (computed by comparing the package's file list with airootfs). The
+# package takes them over; nothing else may be overwritten.
+overwrite = [
+    "/etc/skel/*",
+    "/etc/polkit-1/rules.d/50-udisks.rules",
+    "/usr/local/bin/fuzzel-power-menu",
+    "/usr/local/bin/power_menu",
+    "/usr/local/bin/qtile-session",
+    "/usr/local/bin/rofi-power-menu",
+    "/usr/local/bin/screenlock",
+    "/usr/local/bin/wswap-X",
+    "/usr/local/bin/wswap-way",
+    "/usr/share/pixmaps/d77void.png",
+]
+
+[[online.repositories]]
+name = "custom"
+servers = ["https://raw.githubusercontent.com/dani-77/d77-iso/main"]
+siglevel = "Optional TrustAll"
+
+[[online.repositories]]
+name = "chaotic-aur"
+servers = ["https://geo-mirror.chaotic.cx/$repo/$arch", "https://cdn-mirror.chaotic.cx/$repo/$arch"]
+siglevel = "Never"
+
+[online.grub_defaults]
+GRUB_THEME = "/boot/grub/themes/d77-grub-theme/theme.txt"

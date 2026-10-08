@@ -2,6 +2,7 @@
 # run_automated_test.sh --- Automated QEMU install test of Mocinha from a btw-d77 live ISO.
 #
 #   tools/qemu/run_automated_test.sh [--firmware bios|uefi] [--bootloader NAME] [--iso PATH] [--script adversarial.sh]
+#                                    [--offline] [--aur PKG]
 #
 # Boots the btw-d77 live (kernel/initramfs extracted from the ISO itself, the
 # ISO attached as CD-ROM so archiso mounts its real airootfs), logs in as root
@@ -26,12 +27,16 @@ FIRMWARE="bios"
 BOOTLOADER=""
 ISO=""
 SCRIPT="startup.sh"   # adversarial.sh: disk-safety scenarios instead of a normal install
+EXTRA_APPEND=""       # --offline / --aur PKG are passed to startup.sh on the kernel command line
+RUN_SUFFIX=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --firmware) FIRMWARE="$2"; shift 2 ;;
         --bootloader) BOOTLOADER="$2"; shift 2 ;;
         --iso) ISO="$2"; shift 2 ;;
         --script) SCRIPT="$2"; shift 2 ;;
+        --offline) EXTRA_APPEND+=" mocinha.offline=1"; RUN_SUFFIX+="-offline"; shift ;;
+        --aur) EXTRA_APPEND+=" mocinha.aur=$2"; RUN_SUFFIX+="-aur"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -53,6 +58,7 @@ fi
 
 RUN="${FIRMWARE}-${BOOTLOADER}"
 [ "$SCRIPT" = "startup.sh" ] || RUN="${RUN}-${SCRIPT%.sh}"
+RUN="${RUN}${RUN_SUFFIX}"
 WORK="$DIR/work"
 LOGS="$DIR/logs/$RUN"
 KDIR="$WORK/kernel/$(basename "$ISO" .iso)"
@@ -113,7 +119,7 @@ fi
 
 APPEND="archisobasedir=arch archisosearchuuid=$ISO_UUID"
 APPEND+=" console=ttyS0"
-APPEND+=" mocinha.bootloader=$BOOTLOADER mocinha.logdir=tools/qemu/logs/$RUN"
+APPEND+=" mocinha.bootloader=$BOOTLOADER mocinha.logdir=tools/qemu/logs/$RUN$EXTRA_APPEND"
 
 SERIAL_SOCK="$WORK/serial-$RUN.sock"
 rm -f "$SERIAL_SOCK"

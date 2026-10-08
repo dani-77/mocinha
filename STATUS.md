@@ -1,6 +1,12 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-08. VM results were obtained with the code of the sysvd77 commit (the one following `54917c4`) unless stated otherwise; the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4` and not repeated after the sysvd77 changes.
+**Date:** 2026-10-08. VM results were obtained with the code of the online (level A) commit that follows `49d6236`, unless a run says otherwise; the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
+
+**Contract change (2026-10-08):** Mocinha is no longer 100% offline. It is
+offline-first, with online components where they are declared or chosen
+(level A, implemented) and a bootstrap mode composed at install time
+(level B, objective, not implemented). See `AGENTS.md` "Online rules" and
+`plano.md` §22.1.
 **Branch:** `main` (private GitHub repository `dani-77/mocinha`)
 
 This file records what has actually been done and validated, and how. If
@@ -12,7 +18,7 @@ something is not listed as validated here, assume it is not.
 
 | Target | State |
 |---|---|
-| btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO, BIOS/GRUB and UEFI/GRUB. Never run on real hardware. GUI never run on the live. |
+| btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
 | au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
@@ -84,11 +90,17 @@ GUI: the GTK3 frontend has never driven an installation.
 | `rsync-copy` | **no** --- unit tests only | Not referenced by any manifest. |
 | `tar-extract` | **no** --- unit tests only | Not referenced by any manifest. |
 
+| `pacman` (online, level A) | yes (btw-d77, BIOS, network through QEMU user networking) | Preflight on a throwaway package database (temporary `--dbpath`); repositories added to the target's `pacman.conf`; keyring initialized when absent; `pacman -Syu` with the packages and `--overwrite` for declared paths; AUR builds as a temporary user at the revision shown in the plan (`yay-bin` built), user and build tree removed. AUR packages whose dependencies are other AUR packages must all be listed; `check()` is skipped (`makepkg --nocheck`). |
+| `networkmanager` (network) | partly | `status` read in the btw-d77 live (wired); `status` and `scan` against the development host's real NetworkManager and Wi-Fi. **`connect` never run** (it would change the host's connection; QEMU has no Wi-Fi). The password goes through `nmcli --ask` on stdin. |
+| `iwd` (network) | **no** --- unit tests only | Passphrase written to `/var/lib/iwd/<ssid>.psk` (0600) in the live, never on a command line. |
+
 Plan wiring fails on unregistered providers or unknown steps before
 confirmation. No placeholder binaries are written anywhere.
 
 ### Frontends
-- **CLI** (`probe`, `check-manifest`, `plan`, `install`): used for every VM validation.
+- **CLI** (`probe`, `check-manifest`, `plan`, `install`, `network`): used for every VM validation.
+  Online: `--offline`, `--online-package`, `--aur`; the online preflight
+  report is printed with the plan.
   User, password and hostname are required; passwords are given on the
   command line (visible in `ps`).
 - **GTK3 wizard**: only **rendered offscreen** on the development host with
@@ -96,7 +108,10 @@ confirmation. No placeholder binaries are written anywhere.
   never ran an installation, never run on FreeBSD. It has root password and
   password confirmation fields; no locale, keymap, timezone or kernel-argument
   fields (the live's settings are kept). The hostname is pre-filled with
-  `[system].id`.
+  `[system].id`. A "Network & Online Components" page (connection state,
+  Wi-Fi list and connect, decline/extra/AUR packages) appears for remasters
+  with an online provider; it too was only rendered offscreen with simulated
+  network data.
 - The CRUX live runs Python 3.12, which evaluates annotations at import time;
   the development host has 3.14 (lazy), so a forward reference passed the unit
   tests and failed in the VM. `tests/test_import_portability.py` now checks
@@ -105,7 +120,7 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 109 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 125 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -129,9 +144,9 @@ confirmation. No placeholder binaries are written anywhere.
 Harness:
 
 ```
-tools/qemu/run_automated_test.sh --firmware bios|uefi [--bootloader NAME] [--iso PATH]
+tools/qemu/run_automated_test.sh --firmware bios|uefi [--bootloader NAME] [--iso PATH] [--offline] [--aur PKG]
 tools/qemu/test_boot_installed.py --firmware bios|uefi --disk tools/qemu/work/target-<run>.qcow2 \
-    --expect tools/qemu/expect/btw-d77.json
+    --expect tools/qemu/expect/btw-d77.json   # or btw-d77-aur.json / btw-d77-offline.json
 ```
 
 The live is booted from the ISO's own kernel/initramfs (the ISO's boot menu is
@@ -142,8 +157,9 @@ over serial.
 
 | Run | Install | Boot | Equivalence check |
 |---|---|---|---|
-| BIOS + GRUB | pass | pass | pass |
-| UEFI + GRUB | pass | pass | pass |
+| BIOS + GRUB, online components + `--aur yay-bin` | pass (16 steps verified) | pass | pass (`btw-d77-aur.json`) |
+| UEFI + GRUB, `--offline` (online components declined) | pass | pass | pass (`btw-d77-offline.json`) |
+| BIOS + GRUB / UEFI + GRUB without online components (sysvd77 code, `49d6236`) | pass | pass | pass |
 | UEFI + Limine (earlier code, `e8bd6ee`) | refused at validation, before any disk write (no Limine in the live) | --- | --- |
 
 Checked on the installed system: hostname; only user `dani` (uid 1000, groups
@@ -152,6 +168,11 @@ enabled; live units and not-selected `sshd`/`iwd` disabled; greetd
 greeter-only; `/etc/resolv.conf` written by NetworkManager; locale
 `pt_PT.UTF-8` generated, keymap `pt-latin1`, timezone `Europe/Lisbon`;
 default target `graphical.target`; `systemctl is-system-running` = running.
+Online run: `[custom]` and `[chaotic-aur]` in `pacman.conf`;
+`d77-qtile-skel`, `d77-grub-theme` (and `yay-bin`) installed; `GRUB_THEME`
+set; `/etc/skel` owned by `d77-qtile-skel`; no build user or build tree left.
+Offline run: none of these packages, no `GRUB_THEME`, `/etc/skel` owned by
+no package.
 
 Differences from what `d77-install` produces (not covered by the check, or
 checked differently):
@@ -162,9 +183,14 @@ checked differently):
    partition, a 1 GiB ESP and the root partition; Mocinha uses DOS on BIOS and
    GPT (ESP + root) on UEFI.
 3. **Packages:** the target keeps the live package set (e.g. archinstall,
-   dialog, reflector, iwd, openssh); only their services are disabled.
-4. **GRUB theme:** `d77-grub-theme` is not in the live (d77-install installs it
-   online). No removable-media fallback (`\EFI\BOOT\BOOTX64.EFI`) for GRUB, so
+   dialog, reflector, iwd, openssh), upgraded with `-Syu` when the online
+   components are installed; only their services are disabled.
+4. **Online components:** installed like d77-install's custom-commands
+   (`[custom]`, `[chaotic-aur]`, the same seven packages, `GRUB_THEME`), but a
+   network failure stops the install, where d77-install ignores it (`|| true`).
+   The live already ships 243 of `d77-qtile-skel`'s files from its airootfs
+   (owned by no package); the manifest lets the package take over exactly
+   those (`[online].overwrite`). No removable-media fallback (`\EFI\BOOT\BOOTX64.EFI`) for GRUB, so
    UEFI boot relies on the NVRAM entry.
 5. No LUKS, btrfs or swapfile options.
 
@@ -175,8 +201,10 @@ links; not-selected services left enabled; `uninitialized` machine-id
 re-enabling units on first boot; dangling `/etc/resolv.conf`; hostname never
 written.
 
-Re-run with the sysvd77 code (target tools in a chroot, sysconfig split):
-BIOS + GRUB and UEFI + GRUB, install, boot and equivalence pass.
+Problems found by the online runs and fixed: the throwaway cache directory
+did not exist; file conflicts with the live's airootfs copies of
+`d77-qtile-skel`; the GRUB check required `root=` on memtest86+'s entry
+(only the system's kernels are checked now).
 
 ### Disk-safety adversarial runs (code of `54917c4`; not repeated after the sysvd77 changes)
 
@@ -212,8 +240,8 @@ chosen at install time, and diagnostics read in single-user mode.
 
 | Run | Install | Boot | Equivalence check |
 |---|---|---|---|
-| BIOS live -> install | pass (14 steps verified; re-run with the sysvd77 code) | --- | --- |
-| Installed disk, BIOS | --- | pass (re-run with the sysvd77 code) | pass |
+| BIOS live -> install | pass (14 steps verified; re-run with the online code) | --- | --- |
+| Installed disk, BIOS | --- | pass (re-run with the online code) | pass |
 | Installed disk, UEFI (empty NVRAM, removable path) | --- | pass (run 3 times, code of `54917c4`) | pass |
 
 The **au-d77 live image does not boot under OVMF**: its 32 MiB ESP is
@@ -268,6 +296,7 @@ and sends the diagnostics to the serial port.
 |---|---|---|---|
 | BIOS + GRUB (GPT, BIOS boot partition) | pass (16 steps verified) | pass | pass |
 | UEFI + GRUB | pass | pass (NVRAM from the install) | pass |
+| BIOS + GRUB, re-run with the online code (step order changed) | pass | pass | pass |
 
 One UEFI boot-proof attempt failed before QEMU's monitor socket accepted a
 connection while another VM was running; the cause was not identified and the
@@ -338,4 +367,8 @@ floppy listed as a disk by the probe.
   `[users].groups` and sudo/doas rules as `[[target_files]]`. To be decided.
 - Package-based deployment checks values whose data the live lacks (CRUX:
   timezone) only after deployment.
-- Future idea, not planned: optional online components (`plano.md` §22.1).
+- Level B (bootstrap install from a clean archiso, packages chosen at
+  install time): objective in the contract, not implemented.
+- Online: Wi-Fi `connect` never validated (NetworkManager or iwd); no network
+  providers for FreeBSD or CRUX; Limine still has to be in the live (the
+  bootloader provider does not use online packages yet).

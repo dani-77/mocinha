@@ -15,8 +15,17 @@ Normal installation means:
 
 **BOOTED LIVE SYSTEM -\> THAT LIVE SYSTEM -\> TARGET DISK**
 
-It is **offline-first**. Network access MUST NOT be required for a
-normal install.
+It is **offline-first, online when declared**:
+
+-   a remaster that ships everything installs without network, always;
+-   network is used only where it is a real need: components the remaster
+    declares as online (e.g. btw-d77's own installer fetches its GRUB theme
+    and skel from extra pacman repositories), or an installation the user
+    composes at install time (e.g. a clean archiso where the packages are
+    chosen on the spot instead of coming from a manifest shipped on the ISO);
+-   online is never a silent fallback for something that failed offline.
+
+See "Online rules" below.
 
 The project philosophy is:
 
@@ -145,14 +154,57 @@ another one. Explain why the choice is invalid.
 
 ## Deployment rules
 
-Normal install copies/extracts the booted live system. It does NOT
-rebuild the base from package repositories.
+Normal install copies/extracts the booted live system, or --- where the
+live is only an installation environment (CRUX) --- installs the packages
+on its medium, offline.
 
-Providers may include squashfs extraction, rsync/filesystem copy, tar or
-another native mechanism.
+Providers may include squashfs extraction, rsync/filesystem copy, tar,
+offline package installation from the medium or another native mechanism.
 
-Network bootstrap (`pacstrap`, `debootstrap`, `xbps-install`, etc.) is
-not the normal installation path.
+Network bootstrap (`pacstrap`, `debootstrap`, `xbps-install`, etc.) is a
+legitimate **explicit deployment mode** (level B below), chosen by the
+user or declared by the manifest. It is never used silently, and never
+replaces a live copy the manifest asked for.
+
+## Online rules
+
+Two levels, both objectives of the project:
+
+-   **Level A --- online components on top of a normal install.** Extra
+    repositories, packages, AUR builds or other remote sources declared
+    by the manifest (or added by the user) and installed into the target
+    after deployment. Implemented first.
+-   **Level B --- bootstrap install.** A system composed at install time
+    from remote repositories (e.g. `pacstrap` from a clean archiso, user
+    choosing the packages). The user's choices take the place of a
+    remaster manifest, but still go through resolver -> plan ->
+    confirmation -> executor -> verify.
+
+Rules for both:
+
+1.  Network availability is a **probed fact**, not an assumption.
+2.  Online actions happen only when **declared or chosen**; the user may
+    decline optional online components, and the plan then lists them as
+    skipped.
+3.  **Every online action is in the plan**: source, repository/URL,
+    package names, and for source builds the exact revision that will be
+    built.
+4.  **Preflight before confirmation**: connectivity, that the sources
+    answer, and that every requested package exists and its dependencies
+    resolve --- without touching the disk or the live's package state.
+5.  **Online failure is a diagnostic error.** Never skip, retry silently
+    into another source, or substitute packages.
+6.  **Trust is explicit**: signature policy comes from the native tool and
+    the manifest; unsigned sources (e.g. `SigLevel = Never`, AUR
+    PKGBUILDs) are shown as such in the plan. Source builds run as an
+    unprivileged temporary user in the target, at the revision shown in
+    the plan, and that user is removed afterwards.
+7.  **Connecting to a network** is a capability of its own (`network`
+    providers per native mechanism: NetworkManager, iwd, ...), selected
+    from what the live actually runs, and usable from every frontend.
+    Mocinha never stores network credentials on the target unless asked.
+8.  Online components are still verified on the target (`verify()`):
+    installed packages, configured repositories, build user removed.
 
 ## Plan-before-destruction rule
 
@@ -256,12 +308,14 @@ metal is for later real validation.
 
 Mocinha is NOT initially:
 
--   a package manager;
+-   a package manager (it drives the native one);
 -   a distro builder;
 -   an ISO builder;
 -   a general configuration-management framework;
--   an Internet bootstrap installer;
--   an excuse to support every distro.
+-   an Internet-only installer: network bootstrap (level B) is one explicit
+    mode, never a requirement of a normal install;
+-   an excuse to support every distro (e.g. SlackBuilds fit the provider
+    model, but Slackware is not a reference target).
 
 Do not expand scope to solve an interesting unrelated problem.
 
@@ -369,7 +423,8 @@ Mocinha 0.0.1 succeeds when a btw-d77 live can:
 4.  configure required user/location/boot choices;
 5.  display a complete validated plan;
 6.  receive explicit confirmation;
-7.  install the live system offline;
+7.  install the live system offline (declared online components are an
+    explicit addition, not a requirement);
 8.  configure intended persistent services;
 9.  install/configure a supported bootloader;
 10. verify enough target state to catch obvious failure;

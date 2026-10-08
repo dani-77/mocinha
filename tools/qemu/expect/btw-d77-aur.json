@@ -1,5 +1,5 @@
 {
-  "_comment": "Expected state derived by reading btw-d77's installer (d77-install + d77-archinstall.json); hostname, user and locale are the test's choices. Differs from d77-install on purpose in root_locked (d77-install always sets a root password; this test exercises Mocinha's locked-root choice). Online components (d77-install's custom-commands) are installed: [custom]/[chaotic-aur] packages, GRUB theme; the AUR run adds yay-bin as the user's choice.",
+  "_comment": "btw-d77.json plus yay-bin, built from the AUR as the user's choice (--aur yay-bin).",
   "hostname": "btw-test",
   "users": {
     "dani": "1000"
@@ -40,7 +40,8 @@
   "system_state": "running",
   "packages_present": [
     "d77-qtile-skel",
-    "d77-grub-theme"
+    "d77-grub-theme",
+    "yay-bin"
   ],
   "grub_theme": "GRUB_THEME=\"/boot/grub/themes/d77-grub-theme/theme.txt\"",
   "skel_owner": "d77-qtile-skel",
