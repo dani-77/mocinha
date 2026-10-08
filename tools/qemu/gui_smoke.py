@@ -22,6 +22,27 @@ QEMU_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(QEMU_DIR))
 from test_boot_installed import ppm_to_png  # noqa: E402
 
+# --launcher: open Mocinha the way a desktop menu does (the session spawns the .desktop entry,
+# no terminal), so the elevation goes through pkexec and the session's polkit agent. The live
+# user's password is set to a throwaway value in this VM only (the ISO is not changed).
+LAUNCH_SCRIPT = r"""
+for i in $(seq 90); do s=$(find /run/user -maxdepth 2 -name 'wayland-?' 2>/dev/null | head -n1); [ -n "$s" ] && break; sleep 2; done
+u=$(stat -c %U "$(dirname "$s")"); echo "session=$s user=$u"
+echo "$u:mocinhalive" | chpasswd
+for i in $(seq 90); do q=$(find /home/$u /run/user -name 'qtilesocket.*' 2>/dev/null | head -n1); [ -n "$q" ] && break; sleep 2; done
+echo "qtile socket=$q"; pgrep -a qtile | head -n2
+sleep 5
+su "$u" -c "XDG_RUNTIME_DIR=$(dirname "$s") WAYLAND_DISPLAY=$(basename "$s") qtile cmd-obj -s '$q' -o cmd -f spawn -a 'sh -c \"exec /usr/bin/mocinha > /tmp/mocinha-launch.log 2>&1\"'"
+sleep 10
+echo "--- launch log"; cat /tmp/mocinha-launch.log
+echo "--- processes"; pgrep -a pkexec; pgrep -af polkit-gnome-authentication; pgrep -a polkitd
+echo "--- polkit journal"; journalctl -u polkit -n 15 --no-pager -o cat
+echo "--- agent"; ls -la /usr/lib/polkit-gnome/ 2>&1 | head -3; pgrep -a -u "$u" | head -25
+echo "--- autostart"; ls -la /home/$u/.config/qtile/ 2>&1 | head; grep -n polkit /home/$u/.config/qtile/autostart.sh /home/$u/.config/qtile/config.py 2>&1 | head
+echo MOCINHA_""DIALOG_UP
+"""
+LAUNCH = "bash -c " + "'" + LAUNCH_SCRIPT.replace("'", "'\\''") + "'"
+CHECK = "sleep 15; echo MOCINHA_""AFTER_AUTH; pgrep -a -u root -f 'share/mocinha/bin/mocinha' | head -n2"
 START = ("for i in $(seq 90); do s=$(ls /run/user/*/wayland-? 2>/dev/null | head -n1); [ -n \"$s\" ] && break; sleep 2; done; "
          "export XDG_RUNTIME_DIR=$(dirname \"$s\") WAYLAND_DISPLAY=$(basename \"$s\"); "
          "echo session=$s; pacman -Q mocinha; "
@@ -33,6 +54,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--iso", required=True)
     ap.add_argument("--timeout", type=int, default=400)
+    ap.add_argument("--launcher", action="store_true", help="open it like a desktop menu does (pkexec + polkit agent)")
     args = ap.parse_args()
     iso = Path(args.iso)
     work, logs = QEMU_DIR / "work", QEMU_DIR / "logs" / "gui-smoke"
@@ -71,6 +93,11 @@ def main() -> int:
             (logs / name).write_bytes(ppm_to_png(ppm.read_bytes()))
             print(f"[GUI] screenshot {logs / name}")
 
+        def sendkeys(text: str) -> None:
+            for ch in text:
+                m.sendall(f"sendkey {'ret' if ch == chr(10) else ch}\n".encode())
+                time.sleep(0.08)
+
         out, state, deadline = "", "LOGIN", time.time() + args.timeout
         while time.time() < deadline:
             try:
@@ -81,8 +108,26 @@ def main() -> int:
                 s.sendall(b"root\n")
                 state = "SHELL"
             elif state == "SHELL" and re.search(r"# $", out[-50:]):
-                s.sendall(START.encode() + b"\n")
-                state = "WAIT"
+                s.sendall((LAUNCH if args.launcher else START).encode() + b"\n")
+                state = "DIALOG" if args.launcher else "WAIT"
+            elif state == "DIALOG" and "MOCINHA_DIALOG_UP" in out:
+                shot("polkit-dialog.png")
+                sendkeys("mocinhalive\n")  # letters only: the same on the live's pt and us layouts
+                s.sendall(CHECK.encode() + b"\n")
+                state = "AUTH"
+            elif state == "AUTH" and "MOCINHA_AFTER_AUTH" in out:
+                time.sleep(3)
+                try:
+                    out += s.recv(65536).decode(errors="replace")
+                except socket.timeout:
+                    pass
+                shot("mocinha-after-auth.png")
+                ok = "/usr/share/mocinha/bin/mocinha" in out[out.find("MOCINHA_AFTER_AUTH"):]
+                (logs / "serial.log").write_text(out)
+                print(out[out.find("MOCINHA_AFTER_AUTH"):][:800])
+                print("LAUNCHER PASSED: Mocinha runs as root after polkit authentication" if ok
+                      else "LAUNCHER FAILED: no root Mocinha process after authentication")
+                return 0 if ok else 1
             elif state == "WAIT" and "MOCINHA_GUI_STARTED" in out:
                 time.sleep(3)
                 try:

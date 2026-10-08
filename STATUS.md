@@ -18,9 +18,11 @@ something is not listed as validated here, assume it is not.
 
 | Target | State |
 |---|---|
-| btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
+| btw-d77 (Arch + systemd) | **Installed on real hardware** (ThinkPad X61, BIOS) through the **GTK3 wizard** of the packaged Mocinha, live copy, Qtile session working --- reported by the maintainer (2026-10-08); not instrumented by the test harness. **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
 | au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
 | Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
+| hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror. Never run on real hardware. |
+| Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
@@ -125,7 +127,7 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 137 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 152 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -398,6 +400,50 @@ no `chpasswd` in CRUX's shadow; no `/etc/default/grub` in CRUX's grub2; a
 floppy listed as a disk by the probe.
 
 ---
+
+### hybrid-d77 and official Chimera --- `tools/qemu/run_chimera_test.sh` + `test_boot_chimera.py`
+
+The live is booted from the ISO's kernel/initrd with its GRUB boot line plus a
+serial console (Chimera's `dinit-agetty` starts a getty per active console);
+root logs in with Chimera's documented live password. Expectations in
+`tools/qemu/expect/{hybrid-d77,hybrid-d77-mirror,chimera-gnome,chimera-bootstrap}.json`.
+
+| Run | Install | Boot | Equivalence check |
+|---|---|---|---|
+| hybrid-d77 sway 20261005, BIOS + GRUB | pass (15 steps; 218 520 entries verified) | pass | pass |
+| hybrid-d77 sway 20261005, UEFI + GRUB `--removable`, mirror `chimera.sakamoto.pl` | pass | pass | pass |
+| official Chimera GNOME 20251220, BIOS + GRUB (`chimera-gnome`) | pass (79 741 entries verified) | pass (`gdm`, `networkmanager` running; no live autologin) | pass |
+| official Chimera GNOME 20251220, UEFI, level B (`chimera-bootstrap`, mirror) | pass (513 packages) | pass | pass |
+
+Differences from chimera-installer: Mocinha partitions automatically (the
+installer opens cfdisk); with `chimera-gnome` the services the live session
+runs (gdm, networkmanager, polkitd, rtkit, syslog-ng) are pre-selected,
+where chimera-installer enables none (its GNOME install boots without GDM);
+locale changes are refused (musl).
+
+Problems found and fixed: **tree-copy lost data** --- tar exclusion patterns
+are unanchored, so `./dev/*` dropped every nested directory named
+dev/tmp/mnt/proc (a kernel module directory on Chimera; on FreeBSD e.g.
+`/usr/include/dev`). **au-d77 installs made before this fix were affected and
+the earlier au-d77 validation did not detect it** (not quantified); au-d77 was
+re-run with the fix (142 311 entries verified). Also: Chimera's `chpasswd`
+without `-c` exited 0 and wrote nothing (passwords now verified as real
+hashes); `apk --simulate` cannot create a throwaway database.
+
+### Launcher (desktop menu) elevation
+
+Reported on the X61: Mocinha did not open from fuzzel, only from a terminal.
+The wrapper used sudo, which cannot ask without a terminal. Fixed: without a
+terminal it now uses pkexec with a polkit action (`org.mocinha.installer`) and
+a helper that only accepts the session's display variables. In QEMU the
+session (Qtile spawn, as fuzzel does) reached `pkexec`, but **no dialog
+appears on btw-d77 because its live session runs no polkit agent**: the ISO
+ships `/etc/skel/.config/qtile/autostart.sh` with mode 644 (mkarchiso resets
+airootfs modes; `profiledef.sh` has no `file_permissions` entry for it), so
+`subprocess.call` fails and nothing in it runs (no polkit agent, dunst,
+udiskie, wlsunset, swayidle). The same 644 file reaches an offline install;
+with the online components `d77-qtile-skel` restores 755. Remaster issue,
+not changed here.
 
 ## Open issues and debt
 
