@@ -151,8 +151,9 @@ class TestPacmanOnline(unittest.TestCase):
         self.online.update(packages=[], aur=["yay-bin"])
         info = {"yay-bin": {"Name": "yay-bin", "PackageBase": "yay-bin", "Version": "1", "Depends": ["git"], "MakeDepends": []}}
         revs = iter(["aaaa1111", "bbbb2222"])
-        self.provider.runner.run = lambda cmd, **kw: ok(f"{next(revs)}\tHEAD\n") if cmd[:2] == ["git", "ls-remote"] else ok("x 1 core\n")
+        self.provider.runner.run = lambda cmd, **kw: ok("x 1 core\n")
         with mock.patch("mocinha.providers.online.pacman.shutil.which", return_value="/usr/bin/pacman"), \
+                mock.patch("mocinha.providers.online.pacman.remote_head", side_effect=lambda url: next(revs)), \
                 mock.patch("mocinha.providers.online.pacman.aur_info", return_value=info):
             self.provider.validate(self.context)
             self.assertEqual(self.context.metadata["aur_revisions"], {"yay-bin": "aaaa1111"})
@@ -191,6 +192,26 @@ class TestPacmanOnline(unittest.TestCase):
                 self.provider.verify(self.context)
 
 
+class TestRemoteHead(unittest.TestCase):
+    def test_smart_http_head_parsing(self) -> None:
+        """Regression (official archiso has no git): the revision is read over HTTP."""
+        import io
+        from mocinha.providers.online.pacman import remote_head
+        sha = "13e0a4754d10" + "0" * 28
+
+        def pkt(line: str) -> str:
+            return f"{len(line) + 4:04x}{line}"
+
+        body = pkt("# service=git-upload-pack\n") + "0000" + pkt(f"{sha} HEAD\0multi_ack symref=HEAD:refs/heads/master\n") \
+            + pkt(f"{sha} refs/heads/master\n") + "0000"
+
+        class Resp(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        self.assertEqual(remote_head("https://aur.archlinux.org/yay-bin.git", opener=lambda url, timeout: Resp(body.encode())), sha)
+
+
 class TestNetworkProviders(unittest.TestCase):
     def test_nmcli_terse_escapes(self) -> None:
         self.assertEqual(split_terse(r"*:Caf\:e Wi\\Fi:70:WPA2"), ["*", "Caf:e Wi\\Fi", "70", "WPA2"])
@@ -212,6 +233,10 @@ class TestNetworkProviders(unittest.TestCase):
                "--------------------------------------------------------------------------------\n"
                "  wlan0                 connected\n\n")
         self.assertEqual([r.split()[0] for r in table_rows(out)], ["wlan0"])
+        # Regression (official archiso, no Wi-Fi device): the message is not a device called "No"
+        self.assertEqual(table_rows("                            Devices in Station mode\n"
+                                    "--------------------------------------------------------------------------------\n"
+                                    "  No devices in Station mode available.\n"), [])
         self.assertEqual(psk_file_name("Casa 2"), "Casa 2.psk")
         self.assertEqual(psk_file_name("Café"), "=" + "Café".encode().hex() + ".psk")
         with tempfile.TemporaryDirectory() as tmp:

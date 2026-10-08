@@ -131,7 +131,7 @@ class MocinhaGTKApp(Gtk.Window):
         box.set_margin_end(40)
 
         # Mascot / Logo
-        logo_path = Path(__file__).parent.parent.parent.parent / "mocinha-logo-mascot.png"
+        logo_path = Path(__file__).parent.parent.parent.parent / "assets" / "mocinha-logo-mascot.png"
         if logo_path.is_file():
             try:
                 pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(logo_path), 160, 160, True)

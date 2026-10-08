@@ -58,6 +58,26 @@ def aur_info(names: List[str], opener=urllib.request.urlopen) -> Dict[str, Dict[
     return {r["Name"]: r for r in data.get("results", [])}
 
 
+def remote_head(repo_url: str, opener=urllib.request.urlopen) -> str:
+    """HEAD commit of a git repository over smart HTTP (what 'git ls-remote URL HEAD' prints),
+    so the preflight does not need git on the live (the official archiso has none)."""
+    with opener(f"{repo_url}/info/refs?service=git-upload-pack", timeout=30) as response:
+        data = response.read().decode(errors="replace")
+    pos = 0
+    while pos + 4 <= len(data):
+        size = int(data[pos:pos + 4], 16)
+        if size == 0:
+            pos += 4
+            continue
+        line = data[pos + 4:pos + size]
+        pos += size
+        ref = line.split("\0", 1)[0].strip()
+        if ref.endswith(" HEAD") and re.fullmatch(r"[0-9a-f]{40}", ref.split()[0]):
+            return ref.split()[0]
+    raise ExecutionError(message=f"No HEAD revision in {repo_url}.", cause="Unexpected git smart-HTTP answer.",
+                         failed_operation="Pin AUR revisions")
+
+
 def strip_version(dep: str) -> str:
     return re.split(r"[<>=]", dep, maxsplit=1)[0]
 
@@ -114,10 +134,10 @@ class PacmanOnlineProvider(ProviderContract):
             if not PACKAGE_NAME.match(base):
                 raise ExecutionError(message=f"Unexpected AUR package base {base!r} for {name}.",
                                      cause="The name is used in paths and commands.", failed_operation="Pin AUR revisions")
-            proc = self.runner.run(["git", "ls-remote", AUR_GIT.format(base), "HEAD"], phase=EventPhase.PLAN, check=False)
-            rev = proc.stdout.split()[0] if proc.returncode == 0 and proc.stdout.split() else None
-            if not rev:
-                raise ExecutionError(message=f"Cannot read the AUR git revision of {name}.", cause=proc.stderr.strip(),
+            try:
+                rev = remote_head(AUR_GIT.format(base))
+            except (OSError, ExecutionError) as err:
+                raise ExecutionError(message=f"Cannot read the AUR git revision of {name}.", cause=str(err),
                                      failed_operation="Pin AUR revisions", current_state="No disk has been modified.")
             revisions[name] = rev
             report.append(f"AUR {name} {info[name]['Version']} (base {base}, maintainer "

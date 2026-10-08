@@ -62,6 +62,8 @@ fi
 RUN="${FIRMWARE}-${BOOTLOADER}"
 [ "$SCRIPT" = "startup.sh" ] || RUN="${RUN}-${SCRIPT%.sh}"
 RUN="${RUN}${RUN_SUFFIX}"
+# Runs from another live than btw-d77 (e.g. the official archiso for level B) get their own logs/disk
+case "$(basename "$ISO")" in btw-d77-*) ;; *) RUN="${RUN}-$(basename "$ISO" .iso | cut -d- -f1)" ;; esac
 WORK="$DIR/work"
 LOGS="$DIR/logs/$RUN"
 KDIR="$WORK/kernel/$(basename "$ISO" .iso)"

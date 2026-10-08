@@ -24,8 +24,9 @@ def table_rows(text: str) -> List[str]:
     """Data rows of an iwctl table (after the header separator lines)."""
     lines = [ANSI.sub("", l).rstrip() for l in text.splitlines()]
     seps = [i for i, l in enumerate(lines) if l.strip() and set(l.strip()) <= {"-"}]
-    start = seps[1] + 1 if len(seps) >= 2 else 0
-    return [l for l in lines[start:] if l.strip()]
+    if len(seps) < 2:
+        return []  # no table, e.g. "No devices in Station mode available."
+    return [l for l in lines[seps[1] + 1:] if l.strip() and not l.strip().startswith("No ")]
 
 
 def psk_file_name(ssid: str) -> str:

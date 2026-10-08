@@ -139,6 +139,15 @@ class TestPacstrapProvider(unittest.TestCase):
             with self.assertRaises(VerificationError):  # a dependency is missing
                 self.provider.verify(self.context)
 
+    def test_throwaway_database_reachable_by_pacman_download_user(self) -> None:
+        """Regression (official archiso): pacman 7 downloads as DownloadUser (alpm) inside its sandbox."""
+        from mocinha.providers.pacman_common import scratch_db
+        work = self.root / "scratch"
+        work.mkdir(mode=0o700)  # like tempfile.TemporaryDirectory
+        scratch_db(work, self.conf)
+        for d in (work, work / "db", work / "cache"):
+            self.assertEqual(d.stat().st_mode & 0o777, 0o755, d)
+
     def test_search_output_parsing(self) -> None:
         runner = mock.Mock()
         runner.run.return_value = ok("extra/htop 3.4.1-1\n    Interactive process viewer\ncore/hwdata 0.400-1 [installed]\n    hw ids\n")

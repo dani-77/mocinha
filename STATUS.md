@@ -20,7 +20,7 @@ something is not listed as validated here, assume it is not.
 |---|---|
 | btw-d77 (Arch + systemd) | **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
 | au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
-| Arch bootstrap (level B) | **CLI install + boot validated in QEMU**: a fresh Arch bootstrapped with `pacstrap` from the btw-d77 live (its content is not copied) with the `arch-bootstrap` profile, BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`). **Not run from an upstream archiso.** Never run on real hardware. |
+| Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
@@ -92,9 +92,9 @@ GUI: the GTK3 frontend has never driven an installation.
 | `tar-extract` | **no** --- unit tests only | Not referenced by any manifest. |
 
 | `pacman` (online, level A) | yes (btw-d77, BIOS, network through QEMU user networking) | Preflight on a throwaway package database (temporary `--dbpath`); repositories added to the target's `pacman.conf`; keyring initialized when absent; `pacman -Syu` with the packages and `--overwrite` for declared paths; AUR builds as a temporary user at the revision shown in the plan (`yay-bin` built), user and build tree removed. AUR packages whose dependencies are other AUR packages must all be listed; `check()` is skipped (`makepkg --nocheck`). |
-| `pacstrap` (deployment, level B) | yes (from the btw-d77 live, BIOS and UEFI) | `pacstrap -K` with the live's pacman.conf and mirrorlist; mirrors reported in order, never re-ranked; the whole transaction (178/180 packages) resolved on a throwaway database before confirmation; verify: every resolved package installed, mirrorlist and keyring present. |
+| `pacstrap` (deployment, level B) | yes (official archiso and btw-d77 live, BIOS and UEFI) | `pacstrap -K` with the live's pacman.conf and mirrorlist; mirrors reported in order, never re-ranked; the whole transaction (178/180 packages) resolved on a throwaway database before confirmation; verify: every resolved package installed, mirrorlist and keyring present. |
 | `networkmanager` (network) | partly | `status` read in the btw-d77 live (wired); `status` and `scan` against the development host's real NetworkManager and Wi-Fi. **`connect` never run** (it would change the host's connection; QEMU has no Wi-Fi). The password goes through `nmcli --ask` on stdin. |
-| `iwd` (network) | **no** --- unit tests only | Passphrase written to `/var/lib/iwd/<ssid>.psk` (0600) in the live, never on a command line. |
+| `iwd` (network) | partly | `status` read in the official archiso (no Wi-Fi device; wired default route reported). Scan and connect: unit tests only. Passphrase written to `/var/lib/iwd/<ssid>.psk` (0600) in the live, never on a command line. |
 
 Plan wiring fails on unregistered providers or unknown steps before
 confirmation. No placeholder binaries are written anywhere.
@@ -278,7 +278,7 @@ partitions.
 The Wasp desktop could not be shown in QEMU: FreeBSD's drm-kmod has no KMS
 driver for QEMU's virtual GPUs, so the live session falls back to a shell.
 
-### Arch bootstrap (level B) --- from the btw-d77 2026.10.07 live, profile `examples/manifests/arch-bootstrap.toml`
+### Arch bootstrap (level B) --- profile `examples/manifests/arch-bootstrap.toml`, from the official archiso and the btw-d77 live
 
 Harness: `tools/qemu/run_automated_test.sh --manifest arch-bootstrap [--kernel PKG] [--aur PKG]`,
 expectations `tools/qemu/expect/arch-bootstrap.json` /
@@ -288,8 +288,18 @@ nothing of it reached the target.
 
 | Run | Install | Boot | Equivalence check |
 |---|---|---|---|
-| BIOS + GRUB, kernel `linux-lts` | pass (15 steps verified; 178 packages) | pass | pass |
-| UEFI + GRUB, kernel `linux` + AUR `yay-bin` | pass (180 packages) | pass | pass |
+| official archiso 2026.10.01, BIOS + GRUB, kernel `linux-lts` | pass (178 packages) | pass | pass |
+| official archiso 2026.10.01, UEFI + GRUB, kernel `linux` + AUR `yay-bin` | pass | pass | pass |
+| btw-d77 live, BIOS + GRUB, kernel `linux-lts` (code of `c19a84a`) | pass (15 steps verified; 178 packages) | pass | pass |
+| btw-d77 live, UEFI + GRUB, kernel `linux` + AUR `yay-bin` (code of `c19a84a`) | pass (180 packages) | pass | pass |
+
+The official archiso (live network stack: iwd + systemd-networkd; Mocinha
+selected the `iwd` provider and reported the wired default route) exposed
+three problems the btw-d77 live hid, all fixed: pacman 7's download sandbox
+(`DownloadUser = alpm`, commented out on btw-d77) could not reach the
+throwaway database directory; `iwctl` without a Wi-Fi device was parsed as a
+device named "No"; the AUR revision was read with the live's `git`, which the
+archiso does not ship (now read over git smart HTTP).
 
 Checked: hostname, user `dani` (wheel), root locked, locale/keymap/timezone,
 `NetworkManager` and `systemd-timesyncd` enabled, `greetd`/`sshd`/
@@ -396,8 +406,7 @@ floppy listed as a disk by the probe.
   `[users].groups` and sudo/doas rules as `[[target_files]]`. To be decided.
 - Package-based deployment checks values whose data the live lacks (CRUX:
   timezone) only after deployment.
-- Level B: never run from an upstream archiso (validated from the btw-d77
-  live only); no package-group browsing; Arch family only.
+- Level B: no package-group browsing; Arch family only.
 - Online: Wi-Fi `connect` never validated (NetworkManager or iwd); no network
   providers for FreeBSD or CRUX; Limine still has to be in the live (the
   bootloader provider does not use online packages yet).

@@ -43,6 +43,10 @@ def scratch_db(workdir: Path, live_conf: Path, extra_repositories: Optional[List
     conf.write_text(text)
     for d in ("db", "cache"):
         (workdir / d).mkdir(exist_ok=True)
+    # pacman >= 7 downloads as an unprivileged user (pacman.conf DownloadUser, e.g. alpm)
+    # inside its sandbox; it must be able to reach the throwaway directories.
+    for d in (workdir, workdir / "db", workdir / "cache"):
+        d.chmod(0o755)
     return ["--config", str(conf), "--dbpath", str(workdir / "db"), "--cachedir", str(workdir / "cache"),
             "--logfile", str(workdir / "pacman.log"), "--noconfirm"]
 
