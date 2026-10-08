@@ -453,8 +453,11 @@ Not yet confirmed on real hardware.
 
 ### Packaging on hybrid-d77 (cports)
 
-`packaging/chimera/make-source.sh` writes `mocinha-<pkgver>.tar.gz` from the
-committed HEAD and the matching cports template; hybrid-d77's `build.sh`
+Originally (private repository) `make-source.sh` wrote the source archive
+locally and cbuild's cache was seeded with it; since the repository is public,
+`packaging/chimera/make-template.sh` writes the template for a pushed commit,
+with GitHub's own archive and its sha256, so cbuild downloads it normally.
+Before that: hybrid-d77's `build.sh`
 (branch `mocinha`) runs it from `MOCINHA_SRC` (default `~/Projectos/mocinha`)
 and its cbuild container seeds `sources/by_sha256` with it, so the (then private)
 source is never downloaded. Packages: `mocinha` and `h77-mocinha`
