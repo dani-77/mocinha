@@ -6,9 +6,9 @@ set -u
 cmdline_param() { local p; for p in $(</proc/cmdline); do case "$p" in "$1"=*) echo "${p#*=}"; return 0 ;; esac; done; return 1; }
 LOGREL="$(cmdline_param mocinha.logdir || echo tools/qemu/logs/adversarial)"
 
-mkdir -p /mnt/mocinha && mount -t 9p -o trans=virtio,version=9p2000.L mocinha /mnt/mocinha
-cd /mnt/mocinha
-LOG="/mnt/mocinha/$LOGREL"; mkdir -p "$LOG"
+mkdir -p /root/mocinha && mount -t 9p -o trans=virtio,version=9p2000.L mocinha /root/mocinha
+cd /root/mocinha
+LOG="/root/mocinha/$LOGREL"; mkdir -p "$LOG"
 REPORT="$LOG/adversarial.log"; : > "$REPORT"
 FAILED=0
 

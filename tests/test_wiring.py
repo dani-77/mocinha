@@ -53,8 +53,9 @@ class TestWiring(unittest.TestCase):
             wire_plan_providers(plan, registry, manifest)
         self.assertIn("systemd-boot", str(ctx.exception))
 
-    def test_lilo_without_provider_rejected(self) -> None:
-        plan, registry, manifest = resolve("sysvd77", "lilo", FirmwareType.BIOS, extra_boot=["lilo"])
+    def test_bootloader_declared_but_unimplemented_rejected(self) -> None:
+        # syslinux: declared in the manifest, no provider (LILO has one since a77ien)
+        plan, registry, manifest = resolve("sysvd77", "syslinux", FirmwareType.BIOS, extra_boot=["syslinux"])
         with self.assertRaises(ResolutionError):
             wire_plan_providers(plan, registry, manifest)
 

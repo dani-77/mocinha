@@ -694,6 +694,12 @@ false abstractions early.
 > works. sysvd77 proves we do not accidentally depend on the first
 > target's conveniences.
 
+4.  **a77ien --- Slackware64-current + liveslak** (added 2026-10-10, after
+    the trio): BSD-style init where a service is the execute bit of its
+    /etc/rc.d script, LILO (BIOS) and ELILO (UEFI), a live that mounts its
+    own filesystems under /mnt and copies its package modules rather than
+    its running root. It proves the Linux layer is not CRUX-shaped either.
+
 FreeBSD is therefore an architectural requirement **from the start**,
 even if full support only arrives after the first target. The core must
 distinguish platform from distribution/policy.
@@ -802,6 +808,15 @@ whether it is a property of Arch/systemd rather than of Linux.
 Only after the reference trio, expand to d77void/Void-runit,
 Artix-runit, Chimera/dinit, Slackware and others. The goal remains to
 add providers/policies, not to grow `if distro == ...` in the core.
+
+**Decision (2026-10-10):** Chimera/dinit (hybrid-d77) was done as a
+supported remaster; Slackware (a77ien) became the fourth reference target
+(see the list above and AGENTS.md). It added providers (slackware-rc,
+slackware sysconfig, geninitrd, lilo, elilo) and two small core changes
+that every target benefits from: per-firmware bootloader defaults
+([boot].default_bios/default_uefi, with the firmware support of each
+bootloader in one table) and a staging mount point that the remaster can
+set ([install].target_mount), checked against mounts already below it.
 
 ## 17. Test matrix
 

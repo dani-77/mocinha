@@ -39,6 +39,9 @@ class InstallConfig:
     swap_size: Optional[str] = None        # None: no swap partition
     exclude: List[str] = field(default_factory=list)
     fstab_extra: List[str] = field(default_factory=list)
+    # Where the target is mounted while installing; the frontends' default (they may override it).
+    # A live that mounts its own filesystems under /mnt (liveslak) needs another directory.
+    target_mount: str = "/mnt"
 
 
 @dataclass
@@ -63,6 +66,13 @@ class BootConfig:
     kernel_args: List[str] = field(default_factory=list)  # appended to the kernel command line
     efi_id: Optional[str] = None     # EFI/<efi_id> directory and NVRAM entry name; None: [system].id
     grub_removable: bool = False     # UEFI: GRUB at the removable-media path EFI/BOOT/BOOTX64.EFI, no NVRAM entry
+    default_bios: Optional[str] = None  # remaster default on BIOS when it differs per firmware (e.g. LILO)
+    default_uefi: Optional[str] = None  # remaster default on UEFI (e.g. ELILO)
+
+    def default_for(self, firmware: str) -> str:
+        """The remaster's default bootloader for this firmware ("BIOS"/"UEFI"); a default, not a substitution."""
+        per_firmware = self.default_uefi if firmware.upper() == "UEFI" else self.default_bios
+        return per_firmware or self.default
 
 
 @dataclass
@@ -91,6 +101,8 @@ class UsersConfig:
     # Groups of the primary user (including the administrator group, e.g. "wheel")
     groups: List[str] = field(default_factory=list)
     shell: Optional[str] = None  # None: the target's useradd/pw default
+    # Primary (login) group, e.g. Slackware's setup: useradd -g users; None: the target's useradd default
+    primary_group: Optional[str] = None
     # crypt method passed to chpasswd -c (e.g. "SHA512"); None: the target's default.
     # Chimera's chpasswd without -c goes through PAM and writes nothing in a chroot.
     password_hash: Optional[str] = None
@@ -576,12 +588,13 @@ class Manifest:
             {"method": str, "source": str, "min_disk_size_bytes": int, "root_filesystem": str,
              "root_mount_options": str, "esp_size": str, "esp_mountpoint": str, "esp_mount_options": str},
             {"partition_table": str, "root_label": str, "esp_label": str, "swap_size": str,
-             "exclude": list, "fstab_extra": list},
+             "exclude": list, "fstab_extra": list, "target_mount": str},
         )
         install = InstallConfig(**{k: t.get(k) for k in (
             "method", "source", "min_disk_size_bytes", "root_filesystem", "root_mount_options",
             "esp_size", "esp_mountpoint", "esp_mount_options", "partition_table", "root_label",
-            "esp_label", "swap_size")}, exclude=t.get("exclude", []), fstab_extra=t.get("fstab_extra", []))
+            "esp_label", "swap_size")}, exclude=t.get("exclude", []), fstab_extra=t.get("fstab_extra", []),
+            target_mount=t.get("target_mount", "/mnt"))
         install.esp_mountpoint = install.esp_mountpoint.rstrip("/") or "/"
         _validate_install(install)
 
@@ -597,20 +610,24 @@ class Manifest:
             )
 
         t = _Table(data["boot"], "[boot]", {"available": list, "default": str},
-                   {"timeout": int, "kernel_args": list, "efi_id": str, "grub_removable": bool})
+                   {"timeout": int, "kernel_args": list, "efi_id": str, "grub_removable": bool,
+                    "default_bios": str, "default_uefi": str})
         boot = BootConfig(available=t.get("available"), default=t.get("default"),
                           timeout=t.get("timeout"), kernel_args=t.get("kernel_args", []), efi_id=t.get("efi_id"),
-                          grub_removable=t.get("grub_removable", False))
+                          grub_removable=t.get("grub_removable", False),
+                          default_bios=t.get("default_bios"), default_uefi=t.get("default_uefi"))
         if boot.efi_id is not None and not re.fullmatch(r"[A-Za-z0-9._-]+", boot.efi_id):
             raise ManifestError(
                 message=f"Invalid [boot].efi_id {boot.efi_id!r}",
                 cause="efi_id names a directory under EFI/ and may only contain letters, digits, '.', '_' and '-'.",
                 failed_operation="Validate [boot].efi_id",
             )
-        if not boot.available or boot.default not in boot.available or (boot.timeout is not None and boot.timeout < 0):
+        if (not boot.available or boot.default not in boot.available or (boot.timeout is not None and boot.timeout < 0)
+                or any(d is not None and d not in boot.available for d in (boot.default_bios, boot.default_uefi))):
             raise ManifestError(
                 message="Invalid [boot] section",
-                cause="available must be non-empty, default must be one of them, timeout must be >= 0.",
+                cause="available must be non-empty, default (and default_bios/default_uefi) must be one of them, "
+                      "timeout must be >= 0.",
                 failed_operation="Validate [boot]",
                 current_state=f"available={boot.available}, default={boot.default!r}, timeout={boot.timeout!r}",
             )
@@ -629,9 +646,10 @@ class Manifest:
             metadata=metadata_map, default_target=t.get("default_target"),
         )
 
-        t = _Table(data.get("users", {}), "[users]", {}, {"groups": list, "shell": str, "password_hash": str})
+        t = _Table(data.get("users", {}), "[users]", {}, {"groups": list, "shell": str, "password_hash": str,
+                                                           "primary_group": str})
         groups = t.get("groups", [])
-        if not all(re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups):
+        if not all(re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups + [t.get("primary_group") or "users"]):
             raise ManifestError(
                 message="Invalid [users].groups",
                 cause="groups must be a list of valid group names.",
@@ -642,7 +660,8 @@ class Manifest:
             raise ManifestError(message="Invalid [users].password_hash",
                                 cause="Known chpasswd -c methods: DES, MD5, SHA256, SHA512, BCRYPT, YESCRYPT.",
                                 failed_operation="Validate [users]")
-        users = UsersConfig(groups=groups, shell=t.get("shell"), password_hash=t.get("password_hash"))
+        users = UsersConfig(groups=groups, shell=t.get("shell"), password_hash=t.get("password_hash"),
+                            primary_group=t.get("primary_group"))
 
         live_only = _parse_live_only(data.get("live_only", {}))
         if live_only.packages and not providers.packages:

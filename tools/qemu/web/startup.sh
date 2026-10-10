@@ -27,10 +27,10 @@ case "$MANIFEST_NAME" in arch-bootstrap) TEST_HOSTNAME=arch-test ;; *) TEST_HOST
 
 echo "=== MOCINHA AUTOMATED TEST (bootloader=$BOOTLOADER) ==="
 
-mkdir -p /mnt/mocinha
-mount -t 9p -o trans=virtio,version=9p2000.L mocinha /mnt/mocinha
-cd /mnt/mocinha
-LOGDIR="/mnt/mocinha/$LOGREL"
+mkdir -p /root/mocinha
+mount -t 9p -o trans=virtio,version=9p2000.L mocinha /root/mocinha
+cd /root/mocinha
+LOGDIR="/root/mocinha/$LOGREL"
 mkdir -p "$LOGDIR"
 
 MANIFEST="examples/manifests/$MANIFEST_NAME.toml"

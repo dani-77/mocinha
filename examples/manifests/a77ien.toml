@@ -1,0 +1,144 @@
+# a77ien --- Slackware64-current + liveslak, Spitfire session
+#
+# Derived from liveslak's setup2hd (setup.liveslak, live_post_install) and
+# a77ien's own hook (packages/a77ien-defaults/files/usr/share/liveslak/
+# setup2hd.slackware), followed by the configuration scripts Slackware's setup
+# runs afterwards (setup.01.mkinitrd, setup.services, liloconfig/eliloconfig).
+# Differences are listed in STATUS.md.
+#
+# Like setup2hd, the copy source is /mnt/liveslakfs: the live's package
+# modules WITHOUT the 0099 zzzconf module, where liveslak keeps the live
+# session's configuration (the "live" account, its sudo rules, live-only
+# service choices). The pieces setup2hd brings back from zzzconf are copied
+# from that module, mounted read-only by liveslak at
+# /mnt/live/modules/0099-slackware_zzzconf-current-x86_64 (the name follows
+# liveslak's DISTRO, SL_VERSION and SL_ARCH: a77ien.conf).
+
+[system]
+id = "a77ien"
+name = "a77ien Live"
+arch = "x86_64"
+platform = "linux"
+
+[install]
+method = "local copy"
+source = "/mnt/liveslakfs"
+min_disk_size_bytes = 8589934592
+root_filesystem = "ext4"
+root_mount_options = "defaults"
+esp_size = "512m"                    # ELILO keeps a copy of the kernel and initrd on the ESP
+esp_mountpoint = "/boot/efi"         # where eliloconfig expects it
+esp_mount_options = "defaults"
+target_mount = "/setup2hd"           # setup2hd's own target directory; liveslak mounts its modules under /mnt
+fstab_extra = [
+    # The entries setup2hd appends to the generated fstab
+    "devpts /dev/pts devpts gid=5,mode=620 0 0",
+    "proc /proc proc defaults 0 0",
+    "tmpfs /dev/shm tmpfs defaults 0 0",
+]
+
+[providers]
+platform = "linux"
+storage = "linux-sfdisk"
+filesystem = "linux-mkfs"
+deployment = "tree-copy"
+users = "shadow"
+initramfs = "geninitrd"
+services = "slackware-rc"
+sysconfig = "slackware"
+
+[live_only]
+# liveslak's marker file (@MARKER@), removed by setup2hd
+files = ["/SLACKWARELIVE"]
+
+[boot]
+available = ["lilo", "elilo"]
+default = "lilo"
+default_bios = "lilo"                # liloconfig (MBR)
+default_uefi = "elilo"               # eliloconfig
+efi_id = "Slackware"                 # eliloconfig: EFI/Slackware, boot entry "Slackware"
+
+[services]
+# Slackware's service menu (setup.services) preselects what the packages leave
+# executable; a77ien's hook enables ntpd; the live session runs NetworkManager
+# (netconfig's NetworkManager choice).
+default_enabled = ["avahidaemon", "avahidnsconfd", "crond", "messagebus", "networkmanager", "ntpd", "sshd", "syslog"]
+optional = ["cups", "cups-browsed", "rpc", "nfsd", "samba", "dnsmasq", "smartd"]
+
+[users]
+# setup.liveslak: useradd -g users -G <these> -m -s <shell>, then %wheel in sudoers
+primary_group = "users"
+groups = ["wheel", "audio", "cdrom", "floppy", "plugdev", "video", "power", "netdev", "lp", "scanner",
+          "dialout", "games", "disk", "input"]
+shell = "/bin/bash"
+
+# --- setup.liveslak's live_post_install: copied back from the zzzconf module ---
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/skel"
+path = "/etc/skel"
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/inittab"
+path = "/etc/inittab"
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/profile.d/lang.sh"
+path = "/etc/profile.d/lang.sh"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/rc.d/rc.font"
+path = "/etc/rc.d/rc.font"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/rc.d/rc.gpm"
+path = "/etc/rc.d/rc.gpm"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/vconsole.conf"
+path = "/etc/vconsole.conf"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/slackpkg"
+path = "/etc/slackpkg"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/var/lib/slackpkg"
+path = "/var/lib/slackpkg"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/X11/xinit/xinitrc"
+path = "/etc/X11/xinit/xinitrc"
+optional = true
+
+[[live_files]]
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/X11/xorg.conf.d/30-keyboard.conf"
+path = "/etc/X11/xorg.conf.d/30-keyboard.conf"
+optional = true
+
+# --- a77ien's setup2hd.slackware hook ---
+[[live_files]]
+# Network time: custom_config() in a77ien.conf uncomments the pool servers
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/ntp.conf"
+path = "/etc/ntp.conf"
+
+[[live_files]]
+# a77ien's LILO menu bitmap, where liloconfig's lilo.conf points (bitmap = /boot/slack.bmp)
+source = "/usr/share/a77ien/lilo.bmp"
+path = "/boot/slack.bmp"
+mode = "0644"
+
+# --- setup.liveslak: %wheel may use sudo ---
+[[target_files]]
+path = "/etc/sudoers.d/wheel"
+mode = "0440"
+content = '''
+# Members of group wheel may run any command (setup2hd enables the same rule
+# in /etc/sudoers).
+%wheel ALL=(ALL:ALL) ALL
+'''

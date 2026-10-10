@@ -86,7 +86,7 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
     resolver = InstallationResolver(facts, manifest, registry, stream)
     choices = UserChoices(
         target_disk=args.disk,
-        bootloader=args.bootloader or manifest.boot.default,
+        bootloader=args.bootloader or manifest.boot.default_for(facts.firmware.value),
         username=args.user,
         password=args.password,
         hostname=args.hostname,
@@ -104,7 +104,7 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
     )
     plan = resolver.resolve(choices)
     wire_plan_providers(plan, registry, manifest)
-    context = build_execution_context(plan, args.mount, args.password, args.root_password)
+    context = build_execution_context(plan, args.mount or manifest.install.target_mount, args.password, args.root_password)
     executor = InstallationExecutor(stream)
     executor.preflight(plan, context)
     return plan, context, executor
@@ -278,7 +278,7 @@ def main() -> None:
     p_plan.add_argument("--bootloader", help="Requested bootloader (e.g. limine)")
     p_plan.add_argument("--user", required=True, help="Primary user account name")
     p_plan.add_argument("--password", required=True, help="Password for the primary user (needed to validate the plan)")
-    p_plan.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
+    p_plan.add_argument("--mount", help="Staging mount directory (default: the manifest's [install].target_mount, /mnt)")
     p_plan.add_argument("--hostname", required=True, help="Target hostname")
     p_plan.add_argument("--root-password", default="", help="Root password (default: root account locked)")
     p_plan.add_argument("--kernel-args", default="", help="Extra kernel command-line arguments (e.g. 'console=ttyS0,115200')")
@@ -304,7 +304,7 @@ def main() -> None:
     p_inst.add_argument("--timezone", default=None, help="Timezone (e.g. Europe/Lisbon); default: keep the live setting")
     p_inst.add_argument("--services", help="Comma-separated requested services")
     add_online_arguments(p_inst)
-    p_inst.add_argument("--mount", default="/mnt", help="Staging mount directory (default /mnt)")
+    p_inst.add_argument("--mount", help="Staging mount directory (default: the manifest's [install].target_mount, /mnt)")
     p_inst.add_argument("--confirm", action="store_true", help="Confirm destructive disk modification")
     p_inst.set_defaults(func=cmd_install)
 

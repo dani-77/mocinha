@@ -61,13 +61,14 @@ Validated in this order, each against the real remaster image from
 | **btw-d77** | Arch Linux + systemd | the installer works (live copy + online components) |
 | **au-d77** | FreeBSD 14.5 + rc.d | the architecture is not secretly Linux-only |
 | **sysv-d77** | CRUX 3.8 + sysvinit | Linux support is not secretly Arch/systemd-only |
+| **a77ien** | Slackware64-current + liveslak | not CRUX-shaped either: rc.d execute bits, LILO/ELILO, a live that mounts under `/mnt` |
 | **arch-bootstrap** | Arch Linux, from the repositories | level B: a fresh system chosen at install time |
 | **hybrid-d77** / Chimera | Chimera Linux (musl, BSD userland) + dinit | a third init system and userland; level B with `chimera-bootstrap` |
 
 ## Current status
 
 Install, boot and equivalence pass in QEMU for btw-d77, au-d77, sysv-d77,
-hybrid-d77, the official Chimera Linux live and the Arch bootstrap profile, BIOS
+a77ien, hybrid-d77, the official Chimera Linux live and the Arch bootstrap profile, BIOS
 and UEFI (au-d77: installed from the BIOS live; its live image does not boot
 under OVMF). On real hardware so far: btw-d77 installed on a ThinkPad X61 through
 the GTK3 wizard, and hybrid-d77 (niri) booted with the wizard open on a ThinkPad
@@ -126,6 +127,8 @@ tools/qemu/run_automated_test.sh --firmware bios|uefi [--aur PKG] [--offline]   
 tools/qemu/run_automated_test.sh --iso archlinux-*.iso --manifest arch-bootstrap    # level B
 tools/qemu/run_au_d77_test.sh --firmware bios                                       # au-d77
 tools/qemu/run_sysvd77_test.sh --firmware bios|uefi                                 # sysv-d77
+tools/qemu/run_a77ien_test.sh --iso a77ien64-live-current.iso --firmware bios|uefi   # a77ien
+tools/qemu/run_chimera_test.sh --iso hybrid-d77-*.iso --firmware bios|uefi          # hybrid-d77 / Chimera
 tools/qemu/test_boot_installed.py --firmware bios --disk tools/qemu/work/target-<run>.qcow2 \
     --expect tools/qemu/expect/btw-d77.json
 ```

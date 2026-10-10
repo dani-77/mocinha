@@ -1,6 +1,6 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-08. VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
+**Date:** 2026-10-10 (a77ien added; its runs use the code of the commit that adds it). Earlier VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
 
 **Contract change (2026-10-08):** Mocinha is no longer 100% offline. It is
 offline-first, with online components where they are declared or chosen
@@ -23,12 +23,14 @@ something is not listed as validated here, assume it is not.
 | Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
 | hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror; and **with the Mocinha package on the live** (ISO 20261008 built from the local hybrid-d77 branch `mocinha`): BIOS and UEFI install + boot + self-removal, and the launcher from the Sway session (pkexec + mate-polkit) opens the wizard as root. **Real hardware:** the niri ISO 20261008 with the Mocinha package booted on a ThinkPad T480s and the wizard opened in the niri session (maintainer's photo, 2026-10-08). On a desktop PC, a GTK install with an online package failed at "Install online components" with `[Errno 17] File exists: '/mnt/etc/resolv.conf'` (no disk data lost; the step runs after deployment): `run_in_target(network=True)` called mkdir on the resolv.conf file mount point. Never hit in QEMU because arch-chroot handles it on Arch and the Chimera runs chose only a mirror. Reproduced in QEMU (`run_chimera_test.sh --online-package htop`), fixed, re-run: install, online verify and boot pass; regression test added. |
 | Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
+| a77ien (Slackware64-current + liveslak, Spitfire) | **CLI install + boot validated in QEMU** from the real a77ien ISO `vm-20260928-104725-SRV7l5` (built 2026-09-28; repository untouched): live copy of liveslak's package modules, **BIOS/LILO** and **UEFI/ELILO**, each installed system booted and checked against what setup2hd + a77ien's hook + Slackware's configuration scripts produce. Mocinha is not on that ISO (run from this repository over 9p). Never run on real hardware. GUI never run on the live. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
 installed system with an expected state that was **derived by reading** each
 remaster's own installer (`d77-install` + `d77-archinstall.json`,
-`au-d77-install`, sysv-d77's `crux-*` scripts). Those installers were **not run** to produce a reference
+`au-d77-install`, sysv-d77's `crux-*` scripts, a77ien's setup2hd and its
+hook). Those installers were **not run** to produce a reference
 system. Known points where the checked state differs from what those
 installers produce are listed below.
 
@@ -88,7 +90,12 @@ GUI: the GTK3 frontend has never driven an installation.
 | `crux-rc` sysconfig | yes (sysv-d77) | `rc.conf` `HOSTNAME`, `LANG`, `KEYMAP`, `TIMEZONE`; `localedef`. The timezone cannot be checked before confirmation (the live has no zoneinfo); it is checked on the target after deployment. |
 | `freebsd-rc` sysconfig | yes (au-d77) | `rc.conf` hostname; locale/keymap/timezone changes refused. |
 | `grub` | yes (btw-d77, sysv-d77; BIOS and UEFI) | Target's `grub-install` + `grub-mkconfig`; EFI directory from `[boot].efi_id`. `/etc/default/grub` created only when a timeout or kernel arguments are requested and the package ships none (CRUX). |
-| `freebsd-gpart`, `freebsd-newfs`, `tree-copy`, `pw`, `freebsd-rc`, `freebsd-loader`, `freebsd` platform | yes (au-d77) | Hybrid GPT only (no MBR). |
+| `freebsd-gpart`, `freebsd-newfs`, `tree-copy`, `pw`, `freebsd-rc`, `freebsd-loader`, `freebsd` platform | yes (au-d77; `tree-copy` also hybrid-d77, Chimera and a77ien) | Hybrid GPT only (no MBR). |
+| `slackware-rc` services | yes (a77ien) | Enable = `chmod 755 /etc/rc.d/rc.<name>`, disable = `chmod 644`, as Slackware's setup.services does; services the manifest does not mention keep their package mode. |
+| `slackware` sysconfig | yes (a77ien) | `/etc/HOSTNAME` + `/etc/hosts` (the live's domain added to a bare name), `/etc/localtime` copy + `localtime-copied-from` (timeconfig), `rc.keymap` (loadkeys), `LANG` in `profile.d/lang.sh`/`lang.csh`; locales must be precompiled (checked in `/usr/lib64/locale`: the live has no `locale` command). |
+| `geninitrd` | yes (a77ien) | The target's own `/usr/sbin/geninitrd` in a chroot (mkinitrd via `mkinitrd_command_generator.sh`, root from the target's fstab): `/boot/initrd-<v>.img` + `initrd-generic.img`. It also runs the target's `update-grub` (`AUTO_UPDATE_GRUB=true` in `/etc/default/geninitrd`), which writes an unused `/boot/grub/grub.cfg`, as on any Slackware kernel upgrade. |
+| `lilo` | yes (a77ien, BIOS) | `/etc/lilo.conf` as liloconfig's simple/MBR mode writes it (bitmap menu `/boot/slack.bmp`, 120 s timeout, `disk = /dev/vda bios=0x80` on virtio), target's `lilo` in a chroot; `root="UUID=..."` instead of a `/dev` name. DOS partition table only. |
+| `elilo` | yes (a77ien, UEFI) | As eliloconfig: `EFI/<efi_id>/{elilo.efi,elilo.conf,vmlinuz,initrd.gz}` on the ESP at `/boot/efi`, `efibootmgr` entry; `root=UUID=...`. The ESP copies of the kernel/initrd do not follow kernel upgrades (Slackware: rerun eliloconfig). |
 | `limine` | **no** --- unit tests only | UEFI only; never booted in a VM (the btw-d77 live does not ship Limine). |
 | `rsync-copy` | **no** --- unit tests only | Not referenced by any manifest. |
 | `tar-extract` | **no** --- unit tests only | Not referenced by any manifest. |
@@ -430,6 +437,60 @@ re-run with the fix (142 311 entries verified). Also: Chimera's `chpasswd`
 without `-c` exited 0 and wrote nothing (passwords now verified as real
 hashes); `apk --simulate` cannot create a throwaway database.
 
+### a77ien --- ISO `vm-20260928-104725-SRV7l5` from `~/Remaster/a77ien` (repository untouched); `tools/qemu/run_a77ien_test.sh` + `test_boot_a77ien.py`
+
+liveslak starts no serial getty, live or installed. The harness boots the
+ISO's kernel/initrd with its GRUB boot line plus `console=ttyS0`, waits for
+init's runlevel message on the serial line, logs in as root on tty1 with QEMU
+`sendkey` (`vga_type.py`, `a77ien_serial.py`), runs `loadkeys us` (sendkey
+sends US key positions; the installed system has the pt-latin1 map the test
+chose) and adds an agetty on ttyS0; the rest goes over the serial console as
+on the other targets. For the same reason the installed root password of
+these runs is letters-only. Expectations: `tools/qemu/expect/a77ien.json`.
+
+| Run | Install | Boot | Equivalence check |
+|---|---|---|---|
+| a77ien SRV7l5, BIOS + LILO (MBR, DOS) | pass (16 steps; 282 855 entries verified) | pass (after LILO's 120 s menu timeout) | pass |
+| a77ien SRV7l5, UEFI + ELILO (GPT, ESP at `/boot/efi`, NVRAM entry "Slackware") | pass | pass | pass |
+
+Checked on the booted system: host name, the user with primary group `users`
+and setup2hd's 14 supplementary groups, `%wheel` sudo rule, keymap/timezone/
+`LANG`, enabled rc scripts (setup.services' preselection + `ntpd` +
+`networkmanager`; cups, rpc, nfsd, samba, dnsmasq, smartd disabled), `ntpd`,
+`sshd`, `crond`, `syslogd`, NetworkManager and dbus running, the generated
+initrd, the LILO/ELILO files, the a77ien skeleton in the user's home, no
+`live` user, no `/SLACKWARELIVE` marker, runlevel 3.
+
+How it follows setup2hd: the copy source is `/mnt/liveslakfs` (liveslak's
+package modules **without** the 0099 zzzconf module, where the live session's
+configuration lives), and the files setup2hd and a77ien's hook bring back from
+zzzconf are `[[live_files]]` read from that module, mounted at
+`/mnt/live/modules/0099-slackware_zzzconf-current-x86_64`.
+
+Differences from setup2hd + Slackware's setup, on purpose or not yet done:
+Mocinha partitions automatically (setup2hd opens cfdisk/cgdisk; no swap
+partition); root is named by UUID in lilo.conf/elilo.conf (liloconfig and
+eliloconfig write `/dev/...`); the host name gets the live's domain
+(`home.arpa`) where netconfig asks for one; NetworkManager is enabled where
+netconfig asks; setup2hd's firewall (`rc.firewall` + `myfwconf`, configured
+by an interactive setup script) is not installed; `/etc/hardwareclock` is left
+as copied (timeconfig asks UTC or local time); the `cpp -> mcpp` symlink and
+the vi/ex default that setup2hd adjust are not touched; LILO probes no other
+operating systems.
+
+Problems found and fixed: **the target mounted at `/mnt` hid the live's own
+filesystems** (`/mnt/live`, `/mnt/liveslakfs`): the copy failed with "Cannot
+open". The staging directory is now `[install].target_mount` (a77ien:
+`/setup2hd`, setup2hd's own), and the Linux platform provider refuses a
+staging directory with mounts below it, before confirmation. The new check
+then refused the btw-d77 harness itself, which mounted this repository (the
+running Mocinha) at `/mnt/mocinha`, below `/mnt`: the harnesses now mount it at
+`/root/mocinha`, like the Chimera and a77ien ones. The equivalence
+check first missed `/SLACKWARELIVE` and the skeleton because it matched
+English error text on a system now in Portuguese (test bug; checks now use
+`test -e`). Mocinha left the user in a per-user group where setup2hd uses
+`-g users` (`[users].primary_group` added).
+
 ### Launcher (desktop menu) elevation
 
 Reported on the X61: Mocinha did not open from fuzzel, only from a terminal.
@@ -492,9 +553,15 @@ until decided.
 - Disk-safety adversarial scenarios not run on the sysv-d77 live.
 - `[install].method` is only a label in the plan; the deployment provider is
   chosen by `[providers].deployment`.
-- Bootloader/firmware compatibility (lilo/syslinux vs UEFI, systemd-boot vs
-  BIOS) lives in the resolver instead of provider capabilities; Limine on BIOS
-  is refused at provider validation (after confirmation, before any disk write).
+- Bootloader/firmware compatibility (LILO/syslinux BIOS-only, ELILO/systemd-boot
+  UEFI-only) is one table in the resolver, not provider capabilities; Limine on
+  BIOS is refused at provider validation (after confirmation, before any disk write).
+- a77ien: no Mocinha package and no package provider for Slackware yet (so no
+  self-removal from the installed system); the GUI never ran on the live; the
+  zzzconf module path in the manifest carries liveslak's DISTRO/SL_VERSION/
+  SL_ARCH (`slackware`, `current`, `x86_64`).
+- The "mounts below the staging directory" check is Linux-only (the FreeBSD
+  platform provider has no equivalent yet).
 - `wants` / `before` service metadata parsed but unused.
 - CLI passwords on the command line.
 - Other adversarial cases from `AGENTS.md` not yet tested: failed mount,

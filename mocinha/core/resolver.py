@@ -46,6 +46,15 @@ class UserChoices:
     mirror: Optional[str] = None
 
 
+# Firmware each bootloader can boot from (a fact about the bootloader, not a policy);
+# bootloaders not listed are assumed to support both and are checked by their provider.
+BOOTLOADER_FIRMWARE: Dict[str, Set[str]] = {
+    "lilo": {"BIOS"},
+    "syslinux": {"BIOS"},
+    "elilo": {"UEFI"},
+    "systemd-boot": {"UEFI"},
+}
+
 HOSTNAME_RE = re.compile(r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$")
 # Shape checks only; providers check that the values exist on the system
 LOCALE_RE = re.compile(r"^[A-Za-z0-9_.@-]+$")
@@ -100,26 +109,21 @@ class InstallationResolver:
                 possible_recovery=f"Choose one of: {', '.join(self.manifest.boot.available)}",
             )
 
-        if self.facts.firmware == FirmwareType.UEFI:
-            if req_boot in ("lilo", "syslinux"):
-                raise ResolutionError(
-                    message=f"Bootloader '{choices.bootloader}' cannot boot in UEFI mode.",
-                    cause=f"Machine firmware is UEFI, but {choices.bootloader} only supports legacy BIOS.",
-                    failed_operation="Validate bootloader firmware compatibility",
-                    current_state=f"Firmware: UEFI, Bootloader: {choices.bootloader}",
-                    possible_recovery="Select a UEFI-compatible bootloader (e.g. Limine, systemd-boot, GRUB).",
-                )
-            partition_table = "gpt"
-        else:
-            if req_boot == "systemd-boot":
-                raise ResolutionError(
-                    message="systemd-boot requires UEFI firmware and cannot run on Legacy BIOS.",
-                    cause="Legacy BIOS detected on machine.",
-                    failed_operation="Validate systemd-boot firmware compatibility",
-                    current_state="Firmware: BIOS, Bootloader: systemd-boot",
-                    possible_recovery="Select BIOS-compatible bootloader (e.g. Limine, GRUB).",
-                )
-            partition_table = "dos"
+        firmware = "UEFI" if self.facts.firmware == FirmwareType.UEFI else "BIOS"
+        supported = BOOTLOADER_FIRMWARE.get(req_boot, {"BIOS", "UEFI"})
+        if firmware not in supported:
+            compatible = [b for b in self.manifest.boot.available
+                          if firmware in BOOTLOADER_FIRMWARE.get(b.lower(), {"BIOS", "UEFI"})]
+            raise ResolutionError(
+                message=f"Bootloader '{choices.bootloader}' cannot boot in {firmware} mode.",
+                cause=f"Machine firmware is {firmware}, but {choices.bootloader} only supports "
+                      f"{' and '.join(sorted(supported))}.",
+                failed_operation="Validate bootloader firmware compatibility",
+                current_state=f"Firmware: {firmware}, Bootloader: {choices.bootloader}",
+                possible_recovery=(f"Choose a bootloader for {firmware} among the remaster's: {', '.join(compatible)}"
+                                   if compatible else f"This remaster declares no bootloader for {firmware}."),
+            )
+        partition_table = "gpt" if firmware == "UEFI" else "dos"
         # Remaster policy overrides the firmware-derived default; the storage
         # provider rejects layouts it cannot make bootable on this firmware.
         if self.manifest.install.partition_table:
@@ -386,6 +390,7 @@ class InstallationResolver:
             "timezone": choices.timezone,
             "user_groups": list(self.manifest.users.groups),
             "user_shell": self.manifest.users.shell,
+            "user_primary_group": self.manifest.users.primary_group,
             "password_hash": self.manifest.users.password_hash,
             "root_filesystem": self.manifest.install.root_filesystem,
             "root_mount_options": self.manifest.install.root_mount_options,

@@ -64,12 +64,17 @@ Architectural validation order is deliberate:
 1.  **btw-d77 --- Arch Linux + systemd**
 2.  **au-d77 --- FreeBSD + rc.d/rc.conf**
 3.  **sysvd77 --- CRUX + sysvinit**
+4.  **a77ien --- Slackware64-current + liveslak (BSD-style init, LILO/ELILO)**
 
 Interpretation:
 
 -   btw-d77 proves the installer works;
 -   au-d77 proves the architecture is not secretly Linux-only;
--   sysvd77 proves the Linux layer is not secretly Arch/systemd-only.
+-   sysvd77 proves the Linux layer is not secretly Arch/systemd-only;
+-   a77ien proves it is not secretly CRUX-shaped either: services are
+    execute bits on /etc/rc.d scripts, the bootloaders are LILO (BIOS) and
+    ELILO (UEFI), the live mounts its own filesystems under /mnt, and the copy
+    source is the live's package modules, not its running root.
 
 Do not optimize the core for target #1 in ways that make #2/#3 special
 cases.
@@ -314,8 +319,9 @@ Mocinha is NOT initially:
 -   a general configuration-management framework;
 -   an Internet-only installer: network bootstrap (level B) is one explicit
     mode, never a requirement of a normal install;
--   an excuse to support every distro (e.g. SlackBuilds fit the provider
-    model, but Slackware is not a reference target).
+-   an excuse to support every distro: each target must be a real remaster
+    that teaches the abstraction something (a77ien made Slackware one;
+    SlackBuilds still fit the provider model, but are not implemented).
 
 Do not expand scope to solve an interesting unrelated problem.
 

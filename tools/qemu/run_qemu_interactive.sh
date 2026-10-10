@@ -55,8 +55,8 @@ fi
 cat <<INFO
 ISO: $ISO   Firmware: $FIRMWARE   Target: $DISK (/dev/vda in guest)
 In the guest (root shell):
-  mkdir -p /mnt/mocinha && mount -t 9p -o trans=virtio,version=9p2000.L mocinha /mnt/mocinha
-  cd /mnt/mocinha
+  mkdir -p /root/mocinha && mount -t 9p -o trans=virtio,version=9p2000.L mocinha /root/mocinha
+  cd /root/mocinha
   tools/qemu/guest-test.sh --manifest examples/manifests/<remaster>.toml --disk /dev/vda \
       --user <name> --hostname <name> --bootloader <name>              # probe + plan
   ... same arguments + --install                                        # destructive install

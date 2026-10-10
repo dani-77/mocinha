@@ -5,9 +5,11 @@ from typing import Optional
 from mocinha.core.errors import ResolutionError
 from mocinha.core.events import EventStream
 from mocinha.core.provider import ProviderRegistry
+from mocinha.providers.boot.elilo import EliloBootProvider
 from mocinha.providers.boot.freebsd_loader import FreeBSDBootProvider
 from mocinha.providers.boot.grub import GrubBootProvider
 from mocinha.providers.boot.limine import LimineBootProvider
+from mocinha.providers.boot.lilo import LiloBootProvider
 from mocinha.providers.deployment.chimera_bootstrap import ChimeraBootstrapDeploymentProvider
 from mocinha.providers.deployment.crux_pkgadd import CruxPkgaddDeploymentProvider
 from mocinha.providers.deployment.pacstrap import PacstrapDeploymentProvider
@@ -18,6 +20,7 @@ from mocinha.providers.deployment.tree_copy import TreeCopyDeploymentProvider
 from mocinha.providers.filesystem.mkfs import LinuxMkfsProvider
 from mocinha.providers.filesystem.newfs import FreeBSDNewfsProvider
 from mocinha.providers.initramfs.dracut import DracutProvider
+from mocinha.providers.initramfs.geninitrd import GeninitrdProvider
 from mocinha.providers.initramfs.mkinitcpio import MkinitcpioProvider
 from mocinha.providers.network.iwd import IwdProvider
 from mocinha.providers.network.networkmanager import NetworkManagerProvider
@@ -31,10 +34,12 @@ from mocinha.providers.platform.linux import LinuxPlatformProvider
 from mocinha.providers.services.dinit import DinitServiceProvider
 from mocinha.providers.services.crux_sysv import CruxSysvServiceProvider
 from mocinha.providers.services.freebsd_rc import FreeBSDServiceProvider
+from mocinha.providers.services.slackware_rc import SlackwareRcServiceProvider
 from mocinha.providers.services.systemd import SystemdServiceProvider
 from mocinha.providers.sysconfig.chimera import ChimeraSysconfigProvider
 from mocinha.providers.sysconfig.crux_rc import CruxRcSysconfigProvider
 from mocinha.providers.sysconfig.freebsd_rc import FreeBSDRcSysconfigProvider
+from mocinha.providers.sysconfig.slackware import SlackwareSysconfigProvider
 from mocinha.providers.sysconfig.systemd import SystemdSysconfigProvider
 from mocinha.providers.storage.gpart import FreeBSDStorageProvider
 from mocinha.providers.storage.sfdisk import SfdiskStorageProvider
@@ -63,6 +68,7 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("sysconfig", FreeBSDRcSysconfigProvider("freebsd-rc", event_stream))
     registry.register("sysconfig", CruxRcSysconfigProvider("crux-rc", event_stream))
     registry.register("sysconfig", ChimeraSysconfigProvider("chimera", event_stream))
+    registry.register("sysconfig", SlackwareSysconfigProvider("slackware", event_stream))
 
     # Deployment
     registry.register("deployment", SquashfsDeploymentProvider("squashfs-extract", event_stream))
@@ -77,17 +83,21 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     registry.register("initramfs", MkinitcpioProvider("mkinitcpio", event_stream))
     registry.register("initramfs", DracutProvider("dracut", event_stream))
     registry.register("initramfs", InitramfsToolsProvider("initramfs-tools", event_stream))
+    registry.register("initramfs", GeninitrdProvider("geninitrd", event_stream))
 
     # Services
     registry.register("services", SystemdServiceProvider("arch-systemd", event_stream))
     registry.register("services", FreeBSDServiceProvider("freebsd-rc", event_stream))
     registry.register("services", CruxSysvServiceProvider("crux-sysvinit", event_stream))
     registry.register("services", DinitServiceProvider("dinit", event_stream))
+    registry.register("services", SlackwareRcServiceProvider("slackware-rc", event_stream))
 
     # Bootloader
     registry.register("bootloader", LimineBootProvider("limine", event_stream))
     registry.register("bootloader", GrubBootProvider("grub", event_stream))
     registry.register("bootloader", FreeBSDBootProvider("freebsd-loader", event_stream))
+    registry.register("bootloader", LiloBootProvider("lilo", event_stream))
+    registry.register("bootloader", EliloBootProvider("elilo", event_stream))
 
     # Online components (AGENTS.md "Online rules", level A)
     registry.register("online", PacmanOnlineProvider("pacman", event_stream))

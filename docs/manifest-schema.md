@@ -44,14 +44,16 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 | `swap_size` | no | Swap partition size; omitted means no swap. |
 | `exclude` | no | Extra paths not copied by `tree-copy` (e.g. `./var/cache/pkg/*`). |
 | `fstab_extra` | no | Lines appended verbatim to the generated `/etc/fstab`. |
+| `target_mount` | no | Directory the target is mounted on while installing; default `/mnt`. The frontends use it unless told otherwise (`--mount`). A live that mounts its own filesystems under `/mnt` needs another one (a77ien: `/setup2hd`, setup2hd's own); a staging directory with mounts below it is refused before confirmation. |
 
 ### `[providers]` (required)
 
 Maps capabilities to provider names; all keys are required:
 `platform`, `storage`, `filesystem`, `deployment`, `users`, `services`,
 `sysconfig` (hostname/locale/keymap/timezone files: `systemd`,
-`freebsd-rc`, `crux-rc`, `chimera`), `initramfs` (`none` when the platform needs no
-initramfs step). Optional: `online` (e.g. `pacman`), required when the
+`freebsd-rc`, `crux-rc`, `chimera`, `slackware`), `initramfs` (`mkinitcpio`, `dracut`,
+`initramfs-tools`, `geninitrd`; `none` when the platform needs no initramfs step).
+Services: `arch-systemd`, `freebsd-rc`, `crux-sysvinit`, `dinit`, `slackware-rc`. Optional: `online` (e.g. `pacman`), required when the
 manifest has `[online]` and needed for any user-requested online package. A name
 that is not registered fails plan wiring, before confirmation.
 
@@ -61,9 +63,10 @@ that is not registered fails plan wiring, before confirmation.
 |---|---|---|
 | `available` | yes | Bootloaders the live actually ships and the remaster supports. |
 | `default` | yes | Suggested choice; must be one of `available`. |
+| `default_bios` / `default_uefi` | no | Suggested choice on that firmware, when the remaster's default differs per firmware (a77ien: `lilo` / `elilo`); must be one of `available`. A choice the firmware cannot boot (LILO/syslinux on UEFI, ELILO/systemd-boot on BIOS) is refused with the compatible alternatives, never replaced. |
 | `timeout` | no | Boot menu timeout; omitted keeps the bootloader's/remaster's own setting. |
 | `kernel_args` | no | Arguments appended to the kernel command line (the user may add more). |
-| `efi_id` | no | Name of the `EFI/<efi_id>` directory and NVRAM entry GRUB installs; default `[system].id`. |
+| `efi_id` | no | Name of the `EFI/<efi_id>` directory and NVRAM entry GRUB (or ELILO) installs; default `[system].id`. |
 | `grub_removable` | no | `true`: on UEFI, GRUB goes to the removable-media path `EFI/BOOT/BOOTX64.EFI` with no NVRAM entry (`grub-install --removable`, e.g. Chimera's installer). |
 
 GRUB is installed with the target's own `grub-install` and configured
@@ -94,6 +97,7 @@ enablement links, which are removed.
 |---|---|
 | `groups` | Groups of the primary user, including the administrator group (e.g. `wheel`). Missing groups fail the install. |
 | `shell` | Login shell; omitted uses the target's `useradd`/`pw` default. |
+| `primary_group` | Primary (login) group, `useradd -g` (Slackware's setup: `users`); omitted uses the target's `useradd` default (often a per-user group). |
 | `password_hash` | crypt method passed to `chpasswd -c` (e.g. `SHA512`); omitted uses the target's default. Needed on Chimera, whose `chpasswd` without `-c` goes through PAM and writes nothing in a chroot. |
 
 Administrator rules (sudoers, doas) are remaster policy and are declared

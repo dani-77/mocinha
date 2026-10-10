@@ -352,8 +352,9 @@ class MocinhaGTKApp(Gtk.Window):
         for b in self.manifest.boot.available:
             self.boot_combo.append_text(b)
         # Select manifest default
-        if self.manifest.boot.default in self.manifest.boot.available:
-            self.boot_combo.set_active(self.manifest.boot.available.index(self.manifest.boot.default))
+        default_boot = self.manifest.boot.default_for(self.facts.firmware.value)
+        if default_boot in self.manifest.boot.available:
+            self.boot_combo.set_active(self.manifest.boot.available.index(default_boot))
         elif len(self.manifest.boot.available) > 0:
             self.boot_combo.set_active(0)
 
@@ -705,7 +706,7 @@ class MocinhaGTKApp(Gtk.Window):
         # Collect choices
         active_iter = self.disk_combo.get_active_iter()
         target_disk = self.disk_store[active_iter][0] if active_iter else "/dev/sda"
-        bootloader = self.boot_combo.get_active_text() or self.manifest.boot.default
+        bootloader = self.boot_combo.get_active_text() or self.manifest.boot.default_for(self.facts.firmware.value)
         username = self.entry_user.get_text()
         password = self.entry_pass.get_text()
         root_password = self.entry_root.get_text() or None
@@ -741,7 +742,7 @@ class MocinhaGTKApp(Gtk.Window):
         # tools or impossible layouts are reported before confirmation
         wire_plan_providers(plan, self.registry, self.manifest)
         self.execution_context = build_execution_context(
-            plan, TARGET_MOUNT, self.entry_pass.get_text(), self.entry_root.get_text() or None)
+            plan, self.manifest.install.target_mount, self.entry_pass.get_text(), self.entry_root.get_text() or None)
         self.executor.preflight(plan, self.execution_context)
         self.resolved_plan = plan
         buf = self.summary_text_view.get_buffer()
@@ -847,7 +848,6 @@ class MocinhaGTKApp(Gtk.Window):
 
 
 # Staging directory where the target is mounted during installation
-TARGET_MOUNT = "/mnt"
 
 # Where a live system ships its manifest (docs/manifest-schema.md)
 MANIFEST_LOCATIONS = (Path("/etc/mocinha.toml"), Path("/usr/share/mocinha/mocinha.toml"))

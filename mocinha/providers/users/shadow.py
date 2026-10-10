@@ -170,7 +170,8 @@ class ShadowUsersProvider(ProviderContract):
                 possible_recovery="Choose another name or declare the live account in [live_only].users.",
             )
         groups = list(context.metadata.get("user_groups", []))
-        missing_groups = [g for g in groups if g not in _db_entries(etc / "group")]
+        primary = context.metadata.get("user_primary_group")
+        missing_groups = [g for g in groups + ([primary] if primary else []) if g not in _db_entries(etc / "group")]
         if missing_groups:
             raise ExecutionError(
                 message=f"Groups {missing_groups} do not exist on the target.",
@@ -181,6 +182,7 @@ class ShadowUsersProvider(ProviderContract):
             )
         shell = context.metadata.get("user_shell")
         self._run(target_root, ["useradd", "-m"]
+                  + (["-g", primary] if primary else [])
                   + (["-s", shell] if shell else [])
                   + (["-G", ",".join(groups)] if groups else [])
                   + [username])
@@ -229,6 +231,11 @@ class ShadowUsersProvider(ProviderContract):
                 problems.append(f"/home/{u} still exists")
 
         group = _db_entries(etc / "group")
+        primary = context.metadata.get("user_primary_group")
+        if primary:
+            gid = _db_entries(etc / "passwd").get(username, ["", "", "", ""])[3]
+            if group.get(primary, ["", "", None])[2] != gid:
+                problems.append(f"'{username}' does not have {primary} as primary group (gid {gid})")
         for g in context.metadata.get("user_groups", []):
             if g not in group or username not in group[g][-1].split(","):
                 problems.append(f"'{username}' is not a member of group {g}")

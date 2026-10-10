@@ -23,6 +23,17 @@ from mocinha.providers.base import (
 )
 
 
+def mounts_beneath(path: str, mounts_file: str = "/proc/self/mounts") -> List[str]:
+    """Mount points strictly below `path` (octal escapes in /proc/self/mounts decoded)."""
+    base = os.path.normpath(path).rstrip("/") + "/"
+    try:
+        lines = Path(mounts_file).read_text().splitlines()
+    except OSError:
+        return []
+    points = [l.split()[1].encode().decode("unicode_escape") for l in lines if len(l.split()) > 1]
+    return [p for p in points if p.startswith(base)]
+
+
 class LinuxPlatformProvider(ProviderContract):
     """Linux platform lifecycle manager."""
 
@@ -61,6 +72,17 @@ class LinuxPlatformProvider(ProviderContract):
                 failed_operation="Validate target mount safety",
                 current_state=f"{context.target_mount} is mounted",
                 possible_recovery="Unmount it or choose another staging directory.",
+            )
+        # ... nor below it: mounting the target would hide those filesystems (regression: the
+        # liveslak live mounts its modules at /mnt/live and its copy source at /mnt/liveslakfs)
+        beneath = mounts_beneath(context.target_mount)
+        if beneath:
+            raise ExecutionError(
+                message=f"Filesystems are mounted below the target staging path '{context.target_mount}'.",
+                cause="Mounting the target there would hide them (e.g. the live's own copy source).",
+                failed_operation="Validate target mount safety",
+                current_state=f"Mounted below it: {beneath[:8]}",
+                possible_recovery="Choose another staging directory ([install].target_mount in the manifest, or --mount).",
             )
 
     def prepare(self, context: ExecutionContext) -> None:
