@@ -1,0 +1,56 @@
+{
+  "hostname": "a77ien-test.home.arpa",
+  "primary_group": "users",
+  "users": {
+    "dani": "1000"
+  },
+  "groups_of_primary_user": [
+    "users",
+    "wheel",
+    "audio",
+    "cdrom",
+    "floppy",
+    "plugdev",
+    "video",
+    "power",
+    "netdev",
+    "lp",
+    "scanner",
+    "dialout",
+    "games",
+    "disk",
+    "input"
+  ],
+  "keymap": "pt-latin1",
+  "timezone": "Europe/Lisbon",
+  "lang": "pt_PT.utf8",
+  "enabled": [
+    "avahidaemon",
+    "avahidnsconfd",
+    "crond",
+    "messagebus",
+    "networkmanager",
+    "ntpd",
+    "sshd",
+    "syslog"
+  ],
+  "disabled": [
+    "cups",
+    "cups-browsed",
+    "rpc",
+    "nfsd",
+    "samba",
+    "dnsmasq",
+    "smartd"
+  ],
+  "running": [
+    "ntpd",
+    "sshd",
+    "crond",
+    "syslogd",
+    "NetworkManager",
+    "dbus-daemon"
+  ],
+  "runlevel": "3",
+  "mocinha_absent": true
+}

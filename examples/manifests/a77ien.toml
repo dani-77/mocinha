@@ -124,6 +124,16 @@ source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/X11/xorg.c
 path = "/etc/X11/xorg.conf.d/30-keyboard.conf"
 optional = true
 
+# --- not restored by setup2hd: the CA certificate store ---
+[[live_files]]
+# liveslak runs update-ca-certificates --fresh while configuring the live, so the
+# generated store (/etc/ssl/certs: ca-certificates.crt and the hash links) exists
+# only in zzzconf; the package modules have none and rc.M never regenerates it.
+# Without it HTTPS fails on the installed system (e.g. slackpkg update gpg)
+# until update-ca-certificates --fresh is run by hand (bare metal, 2026-10-10).
+source = "/mnt/live/modules/0099-slackware_zzzconf-current-x86_64/etc/ssl/certs"
+path = "/etc/ssl/certs"
+
 # --- a77ien's setup2hd.slackware hook ---
 [[live_files]]
 # Network time: custom_config() in a77ien.conf uncomments the pool servers

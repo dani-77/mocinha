@@ -22,4 +22,6 @@ echo '### sudo'; cat /etc/sudoers.d/wheel 2>&1 | grep -v '^#'
 echo '### live_user'; grep -c '^live:' /etc/passwd
 echo '### marker'; [ -e /SLACKWARELIVE ] && echo present || echo absent
 echo '### inittab'; grep '^id:' /etc/inittab
+echo '### ca_store'; [ -s /etc/ssl/certs/ca-certificates.crt ] && echo bundle; ls /etc/ssl/certs/*.0 2>/dev/null | wc -l; openssl verify /etc/ssl/certs/ISRG_Root_X1.pem 2>&1 | tail -1
+echo '### mocinha_files'; ls /var/lib/pkgtools/packages | grep '^mocinha-'; for f in /etc/mocinha.toml /usr/share/mocinha /usr/bin/mocinha; do [ -e $f ] && echo "present $f"; done; echo end
 echo ===MOCINHA_""BOOT_PROOF_END===

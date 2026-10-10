@@ -20,7 +20,7 @@ def fake(bindir: Path, name: str, status: int) -> None:
 
 @unittest.skipIf(os.geteuid() == 0, "the wrapper runs directly as root")
 class TestLauncher(unittest.TestCase):
-    def run_wrapper(self, env: dict, pkexec_status=0, with_pkexec=True, terminals=()):
+    def run_wrapper(self, env: dict, pkexec_status=0, with_pkexec=True, terminals=(), tty=None):
         with tempfile.TemporaryDirectory() as tmp:
             b = Path(tmp)
             if with_pkexec:
@@ -28,7 +28,10 @@ class TestLauncher(unittest.TestCase):
             fake(b, "sudo", 0)
             for t in terminals:
                 fake(b, t, 0)
-            for tool in ("id", "tty"):          # the only host tools the wrapper needs
+            if tty:                              # what `tty` reports in the session
+                (b / "tty").write_text(f"#!/bin/sh\necho {tty}\n")
+                (b / "tty").chmod(0o755)
+            for tool in ("id",) if tty else ("id", "tty"):   # the only host tools the wrapper needs
                 (b / tool).symlink_to(subprocess.run(["sh", "-c", f"command -v {tool}"], capture_output=True,
                                                      text=True).stdout.strip())
             base = {"PATH": str(b)}             # no host terminal/sudo can leak into the test
@@ -62,6 +65,16 @@ class TestLauncher(unittest.TestCase):
         proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1", "TERMINAL": "xterm"}, pkexec_status=127,
                                        terminals=["foot", "xterm"])
         self.assertIn("xterm -e /usr/bin/mocinha install --confirm", calls)
+
+    def test_inherited_console_tty_never_reaches_pkexec_stdin(self) -> None:
+        """a77ien on bare metal: launched from fuzzel nothing happened. Spitfire is started from tty1,
+        apps inherit it, and pkexec without an agent asked on tty1 with its text agent, unseen."""
+        script = WRAPPER.read_text()
+        self.assertIn('pkexec /usr/lib/mocinha/mocinha-root "$@" </dev/null', script)
+        proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1"}, pkexec_status=127, terminals=["foot"],
+                                       tty="/dev/tty1")
+        self.assertIn("foot --title Mocinha Installer /usr/bin/mocinha install --confirm", calls)
+        self.assertNotIn("sudo", calls)   # never on the console tty
 
     def test_no_display_no_terminal_explains(self) -> None:
         proc, calls = self.run_wrapper({}, with_pkexec=True)

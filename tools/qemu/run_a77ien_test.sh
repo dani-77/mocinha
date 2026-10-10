@@ -2,7 +2,9 @@
 # run_a77ien_test.sh --- Install with Mocinha from the a77ien live ISO (Slackware64-current +
 # liveslak), then boot-test with test_boot_a77ien.py.
 #
-#   tools/qemu/run_a77ien_test.sh --iso PATH [--firmware bios|uefi] [--manifest NAME]
+#   tools/qemu/run_a77ien_test.sh --iso PATH [--firmware bios|uefi] [--manifest NAME] [--packaged]
+#
+# --packaged: run the Mocinha package of the live with its /etc/mocinha.toml.
 #
 # Boots the ISO's own kernel/initrd (boot/generic, boot/initrd.img) with the boot
 # line of its GRUB menu plus a serial console. liveslak starts no serial getty:
@@ -18,19 +20,21 @@ OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/qemu/edk2-i386-vars.fd}"
 TIMEOUT="${TIMEOUT:-2400}"
 LIVE_ROOT_PASSWORD="${LIVE_ROOT_PASSWORD:-root}"     # liveslak's documented default
 
-FIRMWARE=bios ISO="" MANIFEST=a77ien
+FIRMWARE=bios ISO="" MANIFEST=a77ien PACKAGED=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --iso) ISO="$2"; shift 2 ;;
         --firmware) FIRMWARE="$2"; shift 2 ;;
         --manifest) MANIFEST="$2"; shift 2 ;;
-        -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+        --packaged) PACKAGED=1; shift ;;
+        -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 [ -f "$ISO" ] || { echo "ISO not found: $ISO" >&2; exit 1; }
 
 RUN="a77ien-$MANIFEST-$FIRMWARE"
+[ -z "$PACKAGED" ] || RUN="$RUN-packaged"
 WORK="$DIR/work"; LOGS="$DIR/logs/$RUN"; DISK="$WORK/target-$RUN.qcow2"
 KDIR="$WORK/kernel/$(basename "$ISO" .iso)-$(stat -c %Y "$ISO")"
 mkdir -p "$WORK" "$LOGS" "$KDIR"
@@ -40,6 +44,7 @@ rm -f "$LOGS"/*.log "$LOGS/result.status"
 BOOTLINE="$(bsdtar -xOf "$ISO" EFI/BOOT/grub.cfg | grep -m1 -E '^\s*linux \(\$root\)/boot/generic' \
     | sed -E 's/^\s*linux \(\$root\)\/boot\/generic +//; s/kbd=\$sl_kbd/kbd=us/; s/tz=\$sl_tz/tz=Europe\/Lisbon/; s/locale=\$sl_locale/locale=en_US.UTF-8/; s/xkb=\$sl_xkb//')"
 APPEND="$BOOTLINE 3 console=tty0 console=ttyS0,115200 mocinha.manifest=$MANIFEST mocinha.logdir=tools/qemu/logs/$RUN"
+[ -z "$PACKAGED" ] || APPEND="$APPEND mocinha.packaged=1"
 echo "=== MOCINHA INSTALL TEST --- $ISO ($FIRMWARE, manifest $MANIFEST) -> $DISK"
 echo ">> append: $APPEND"
 

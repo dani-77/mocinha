@@ -21,6 +21,14 @@ mkdir -p "$LOGDIR"
 
 MANIFEST="examples/manifests/$MANIFEST_NAME.toml"
 MOCINHA="python3 ./bin/mocinha"
+# mocinha.packaged=1: the Mocinha package of the live, with its /etc/mocinha.toml
+if [ "$(cmdline_param mocinha.packaged || true)" = 1 ]; then
+    MANIFEST=/etc/mocinha.toml
+    MOCINHA=mocinha
+    { echo "### package"; ls /var/lib/pkgtools/packages | grep '^mocinha-'; command -v mocinha
+      echo "### manifest identical to the repository's?"
+      sed '1,4d' /etc/mocinha.toml | cmp - "examples/manifests/$MANIFEST_NAME.toml" && echo yes; } > "$LOGDIR/package.log" 2>&1
+fi
 set -- --manifest "$MANIFEST" --disk /dev/vda \
     --user dani --password mocinha-test --root-password mocinharoot --hostname a77ien-test \
     --keymap pt-latin1 --timezone Europe/Lisbon --locale pt_PT.utf8 --kernel-args "console=tty0 console=ttyS0,115200"

@@ -23,7 +23,7 @@ something is not listed as validated here, assume it is not.
 | Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
 | hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror; and **with the Mocinha package on the live** (ISO 20261008 built from the local hybrid-d77 branch `mocinha`): BIOS and UEFI install + boot + self-removal, and the launcher from the Sway session (pkexec + mate-polkit) opens the wizard as root. **Real hardware:** the niri ISO 20261008 with the Mocinha package booted on a ThinkPad T480s and the wizard opened in the niri session (maintainer's photo, 2026-10-08). On a desktop PC, a GTK install with an online package failed at "Install online components" with `[Errno 17] File exists: '/mnt/etc/resolv.conf'` (no disk data lost; the step runs after deployment): `run_in_target(network=True)` called mkdir on the resolv.conf file mount point. Never hit in QEMU because arch-chroot handles it on Arch and the Chimera runs chose only a mirror. Reproduced in QEMU (`run_chimera_test.sh --online-package htop`), fixed, re-run: install, online verify and boot pass; regression test added. |
 | Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
-| a77ien (Slackware64-current + liveslak, Spitfire) | **CLI install + boot validated in QEMU** from the real a77ien ISO `vm-20260928-104725-SRV7l5` (built 2026-09-28; repository untouched): live copy of liveslak's package modules, **BIOS/LILO** and **UEFI/ELILO**, each installed system booted and checked against what setup2hd + a77ien's hook + Slackware's configuration scripts produce. Mocinha is not on that ISO (run from this repository over 9p). Never run on real hardware. GUI never run on the live. |
+| a77ien (Slackware64-current + liveslak, Spitfire) | **CLI install + boot validated in QEMU** from the real a77ien ISO `vm-20260928-104725-SRV7l5` (built 2026-09-28; repository untouched): live copy of liveslak's package modules, **BIOS/LILO** and **UEFI/ELILO**, each installed system booted and checked against what setup2hd + a77ien's hook + Slackware's configuration scripts produce. Mocinha is not on that ISO (run from this repository over 9p). **Real hardware (maintainer, 2026-10-10):** the ISO `vm-20261010-205836-W28IXs` built with the Mocinha 0.1.2 package installed on a Lenovo Legion, "100%" for the installation itself; two problems found there and fixed afterwards (see the a77ien section): the installed system had no CA certificate store (HTTPS, e.g. `slackpkg update gpg`, failed until `update-ca-certificates --fresh`), and the launcher did nothing from fuzzel (Mocinha was started from a terminal). |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
@@ -478,6 +478,30 @@ by an interactive setup script) is not installed; `/etc/hardwareclock` is left
 as copied (timeconfig asks UTC or local time); the `cpp -> mcpp` symlink and
 the vi/ex default that setup2hd adjust are not touched; LILO probes no other
 operating systems.
+
+**Bare metal (Lenovo Legion, maintainer, 2026-10-10), ISO `vm-20261010-205836-W28IXs` with Mocinha 0.1.2:**
+the installation worked; started from a terminal. Two problems, both fixed in
+the next commit and only the first re-validated in QEMU:
+
+- **No CA certificate store on the installed system.** liveslak generates
+  `/etc/ssl/certs` (`update-ca-certificates --fresh` in `make_slackware_live.sh`)
+  while configuring the live, so it exists only in the zzzconf module; the
+  package modules have none, `rc.S`/`rc.M` never regenerate it, and the
+  `ca-certificates` package leaves it to the installer. `slackpkg update gpg`
+  fetches the key from `https://www.slackware.com`, so it failed and the next
+  `slackpkg update` reported a bad signature. The manifest now copies the
+  generated store from zzzconf; QEMU: bundle + 121 hash links, `openssl verify`
+  OK on the installed system. The maintainer has never seen this after setup2hd;
+  by reading setup2hd, its scripts and the ISO, no step of setup2hd restores the
+  store either --- not reconciled yet (setup2hd was not run here).
+- **The launcher did nothing from fuzzel.** Spitfire runs no polkit agent and is
+  started from tty1's `.bash_profile`, so applications inherit tty1 as stdin;
+  `pkexec` then used its own text agent on tty1, behind the graphical session,
+  and waited. The launcher now gives pkexec no console tty (stdin from
+  `/dev/null` unless it is a pseudo-terminal), so it exits 127 and the
+  terminal-window fallback asks for the sudo password. Unit-tested; **not
+  re-validated in the session** (inferred from pkexec's documented fallback,
+  not reproduced in QEMU).
 
 Problems found and fixed: **the target mounted at `/mnt` hid the live's own
 filesystems** (`/mnt/live`, `/mnt/liveslakfs`): the copy failed with "Cannot

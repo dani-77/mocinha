@@ -86,6 +86,12 @@ def check(sections: dict, expect: dict, firmware: str) -> list:
         problems.append("live user present on the target")
     if get("marker") != ["absent"]:
         problems.append("liveslak marker /SLACKWARELIVE present on the target")
+    if expect.get("mocinha_absent") and get("mocinha_files") != ["end"]:
+        problems.append(f"Mocinha left on the target: {get('mocinha_files')}")
+    ca = get("ca_store")
+    if not ca or ca[0] != "bundle" or not (len(ca) > 1 and ca[1].isdigit() and int(ca[1]) > 100) \
+            or not ca[-1].endswith(": OK"):
+        problems.append(f"CA certificate store incomplete: {ca}")
     if get("inittab") != [f"id:{expect['runlevel']}:initdefault:"]:
         problems.append(f"default runlevel {get('inittab')}")
     return problems
