@@ -20,14 +20,19 @@ def fake(bindir: Path, name: str, status: int) -> None:
 
 @unittest.skipIf(os.geteuid() == 0, "the wrapper runs directly as root")
 class TestLauncher(unittest.TestCase):
-    def run_wrapper(self, env: dict, pkexec_status=0, with_pkexec=True):
+    def run_wrapper(self, env: dict, pkexec_status=0, with_pkexec=True, terminals=()):
         with tempfile.TemporaryDirectory() as tmp:
             b = Path(tmp)
             if with_pkexec:
                 fake(b, "pkexec", pkexec_status)
             fake(b, "sudo", 0)
-            base = {"PATH": f"{b}:/usr/bin:/bin"}
-            proc = subprocess.run(["sh", str(WRAPPER), "install", "--confirm"], env={**base, **env},
+            for t in terminals:
+                fake(b, t, 0)
+            for tool in ("id", "tty"):          # the only host tools the wrapper needs
+                (b / tool).symlink_to(subprocess.run(["sh", "-c", f"command -v {tool}"], capture_output=True,
+                                                     text=True).stdout.strip())
+            base = {"PATH": str(b)}             # no host terminal/sudo can leak into the test
+            proc = subprocess.run(["/bin/sh", str(WRAPPER), "install", "--confirm"], env={**base, **env},
                                   stdin=subprocess.DEVNULL, capture_output=True, text=True)
             calls = (b / "calls").read_text() if (b / "calls").exists() else ""
             return proc, calls
@@ -48,6 +53,15 @@ class TestLauncher(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("no polkit authentication agent", proc.stderr)
         self.assertNotIn("sudo", calls)  # stdin is not a terminal here
+
+    def test_no_agent_opens_a_terminal_window_for_sudo(self) -> None:
+        """a77ien: Spitfire runs no polkit agent; from fuzzel a terminal window asks for the sudo password."""
+        proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1"}, pkexec_status=127, terminals=["foot"])
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("foot --title Mocinha Installer /usr/bin/mocinha install --confirm", calls)
+        proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1", "TERMINAL": "xterm"}, pkexec_status=127,
+                                       terminals=["foot", "xterm"])
+        self.assertIn("xterm -e /usr/bin/mocinha install --confirm", calls)
 
     def test_no_display_no_terminal_explains(self) -> None:
         proc, calls = self.run_wrapper({}, with_pkexec=True)

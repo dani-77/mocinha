@@ -29,6 +29,7 @@ from mocinha.providers.online.apk import ApkOnlineProvider
 from mocinha.providers.online.pacman import PacmanOnlineProvider
 from mocinha.providers.packages.apk import ApkPackagesProvider
 from mocinha.providers.packages.pacman import PacmanPackagesProvider
+from mocinha.providers.packages.pkgtools import PkgtoolsPackagesProvider
 from mocinha.providers.platform.freebsd import FreeBSDPlatformProvider
 from mocinha.providers.platform.linux import LinuxPlatformProvider
 from mocinha.providers.services.dinit import DinitServiceProvider
@@ -110,6 +111,7 @@ def create_default_registry(event_stream: Optional[EventStream] = None) -> Provi
     # Package manager on the target (live-only package removal)
     registry.register("packages", PacmanPackagesProvider("pacman", event_stream))
     registry.register("packages", ApkPackagesProvider("apk", event_stream))
+    registry.register("packages", PkgtoolsPackagesProvider("pkgtools", event_stream))
 
     # Users
     registry.register("users", ShadowUsersProvider("shadow", event_stream))

@@ -216,5 +216,28 @@ class TestA77ien(unittest.TestCase):
             provider.validate(self.ctx)
 
 
+class TestPkgtools(unittest.TestCase):
+    def test_live_only_package_removed_with_removepkg(self) -> None:
+        from mocinha.providers.packages.pkgtools import PkgtoolsPackagesProvider, installed_packages
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = root / "var/lib/pkgtools/packages"
+            db.mkdir(parents=True)
+            for f in ("mocinha-0.1.2-noarch-1_a77ien", "python3-3.12.14-x86_64-2", "a77ien-defaults-1-noarch-1_a77ien"):
+                (db / f).write_text("")
+            self.assertEqual(installed_packages(root)["mocinha"], "mocinha-0.1.2-noarch-1_a77ien")
+            ctx = ExecutionContext(target_disk="/dev/vda", target_mount=str(root), target_partitions={},
+                                   metadata={"live_only_packages": ["mocinha", "notthere"]})
+            provider = PkgtoolsPackagesProvider("pkgtools", EventStream())
+            with mock.patch("mocinha.providers.packages.pkgtools.run_in_target",
+                            side_effect=lambda r, t, cmd, **k: (db / cmd[-1]).unlink()) as run:
+                provider.apply(ctx)
+            self.assertEqual(run.call_args.args[2], ["/sbin/removepkg", "mocinha-0.1.2-noarch-1_a77ien"])
+            provider.verify(ctx)
+            (db / "mocinha-0.1.2-noarch-1_a77ien").write_text("")
+            with self.assertRaises(VerificationError):
+                provider.verify(ctx)
+
+
 if __name__ == "__main__":
     unittest.main()

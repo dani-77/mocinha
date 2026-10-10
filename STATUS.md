@@ -95,6 +95,7 @@ GUI: the GTK3 frontend has never driven an installation.
 | `slackware` sysconfig | yes (a77ien) | `/etc/HOSTNAME` + `/etc/hosts` (the live's domain added to a bare name), `/etc/localtime` copy + `localtime-copied-from` (timeconfig), `rc.keymap` (loadkeys), `LANG` in `profile.d/lang.sh`/`lang.csh`; locales must be precompiled (checked in `/usr/lib64/locale`: the live has no `locale` command). |
 | `geninitrd` | yes (a77ien) | The target's own `/usr/sbin/geninitrd` in a chroot (mkinitrd via `mkinitrd_command_generator.sh`, root from the target's fstab): `/boot/initrd-<v>.img` + `initrd-generic.img`. It also runs the target's `update-grub` (`AUTO_UPDATE_GRUB=true` in `/etc/default/geninitrd`), which writes an unused `/boot/grub/grub.cfg`, as on any Slackware kernel upgrade. |
 | `lilo` | yes (a77ien, BIOS) | `/etc/lilo.conf` as liloconfig's simple/MBR mode writes it (bitmap menu `/boot/slack.bmp`, 120 s timeout, `disk = /dev/vda bios=0x80` on virtio), target's `lilo` in a chroot; `root="UUID=..."` instead of a `/dev` name. DOS partition table only. |
+| `pkgtools` (packages) | unit tests; see the a77ien section | Live-only packages removed with the target's `removepkg` in a chroot; checked in `/var/lib/pkgtools/packages`. |
 | `elilo` | yes (a77ien, UEFI) | As eliloconfig: `EFI/<efi_id>/{elilo.efi,elilo.conf,vmlinuz,initrd.gz}` on the ESP at `/boot/efi`, `efibootmgr` entry; `root=UUID=...`. The ESP copies of the kernel/initrd do not follow kernel upgrades (Slackware: rerun eliloconfig). |
 | `limine` | **no** --- unit tests only | UEFI only; never booted in a VM (the btw-d77 live does not ship Limine). |
 | `rsync-copy` | **no** --- unit tests only | Not referenced by any manifest. |
@@ -556,8 +557,9 @@ until decided.
 - Bootloader/firmware compatibility (LILO/syslinux BIOS-only, ELILO/systemd-boot
   UEFI-only) is one table in the resolver, not provider capabilities; Limine on
   BIOS is refused at provider validation (after confirmation, before any disk write).
-- a77ien: no Mocinha package and no package provider for Slackware yet (so no
-  self-removal from the installed system); the GUI never ran on the live; the
+- a77ien: the Mocinha package (local a77ien branch `mocinha`) and the
+  `pkgtools` provider (removepkg) are new and validated only as recorded in the
+  a77ien section; the GUI never ran on the live; the
   zzzconf module path in the manifest carries liveslak's DISTRO/SL_VERSION/
   SL_ARCH (`slackware`, `current`, `x86_64`).
 - The "mounts below the staging directory" check is Linux-only (the FreeBSD

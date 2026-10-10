@@ -46,10 +46,13 @@ users = "shadow"
 initramfs = "geninitrd"
 services = "slackware-rc"
 sysconfig = "slackware"
+packages = "pkgtools"
 
 [live_only]
 # liveslak's marker file (@MARKER@), removed by setup2hd
 files = ["/SLACKWARELIVE"]
+# The installer itself (it carries this manifest as /etc/mocinha.toml): removepkg on the target
+packages = ["mocinha"]
 
 [boot]
 available = ["lilo", "elilo"]

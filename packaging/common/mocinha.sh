@@ -5,8 +5,11 @@
 #     whose session agent asks graphically (works from menus like fuzzel).
 #     pkexec clears the environment, so the session's display is passed to
 #     the helper as arguments (only the variables below are accepted by it);
-#   - otherwise, or when the session has no polkit agent, from a terminal:
-#     sudo (or doas), which ask there.
+#   - otherwise, or when the session has no polkit agent: sudo (or doas) in
+#     the terminal Mocinha was started from, if it is a terminal emulator
+#     (/dev/pts/*); in a graphical session without one (e.g. from fuzzel in
+#     a77ien's Spitfire, which runs no polkit agent), in a new terminal window
+#     ($TERMINAL, foot, alacritty or xterm) where sudo/doas can ask.
 DISPLAY_VARS="WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY XDG_SESSION_TYPE GDK_BACKEND"
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -40,8 +43,21 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&
 	echo "mocinha: no polkit authentication agent; trying sudo/doas" >&2
 fi
 
-if [ -t 0 ]; then
-	terminal_elevation "$@"
+# A console tty (/dev/ttyN) may only be inherited from a session started on it:
+# asking there would be invisible. A pseudo-terminal is a terminal emulator.
+case "$(tty 2>/dev/null)" in
+	/dev/pts/*) terminal_elevation "$@" ;;
+esac
+[ -z "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && [ -t 0 ] && terminal_elevation "$@"
+
+if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && { command -v sudo || command -v doas; } >/dev/null 2>&1; then
+	for term in ${TERMINAL:-} foot alacritty xterm; do
+		command -v "$term" >/dev/null 2>&1 || continue
+		case "$term" in
+			foot) exec foot --title "Mocinha Installer" /usr/bin/mocinha "$@" ;;
+			*) exec "$term" -e /usr/bin/mocinha "$@" ;;
+		esac
+	done
 fi
 
 echo "mocinha: administrator rights are needed; run it as root, or from a terminal (sudo/doas), or in a session with a polkit agent." >&2
