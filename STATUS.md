@@ -503,6 +503,14 @@ the next commit and only the first re-validated in QEMU:
   re-validated in the session** (inferred from pkexec's documented fallback,
   not reproduced in QEMU).
 
+- **LILO on a machine with two disks** (found with setup2hd on the same Legion,
+  which then stopped with "Timestamp mismatch" / "Keytable read/checksum
+  error": liloconfig picks the MBR disk itself and lilo guessed the BIOS drive
+  numbers). Mocinha always wrote `boot = <chosen disk>`; it now also writes
+  `disk = <chosen disk> bios=0x80` for every disk (the disk the BIOS boots is
+  drive 0x80), not only for virtio as liloconfig does. QEMU BIOS run passes;
+  two-disk hardware not re-tested.
+
 Problems found and fixed: **the target mounted at `/mnt` hid the live's own
 filesystems** (`/mnt/live`, `/mnt/liveslakfs`): the copy failed with "Cannot
 open". The staging directory is now `[install].target_mount` (a77ien:

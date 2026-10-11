@@ -180,7 +180,10 @@ class TestA77ien(unittest.TestCase):
                      "  label = Linux"):
             self.assertIn(line, conf.splitlines())
         sata = lilo_conf("/dev/sda", "u", "/boot/vmlinuz-generic", None, [], 50, bitmap=False)
-        self.assertNotIn("disk = ", sata)
+        # Regression (two-disk Legion, "Keytable read/checksum error"): the boot disk is always 0x80
+        self.assertIn("disk = /dev/sda bios=0x80", sata.splitlines())
+        self.assertIn("disk = /dev/nvme0n1 bios=0x80",
+                      lilo_conf("/dev/nvme0n1", "u", "/boot/vmlinuz-generic", None, [], 50, bitmap=False).splitlines())
         self.assertNotIn("bitmap", sata)
         self.assertNotIn("  initrd = ", sata)
 
