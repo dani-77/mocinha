@@ -14,7 +14,10 @@ This provider does the same, from the package set the manifest declares:
 - each of those expanded with its dependency closure from
   [packages].dependencies (setup.dependencies: "name: dep ... name");
 - [packages].local: every archive in these directories, upgraded with
-  pkgadd -u when a package of that name is already installed.
+  pkgadd -u when a package of that name is already installed --- except the
+  packages declared in [live_only].packages (e.g. Mocinha itself, which a
+  remaster puts in the same directory as its other local packages): those are
+  never installed onto the target.
 
 Names resolve to exactly one archive across [packages].repositories; an
 ambiguous or missing name fails during validation, before any disk is touched.
@@ -139,8 +142,11 @@ class CruxPkgaddDeploymentProvider(ProviderContract):
                 cause="The package set is remaster policy; it is not guessed.",
                 failed_operation="Validate package deployment",
             )
-        return resolve_package_set(Path(context.metadata["install_source"]), config,
-                                   context.metadata["firmware"].upper())
+        packages, local = resolve_package_set(Path(context.metadata["install_source"]), config,
+                                              context.metadata["firmware"].upper())
+        live_only = set(context.metadata.get("live_only_packages", []))
+        return [(n, a) for n, a in packages if n not in live_only], \
+            [a for a in local if ARCHIVE.match(a.name).group("name") not in live_only]
 
     def validate(self, context: ExecutionContext) -> None:
         if not shutil.which("pkgadd"):

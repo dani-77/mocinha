@@ -121,6 +121,16 @@ class TestSysvd77(unittest.TestCase):
         with self.assertRaises(VerificationError):
             provider.verify(self.context)
 
+    def test_live_only_local_package_is_never_installed(self) -> None:
+        """The remaster ships Mocinha in the medium's ports/ with its other local packages."""
+        config = self._medium()
+        (self.medium / "ports" / "mocinha#0.1.4-1.pkg.tar.gz").write_bytes(b"x")
+        self.context.metadata.update(packages=config, live_only_packages=["mocinha"])
+        provider = CruxPkgaddDeploymentProvider("crux-pkgadd", self.stream)
+        packages, local = provider._resolve(self.context)
+        self.assertNotIn("mocinha#0.1.4-1.pkg.tar.gz", [p.name for p in local])
+        self.assertIn("d77crux-kernel#6.12-1.pkg.tar.xz", [p.name for p in local])
+
     def test_real_manifest_matches_sysv_d77_installer_policy(self) -> None:
         m = Manifest.load_from_file(MANIFEST)
         self.assertEqual(m.providers.deployment, "crux-pkgadd")

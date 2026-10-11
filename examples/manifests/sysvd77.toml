@@ -44,6 +44,12 @@ users = "shadow"
 initramfs = "dracut"
 services = "crux-sysvinit"
 sysconfig = "crux-rc"
+packages = "pkgutils"
+
+[live_only]
+# The installer itself: shipped in the medium's ports/ with the other local
+# packages, never installed onto the target (crux-pkgadd skips it).
+packages = ["mocinha"]
 
 [packages]
 repositories = ["crux/core", "crux/opt", "crux/xorg"]
