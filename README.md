@@ -70,10 +70,14 @@ Validated in this order, each against the real remaster image from
 Install, boot and equivalence pass in QEMU for btw-d77, au-d77, sysv-d77,
 a77ien, hybrid-d77, the official Chimera Linux live and the Arch bootstrap profile, BIOS
 and UEFI (au-d77: installed from the BIOS live; its live image does not boot
-under OVMF). On real hardware so far: btw-d77 installed on a ThinkPad X61 through
-the GTK3 wizard, and hybrid-d77 (niri) booted with the wizard open on a ThinkPad
-T480s --- both reported by the author. Packaged for Arch (PKGBUILD) and Chimera
-(cports), carried on development branches of the remasters. `STATUS.md` records
+under OVMF). On real hardware so far, all reported by the author: btw-d77
+installed on a ThinkPad X61 through the GTK3 wizard; hybrid-d77 (niri) booted
+with the wizard open on a ThinkPad T480s; a77ien installed and booted on a
+two-disk Lenovo Legion (Mocinha 0.1.3); sysv-d77 installed and booted through
+the GTK3 wizard (Mocinha 0.1.4 and the 0.1.5 candidates). Packaged for Arch
+(PKGBUILD, also in the AUR), Chimera (cports), Slackware (SlackBuild, in a77ien)
+and CRUX (the d77crux port, in sysv-d77); a77ien and sysv-d77 ship it on their
+main branches, btw-d77 and hybrid-d77 on development branches. `STATUS.md` records
 exactly what was validated, how, and what differs from each remaster's own
 installer.
 
