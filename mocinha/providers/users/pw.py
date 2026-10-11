@@ -103,6 +103,7 @@ class FreeBSDUsersProvider(ProviderContract):
         self.events.action(EventPhase.CONFIGURE, f"Creating user '{username}' (groups {groups})")
         self.runner.run(
             ["pw", "-R", target, "useradd", username, "-m"]
+            + (["-c", context.metadata["full_name"]] if context.metadata.get("full_name") else [])
             + (["-s", context.metadata["user_shell"]] if context.metadata.get("user_shell") else [])
             + (["-G", ",".join(groups)] if groups else [])
             + ["-h", "0"],
@@ -129,6 +130,9 @@ class FreeBSDUsersProvider(ProviderContract):
             problems.append(f"'{username}' missing from master.passwd/passwd")
         elif master[username][1] in ("", "*") or master[username][1].startswith("*LOCKED*"):
             problems.append(f"'{username}' has no usable password")
+        full_name = context.metadata.get("full_name")
+        if full_name and username in master and master[username][7:8] != [full_name]:
+            problems.append(f"full name of '{username}' is {master[username][7:8]}, expected {full_name!r}")
         for g in context.metadata.get("user_groups", []):
             if g not in group or username not in group[g][-1].split(","):
                 problems.append(f"'{username}' is not a member of group {g}")

@@ -74,10 +74,12 @@ under OVMF). On real hardware so far, all reported by the author: btw-d77
 installed on a ThinkPad X61 through the GTK3 wizard; hybrid-d77 (niri) booted
 with the wizard open on a ThinkPad T480s; a77ien installed and booted on a
 two-disk Lenovo Legion (Mocinha 0.1.3); sysv-d77 installed and booted through
-the GTK3 wizard (Mocinha 0.1.4 and the 0.1.5 candidates). Packaged for Arch
+the GTK3 wizard (Mocinha 0.1.4 and the 0.1.5 candidates); au-d77 (FreeBSD)
+installed and booted through the GTK3 wizard (0.1.6 candidate). Packaged for Arch
 (PKGBUILD, also in the AUR), Chimera (cports), Slackware (SlackBuild, in a77ien)
-and CRUX (the d77crux port, in sysv-d77); a77ien and sysv-d77 ship it on their
-main branches, btw-d77 and hybrid-d77 on development branches. `STATUS.md` records
+CRUX (the d77crux port, in sysv-d77) and FreeBSD (installed from the pinned
+release by au-d77's build); btw-d77, sysv-d77, a77ien and hybrid-d77 ship it
+on their main branches, au-d77 on its development branch. `STATUS.md` records
 exactly what was validated, how, and what differs from each remaster's own
 installer.
 

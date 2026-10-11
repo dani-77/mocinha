@@ -1,23 +1,94 @@
 {
-  "_comment": "Expected state derived by reading au-d77-install (autologin answered 'no'); hostname, user and passwords are the test's choices.",
+  "_comment": "Expected state derived by reading au-d77-install with autologin answered 'yes' (its default), keymap and timezone chosen (kbdmap/tzsetup there; console keymap in rc.conf here) and swap scaled to the 20 GiB disk; hostname, user, full name, passwords, keymap and timezone are the test's choices. Mocinha removes itself. Layout: GPT (UEFI, or BIOS with --layout gpt).",
   "contains": {
-    "/etc/fstab": ["/dev/ufs/AU_D77_ROOT", "tmpfs", "swap", "/boot/efi"],
-    "/boot/loader.conf": ["vfs.root.mountfrom=\"ufs:/dev/ufs/AU_D77_ROOT\""],
-    "/etc/rc.conf": ["hostname=\"au-test\"", "tmpmfs=\"NO\"", "dumpdev=\"AUTO\"", "seatd_enable=\"YES\"", "dbus_enable=\"YES\""],
-    "/usr/local/etc/doas.conf": ["permit persist :wheel"],
-    "ttys_console": ["insecure"],
-    "groups": ["(wheel)", "(operator)", "(video)"],
-    "root_hash": ["$6$"]
+    "/boot/loader.conf": [
+      "vfs.root.mountfrom=\"ufs:/dev/ufs/AU_D77_ROOT\""
+    ],
+    "/etc/rc.conf": [
+      "hostname=\"au-test\"",
+      "tmpmfs=\"NO\"",
+      "dumpdev=\"AUTO\"",
+      "seatd_enable=\"YES\"",
+      "dbus_enable=\"YES\"",
+      "keymap=\"pt\""
+    ],
+    "/usr/local/etc/doas.conf": [
+      "permit persist :wheel"
+    ],
+    "ttys_console": [
+      "insecure",
+      "getty al.dani"
+    ],
+    "gettytab": [
+      "al.dani:",
+      ":al=dani:ht:np:"
+    ],
+    "gecos": [
+      "Dani Test"
+    ],
+    "localtime": [
+      "localtime-is-lisbon",
+      "Europe/Lisbon"
+    ],
+    "skel": [
+      ".profile",
+      ".config",
+      "wasp",
+      "foot",
+      "fuzzel"
+    ],
+    "mocinha_files": [
+      "bin/mocinha: No such file",
+      "share/mocinha: No such file",
+      "mocinha.toml: No such file"
+    ],
+    "groups": [
+      "(wheel)",
+      "(operator)",
+      "(video)"
+    ],
+    "root_hash": [
+      "$6$"
+    ],
+    "/etc/fstab": [
+      "/dev/ufs/AU_D77_ROOT",
+      "tmpfs",
+      "/dev/gpt/au-d77-swap",
+      "/boot/efi"
+    ],
+    "gpart": [
+      "GPT",
+      "freebsd-boot",
+      "efi",
+      "freebsd-swap",
+      "freebsd-ufs"
+    ]
   },
   "absent": {
-    "/etc/fstab": ["AU_D77_LIVE"],
-    "/boot/loader.conf": ["AU_D77_LIVE"],
-    "/etc/rc.conf": ["hostname=\"au-d77\"", "tmpmfs=\"YES\""],
-    "ttys_console": ["al.d77"]
+    "/etc/fstab": [
+      "AU_D77_LIVE"
+    ],
+    "/boot/loader.conf": [
+      "AU_D77_LIVE"
+    ],
+    "/etc/rc.conf": [
+      "hostname=\"au-d77\"",
+      "tmpmfs=\"YES\""
+    ],
+    "ttys_console": [
+      "al.d77"
+    ]
   },
   "exact_lines": {
-    "users": ["dani"],
-    "sudoers.d": ["10-wheel", "networkmgr"],
-    "home": ["dani"]
+    "users": [
+      "dani"
+    ],
+    "sudoers.d": [
+      "10-wheel",
+      "networkmgr"
+    ],
+    "home": [
+      "dani"
+    ]
   }
 }

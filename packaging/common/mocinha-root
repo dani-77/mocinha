@@ -1,5 +1,5 @@
 #!/bin/sh
-# /usr/lib/mocinha/mocinha-root --- run by pkexec (polkit action org.mocinha.installer).
+# <prefix>/lib/mocinha/mocinha-root --- run by pkexec (polkit action org.mocinha.installer).
 #   mocinha-root [VAR=value]... -- [mocinha arguments]
 # Only the session display variables are accepted before "--"; anything else is refused.
 while [ $# -gt 0 ]; do
@@ -10,4 +10,8 @@ while [ $# -gt 0 ]; do
 		*) echo "mocinha-root: refusing argument before --: $1" >&2; exit 2 ;;
 	esac
 done
-exec python3 /usr/share/mocinha/bin/mocinha "$@"
+case "$0" in
+	*/lib/mocinha/mocinha-root) PREFIX=${0%/lib/mocinha/mocinha-root} ;;
+	*) PREFIX=/usr ;;
+esac
+exec python3 "$PREFIX/share/mocinha/bin/mocinha" "$@"

@@ -48,6 +48,8 @@ class TargetSummary:
     live_only_users: List[str] = field(default_factory=list)
     online: Optional[str] = None           # what will be fetched, or None when nothing is online
     online_skipped: Optional[str] = None   # declared online components the user declined
+    swap: Optional[str] = None             # swap partition size, None: no swap
+    autologin: Optional[bool] = None       # None: not offered by the remaster
     wireless: Optional[str] = None         # [network].configure_wireless: the interface, or why none is set
 
 
@@ -75,12 +77,16 @@ class InstallationPlan:
             f"Init System:      {self.summary.init}",
             f"Services:         {', '.join(self.summary.services)}",
         ]
+        lines.append(f"Swap:             {self.summary.swap or 'none'}")
         if self.summary.username:
             lines.append(f"Primary User:     {self.summary.username}")
+        if self.summary.autologin is not None:
+            lines.append(f"Automatic Login:  {'yes' if self.summary.autologin else 'no'}")
         if self.summary.hostname:
             lines.append(f"Hostname:         {self.summary.hostname}")
-        if self.summary.locale:
-            lines.append(f"Locale/Keymap/TZ: {self.summary.locale} / {self.summary.keymap} / {self.summary.timezone}")
+        if self.summary.locale or self.summary.keymap or self.summary.timezone:
+            lines.append(f"Locale/Keymap/TZ: {self.summary.locale or '(live)'} / {self.summary.keymap or '(live)'} / "
+                         f"{self.summary.timezone or '(live)'}")
         else:
             lines.append("Locale/Keymap/TZ: kept from the live system")
         if self.summary.root_account:

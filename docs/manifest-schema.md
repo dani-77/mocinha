@@ -39,9 +39,11 @@ Complete, validated examples: `examples/manifests/btw-d77.toml` and
 | `esp_size` | yes | EFI system partition size, e.g. `512m`, `1g`. |
 | `esp_mountpoint` | yes | Where the ESP is mounted, e.g. `/boot`, `/boot/efi`. |
 | `esp_mount_options` | yes | fstab options of the ESP. |
-| `partition_table` | no | `gpt` or `dos`. Default: GPT on UEFI, DOS on BIOS. Storage providers refuse layouts they cannot make bootable. |
+| `partition_table` | no | `gpt`, `dos` or `mbr` (FreeBSD: an MBR slice with a BSD disklabel). Default: GPT on UEFI, DOS on BIOS. Storage providers refuse layouts they cannot make bootable. |
+| `bios_partition_tables` | no | Partition tables offered on BIOS, the first one the default (au-d77: `["mbr", "gpt"]`, as its installer recommends MBR for BIOS). The user chooses among them (GUI disk page, `--partition-table`); on UEFI `partition_table` applies. |
 | `root_label`, `esp_label` | no | Filesystem labels; omitted means no label. |
 | `swap_size` | no | Swap partition size; omitted means no swap. |
+| `swap_by_disk_size` | no | Swap size by disk size, instead of `swap_size`: `[{ below = "16000m", size = "1g" }, ..., { size = "4g" }]`; the first entry whose `below` the target disk is smaller than wins, the last one has no `below`. The plan shows the size. |
 | `exclude` | no | Extra paths not copied by `tree-copy` (e.g. `./var/cache/pkg/*`). |
 | `fstab_extra` | no | Lines appended verbatim to the generated `/etc/fstab`. |
 | `target_mount` | no | Directory the target is mounted on while installing; default `/mnt`. The frontends use it unless told otherwise (`--mount`). A live that mounts its own filesystems under `/mnt` needs another one (a77ien: `/setup2hd`, setup2hd's own); a staging directory with mounts below it is refused before confirmation. |
@@ -99,12 +101,20 @@ enablement links, which are removed.
 | `shell` | Login shell; omitted uses the target's `useradd`/`pw` default. |
 | `primary_group` | Primary (login) group, `useradd -g` (Slackware's setup: `users`); omitted uses the target's `useradd` default (often a per-user group). |
 | `password_hash` | crypt method passed to `chpasswd -c` (e.g. `SHA512`); omitted uses the target's default. Needed on Chimera, whose `chpasswd` without `-c` goes through PAM and writes nothing in a chroot. |
+| `autologin` | `"on"` or `"off"`: offer automatic login of the primary user, with that default (GUI checkbox, `--autologin`/`--no-autologin`); omitted: not offered. The sysconfig provider implements it (FreeBSD: a getty class `al.<user>` in `/etc/gettytab` used by `ttyv0`); one that cannot is refused before confirmation. |
+| `root_password` | `"required"`: the root account must get a password (au-d77: the console is marked insecure, so single-user mode asks for it); `"optional"` (default): no root password locks the account. |
 
 Administrator rules (sudoers, doas) are remaster policy and are declared
 as `[[target_files]]`.
 
-The root account is locked unless the user chooses a root password; the
-plan shows which one applies.
+The root account is locked unless the user chooses a root password (or
+`root_password = "required"` asks for one); the plan shows which one applies.
+
+### `[network]` (optional)
+
+| Key | Meaning |
+|---|---|
+| `configure_wireless` | `true`: write this machine's wireless interface (probed) into the target's native wireless configuration through the sysconfig provider (CRUX: `DEV=` in `/etc/rc.d/wpa_supplicant`). Only when exactly one interface exists; otherwise the plan says why none is set. |
 
 ---
 
@@ -222,11 +232,15 @@ top by the online provider.
 ## 3. User choices (not in the manifest)
 
 Shown in the plan. In the GUI and on the CLI: target disk, bootloader
-(from `[boot].available`), user name and password, root password (empty:
-locked), hostname, optional services. On the CLI only: extra kernel
-arguments and locale/keymap/timezone (unset: keep the live's settings;
-providers that cannot apply a requested change refuse it during
-validation, before any disk is modified). Online: decline the optional
+(from `[boot].available`), the BIOS partition table when
+`bios_partition_tables` offers several, user name, full name (GECOS) and
+password, root password (empty: locked, unless required), automatic login
+when offered, hostname, optional services, and locale/keymap/timezone
+(unset: keep the live's settings; the GUI page "Language, Keyboard and Time
+Zone" offers only what the sysconfig provider supports, with the values the
+live carries, and providers that cannot apply a requested change refuse it
+during validation, before any disk is modified). On the CLI only: extra
+kernel arguments. Online: decline the optional
 online components (`--offline`; GUI checkbox), extra repository packages
 (`--online-package`; part of the bootstrap transaction for profiles) and AUR
 packages (`--aur`), the package mirror (`--mirror`, listed by `mocinha
@@ -241,4 +255,10 @@ from Mocinha itself (`mocinha network status|scan|connect`; GUI page
 
 On FreeBSD, GPT partition labels are prefixed with `[system].id`
 (e.g. `gpt/au-d77-efi`): generic labels such as `efiboot` may already
-exist on the live medium and would make `/dev/gpt/<label>` ambiguous.
+exist on the live medium and would make `/dev/gpt/<label>` ambiguous. The
+BIOS MBR layout (`mbr`) has no partition labels: its swap gets a glabel
+(`label/<id>-swap`). The keymap is a vt(4) keymap written to `rc.conf`; the
+timezone is copied to `/etc/localtime` and named in `/var/db/zoneinfo`, as
+tzsetup does; the locale is not system-wide on FreeBSD and is refused.
+Mocinha installs under `/usr/local` there and reads
+`/usr/local/etc/mocinha.toml`.

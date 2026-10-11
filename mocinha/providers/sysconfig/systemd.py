@@ -2,12 +2,13 @@
 /etc/vconsole.conf, /etc/localtime and locale-gen (Arch family; btw-d77)."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 import shutil
 
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
+from mocinha.providers.sysconfig import glibc_supported_locales, keymap_names, zone_names
 from mocinha.providers.base import CommandRunner, run_in_target
 
 
@@ -40,6 +41,12 @@ class SystemdSysconfigProvider(ProviderContract):
 
     def capabilities(self) -> List[str]:
         return ["sysconfig"]
+
+    def setting_choices(self) -> Dict[str, List[str]]:
+        """Values the frontends can offer, read from the live (the target is a copy of it)."""
+        live = Path("/")
+        return {"locale": glibc_supported_locales(live), "keymap": keymap_names(live, "usr/share/kbd/keymaps"),
+                "timezone": zone_names(live)}
 
     def validate(self, context: ExecutionContext) -> None:
         self._validate_locale_settings(context)

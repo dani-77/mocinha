@@ -1,19 +1,25 @@
 #!/bin/sh
-# /usr/bin/mocinha --- Mocinha needs root (it partitions disks).
+# <prefix>/bin/mocinha --- Mocinha needs root (it partitions disks). The prefix is
+# where this script is installed: /usr, or /usr/local on FreeBSD (hier(7)).
 #   - as root: runs directly;
 #   - in a graphical session (WAYLAND_DISPLAY/DISPLAY) with pkexec: polkit,
 #     whose session agent asks graphically (works from menus like fuzzel).
 #     pkexec clears the environment, so the session's display is passed to
 #     the helper as arguments (only the variables below are accepted by it);
+#   - with no polkit agent, passwordless sudo/doas (sudo -n) when it is allowed;
 #   - otherwise, or when the session has no polkit agent: sudo (or doas) in
 #     the terminal Mocinha was started from, if it is a terminal emulator
 #     (/dev/pts/*); in a graphical session without one (e.g. from fuzzel in
 #     a77ien's Spitfire, which runs no polkit agent), in a new terminal window
 #     ($TERMINAL, foot, alacritty or xterm) where sudo/doas can ask.
 DISPLAY_VARS="WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY XDG_SESSION_TYPE GDK_BACKEND"
+case "$0" in
+	*/bin/mocinha) PREFIX=${0%/bin/mocinha} ;;
+	*) PREFIX=/usr ;;
+esac
 
 if [ "$(id -u)" -eq 0 ]; then
-	exec python3 /usr/share/mocinha/bin/mocinha "$@"
+	exec python3 "$PREFIX/share/mocinha/bin/mocinha" "$@"
 fi
 
 display_args() {
@@ -23,9 +29,9 @@ display_args() {
 terminal_elevation() {
 	if command -v sudo >/dev/null 2>&1; then
 		exec sudo --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,DISPLAY,XAUTHORITY,XDG_SESSION_TYPE,GDK_BACKEND \
-			/usr/bin/mocinha "$@"
+			"$PREFIX/bin/mocinha" "$@"
 	elif command -v doas >/dev/null 2>&1; then
-		exec doas env $(display_args) /usr/bin/mocinha "$@"
+		exec doas env $(display_args) "$PREFIX/bin/mocinha" "$@"
 	fi
 }
 
@@ -39,8 +45,8 @@ if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&
 	# from tty1's .bash_profile) would make it ask there, unseen, and wait forever;
 	# without a terminal it exits 127 instead and the fallbacks below take over.
 	case "$(tty 2>/dev/null)" in
-		/dev/pts/*) pkexec /usr/lib/mocinha/mocinha-root "$@" ;;
-		*) pkexec /usr/lib/mocinha/mocinha-root "$@" </dev/null ;;
+		/dev/pts/*) pkexec "$PREFIX/lib/mocinha/mocinha-root" "$@" ;;
+		*) pkexec "$PREFIX/lib/mocinha/mocinha-root" "$@" </dev/null ;;
 	esac
 	status=$?
 	# 127: no authorization could be obtained (e.g. no polkit agent in the session)
@@ -57,12 +63,23 @@ case "$(tty 2>/dev/null)" in
 esac
 [ -z "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && [ -t 0 ] && terminal_elevation "$@"
 
+# Passwordless sudo/doas (e.g. a live session's NOPASSWD rule, au-d77) needs no
+# terminal: started from the session's autostart or a menu, run directly.
+if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
+	if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+		exec sudo -n --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,DISPLAY,XAUTHORITY,XDG_SESSION_TYPE,GDK_BACKEND \
+			"$PREFIX/bin/mocinha" "$@"
+	elif command -v doas >/dev/null 2>&1 && doas -n true 2>/dev/null; then
+		exec doas -n env $(display_args) "$PREFIX/bin/mocinha" "$@"
+	fi
+fi
+
 if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && { command -v sudo || command -v doas; } >/dev/null 2>&1; then
 	for term in ${TERMINAL:-} foot alacritty xterm; do
 		command -v "$term" >/dev/null 2>&1 || continue
 		case "$term" in
-			foot) exec foot --title "Mocinha Installer" /usr/bin/mocinha "$@" ;;
-			*) exec "$term" -e /usr/bin/mocinha "$@" ;;
+			foot) exec foot --title "Mocinha Installer" "$PREFIX/bin/mocinha" "$@" ;;
+			*) exec "$term" -e "$PREFIX/bin/mocinha" "$@" ;;
 		esac
 	done
 fi

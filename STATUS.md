@@ -1,6 +1,6 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-11 (sysv-d77 with the Mocinha 0.1.5 code: QEMU runs and real hardware). 2026-10-10: a77ien added; its runs use the code of the commit that adds it. Earlier VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
+**Date:** 2026-10-11 (au-d77 with the Mocinha 0.1.6 code: QEMU runs and real hardware; sysv-d77 with 0.1.5). 2026-10-10: a77ien added; its runs use the code of the commit that adds it. Earlier VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
 
 **Contract change (2026-10-08):** Mocinha is no longer 100% offline. It is
 offline-first, with online components where they are declared or chosen
@@ -19,7 +19,7 @@ something is not listed as validated here, assume it is not.
 | Target | State |
 |---|---|
 | btw-d77 (Arch + systemd) | **Installed on real hardware** (ThinkPad X61, BIOS) through the **GTK3 wizard** of the packaged Mocinha, live copy, Qtile session working --- reported by the maintainer (2026-10-08); not instrumented by the test harness. **CLI install + boot validated in QEMU** from the real btw-d77 2026.10.07 ISO: BIOS/GRUB with its online components plus an AUR build, UEFI/GRUB with the online components declined. Never run on real hardware. GUI never run on the live. |
-| au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU** from the real au-d77 image (built from `da8e27b`): install from the BIOS-booted live; installed disk boots under BIOS and UEFI. The live image itself does not boot under OVMF (remaster bug, see below). Never run on real hardware. GUI never run on FreeBSD. |
+| au-d77 (FreeBSD 14.5 + rc.d) | **CLI install + boot validated in QEMU**, BIOS (MBR and GPT layouts, and each over an earlier install of the other or of itself) and UEFI (live booted in UEFI since the remaster's ESP fix), from this repository and **by the Mocinha installed on the live** (au-d77 branch `mocinha`). **Real hardware (maintainer, 2026-10-11):** installed through the **GTK3 wizard** of the live (Mocinha `0.1.6rc1`) and booted. The first attempt failed at `gpart create -s bsd ada0s1: File exists`: the disk held an earlier MBR install whose BSD disklabel GEOM tasted again in the new slice. Reproduced in QEMU (`KEEP_DISK=1`), fixed in 0.1.6 as au-d77-install does (nested tables destroyed first, the slice's stale label destroyed before the BSD scheme), regression test added; the hardware run then installed after the disk's first 32 MiB were zeroed by hand. |
 | Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
 | hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror; and **with the Mocinha package on the live** (ISO 20261008 built from the local hybrid-d77 branch `mocinha`): BIOS and UEFI install + boot + self-removal, and the launcher from the Sway session (pkexec + mate-polkit) opens the wizard as root. **Real hardware:** the niri ISO 20261008 with the Mocinha package booted on a ThinkPad T480s and the wizard opened in the niri session (maintainer's photo, 2026-10-08). On a desktop PC, a GTK install with an online package failed at "Install online components" with `[Errno 17] File exists: '/mnt/etc/resolv.conf'` (no disk data lost; the step runs after deployment): `run_in_target(network=True)` called mkdir on the resolv.conf file mount point. Never hit in QEMU because arch-chroot handles it on Arch and the Chimera runs chose only a mirror. Reproduced in QEMU (`run_chimera_test.sh --online-package htop`), fixed, re-run: install, online verify and boot pass; regression test added. |
 | Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
@@ -164,7 +164,12 @@ confirmation. No placeholder binaries are written anywhere.
   `crux-pkgadd` never installs `[live_only].packages`, so it does not reach the
   target. The sysv-d77 live starts the wizard with its Openbox session and keeps
   `crux-installer` as the text installer (branch `mocinha`).
-- No FreeBSD package.
+- **FreeBSD (au-d77)**: no pkg package; au-d77's `scripts/install-mocinha.sh`
+  installs the pinned release archive (SHA-256) into `/usr/local` like its Wasp
+  build, the launcher finds its prefix from its own path, and the manifest's
+  `[live_only].files` remove it from the target. The live starts the wizard
+  with its Wasp session (passwordless `sudo -n`, no terminal window) and keeps
+  `au-d77-install` as the text installer.
 
 ---
 
@@ -261,9 +266,11 @@ execution (covered by unit tests only), LUKS/LVM set up with the real tools
 
 ### au-d77 --- 14.5-RELEASE image built from `~/Remaster/au-d77` at `da8e27b` (repository untouched)
 
-Harness: `tools/qemu/run_au_d77_test.sh --firmware bios|uefi`
-(`SKIP_INSTALL=1` re-runs only the boot checks), expectations in
-`tools/qemu/expect/au-d77.json`. FreeBSD 14 has no 9p: Mocinha is fetched over
+Harness: `tools/qemu/run_au_d77_test.sh --firmware bios|uefi [--layout gpt|mbr] [--packaged]`
+(`SKIP_INSTALL=1` re-runs only the boot checks; `KEEP_DISK=1` installs over the
+previous run's disk), expectations in `tools/qemu/expect/au-d77.json` (GPT) and
+`au-d77-mbr.json`. `--packaged` runs the Mocinha installed on the live image
+with its `/usr/local/etc/mocinha.toml` (checked identical to the example). FreeBSD 14 has no 9p: Mocinha is fetched over
 HTTP and logs uploaded with HTTP PUT. The live has no serial login, so the
 driver boots it single-user from the loader, switches `ttyu0` to an autologin
 getty on a throwaway qcow2 overlay of the image, continues to multi-user and
@@ -276,27 +283,39 @@ chosen at install time, and diagnostics read in single-user mode.
 | BIOS live -> install | pass (14 steps verified; re-run with the online code) | --- | --- |
 | Installed disk, BIOS | --- | pass (re-run with the online code) | pass |
 | Installed disk, UEFI (empty NVRAM, removable path) | --- | pass (run 3 times, code of `54917c4`) | pass |
+| 0.1.6 code, image `da8e27b`: BIOS, MBR (default) / GPT (`--layout gpt`) | pass / pass | pass / pass | pass / pass |
+| 0.1.6rc1 on the au-d77 branch image, `--packaged`: BIOS MBR / UEFI GPT (live booted under OVMF) | pass / pass | pass / pass | pass / pass |
+| Over an earlier install (`KEEP_DISK=1`): MBR over MBR with `0.1.6rc1` | **fail**: `gpart create -s bsd: File exists` (the bare-metal failure) | --- | --- |
+| Over an earlier install, 0.1.6 code: MBR over MBR / MBR over GPT | pass / pass | pass / pass | pass / pass |
 
-The **au-d77 live image does not boot under OVMF**: its 32 MiB ESP is
-formatted FAT32 with ~64 496 clusters, below the 65 525 FAT32 requires, and
-EDK2 refuses it (`assemble-image.sh` hides mkfs.fat's warning). Real firmware
-may be lenient. Installing from a UEFI-booted au-d77 live has therefore not
-been tested.
+The au-d77 live image at `da8e27b` did not boot under OVMF: its 32 MiB ESP
+was formatted FAT32 with ~64 496 clusters, below the 65 525 FAT32 requires,
+and EDK2 refused it. The au-d77 branch `mocinha` formats it FAT16; its live
+boots under OVMF and the UEFI install from it passes.
 
 Checked: fstab by labels (`ufs/AU_D77_ROOT`, `gpt/au-d77-swap`,
 `gpt/au-d77-efi`, tmpfs `/tmp`); `loader.conf` mounts `AU_D77_ROOT`;
 `rc.conf` hostname, `tmpmfs="NO"`, `dumpdev="AUTO"`; console `insecure`; no
 `al.d77` autologin; only user `dani` (wheel, operator, video), `d77` and its
 home removed; root password set (`$6$`); `sudoers.d/10-live` removed,
-`10-wheel` present; `doas.conf`.
+`10-wheel` present; `doas.conf`. Since 0.1.6 also: automatic login of the
+primary user (`al.dani` in `gettytab`, used by `ttyv0`; the multi-user boot
+screenshot shows its `.profile` starting the Wasp session, which only fails for
+lack of KMS), the full name in the GECOS field, `keymap="pt"` in `rc.conf`,
+`/etc/localtime` = `Europe/Lisbon` with `/var/db/zoneinfo`, the Wasp/foot/fuzzel
+configuration from `/usr/share/skel` in the user's home, the layout in
+`gpart show`, and no Mocinha left on the target.
 
-Differences from what `au-d77-install` produces:
-1. No autologin option (au-d77-install asks, default yes).
-2. Swap size fixed by the manifest (`2g`); au-d77-install scales it with disk size.
-3. No MBR layout (au-d77-install offers it for BIOS).
-4. GPT labels `au-d77-*` instead of `bootcode/efiboot/swap0/rootfs`, on purpose
-   (the live already uses `efiboot`).
-5. Keymap/timezone not offered on FreeBSD (au-d77-install asks interactively).
+Differences from what `au-d77-install` produces (until 0.1.5 also: no
+autologin, fixed swap, no MBR layout, no keymap/timezone, no full name, root
+password optional --- all implemented in 0.1.6):
+1. GPT labels `au-d77-*` instead of `bootcode/efiboot/swap0/rootfs`, on purpose
+   (the live already uses `efiboot`); in the MBR layout the swap is a glabel
+   (`label/au-d77-swap`) instead of `/dev/<disk>s1b`.
+2. The keymap is written to `rc.conf` (`keymap=`); au-d77-install runs
+   `kbdmap -K` in a chroot of the target, which only applies to the running
+   console. Neither changes the Wasp keyboard layout (its `config.lua`).
+3. `/etc/hosts` is rewritten with the hostname (au-d77-install leaves the live's).
 
 Problems found by the au-d77 runs and fixed: FreeBSD probe (0-byte disks, live
 root by label not recognised); agy's manifest extracted `base.txz` instead of

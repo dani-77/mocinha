@@ -72,6 +72,7 @@ class MocinhaGTKApp(Gtk.Window):
         self._page_welcome = self._create_welcome_page()
         self._page_disk = self._create_disk_page()
         self._page_user = self._create_user_page()
+        self._page_locale = self._create_locale_page()
         self._page_services = self._create_services_page()
         self._page_boot = self._create_boot_page()
         # Only for remasters with an online provider (AGENTS.md "Online rules"): the network
@@ -87,6 +88,7 @@ class MocinhaGTKApp(Gtk.Window):
         ] + ([("network", self._page_network)] if self._page_network else []) + [
             ("disk", self._page_disk),
             ("user", self._page_user),
+        ] + ([("locale", self._page_locale)] if self._page_locale else []) + [
             ("services", self._page_services),
             ("boot", self._page_boot),
         ] + ([("online", self._page_online)] if self._page_online else []) + [
@@ -189,6 +191,19 @@ class MocinhaGTKApp(Gtk.Window):
             self.disk_combo.set_active(0)
         box.pack_start(self.disk_combo, False, False, 0)
 
+        # Partition table choice, when the remaster offers one on this firmware
+        self.table_combo = None
+        offered = self.manifest.install.bios_partition_tables if self.facts.firmware.value == "BIOS" else []
+        if offered:
+            names = {"mbr": "MBR (FreeBSD slice with a BSD disklabel)", "dos": "MBR (DOS partition table)",
+                     "gpt": "GPT (with BIOS boot code)"}
+            box.pack_start(Gtk.Label(label="Partition table (legacy BIOS):", xalign=0), False, False, 0)
+            self.table_combo = Gtk.ComboBoxText()
+            for i, table in enumerate(offered):
+                self.table_combo.append(table, names.get(table, table.upper()) + (" --- recommended" if i == 0 else ""))
+            self.table_combo.set_active(0)
+            box.pack_start(self.table_combo, False, False, 0)
+
         warn_lbl = Gtk.Label()
         warn_lbl.set_markup(
             "<span color='#d9534f'><b>Warning:</b> The selected disk will be completely partitioned and formatted. "
@@ -221,11 +236,13 @@ class MocinhaGTKApp(Gtk.Window):
             entry.set_placeholder_text(placeholder)
             return entry
 
+        root_required = self.manifest.users.root_password == "required"
         rows = [
             ("Username:", "entry_user", Gtk.Entry(placeholder_text="e.g. dani")),
+            ("Full name:", "entry_fullname", Gtk.Entry(placeholder_text="optional")),
             ("Password:", "entry_pass", password_entry("required")),
             ("Confirm password:", "entry_pass2", password_entry("repeat the password")),
-            ("Root password:", "entry_root", password_entry("empty: root account locked")),
+            ("Root password:", "entry_root", password_entry("required" if root_required else "empty: root account locked")),
             ("Confirm root password:", "entry_root2", password_entry("repeat the root password")),
             ("Hostname:", "entry_host", Gtk.Entry(text=self.manifest.system.id)),
         ]
@@ -236,12 +253,20 @@ class MocinhaGTKApp(Gtk.Window):
 
         note = Gtk.Label(xalign=0)
         note.set_line_wrap(True)
-        note.set_markup(
-            "<small>Root password: set one to use the root account, or leave it empty to keep root "
-            "locked and administer the system as the user above (member of <b>wheel</b>). "
-            "The plan summary shows which one applies.</small>"
-        )
+        if root_required:
+            note.set_markup("<small>This system needs a root password (for example, single-user mode asks for it).</small>")
+        else:
+            note.set_markup(
+                "<small>Root password: set one to use the root account, or leave it empty to keep root "
+                "locked and administer the system as the user above (member of <b>wheel</b>). "
+                "The plan summary shows which one applies.</small>"
+            )
         grid.attach(note, 0, len(rows), 2, 1)
+        self.autologin_check = None
+        if self.manifest.users.autologin:
+            self.autologin_check = Gtk.CheckButton(label="Log in automatically to the desktop at boot")
+            self.autologin_check.set_active(self.manifest.users.autologin == "on")
+            grid.attach(self.autologin_check, 0, len(rows) + 1, 2, 1)
         box.pack_start(grid, False, False, 0)
 
         return box
@@ -280,6 +305,53 @@ class MocinhaGTKApp(Gtk.Window):
         current = self.entry_online_packages.get_text().split()
         if name not in current:
             self.entry_online_packages.set_text(" ".join(current + [name]))
+
+    def _create_locale_page(self) -> Optional[Gtk.Widget]:
+        """Locale, keymap and timezone, as far as the sysconfig provider supports them; None when it supports none."""
+        provider = self.registry.get("sysconfig", self.manifest.providers.sysconfig)
+        offered = provider.setting_choices() if provider is not None and hasattr(provider, "setting_choices") else {}
+        self.setting_combos: Dict[str, Gtk.ComboBoxText] = {}
+        if not offered:
+            return None
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        box.set_margin_top(30)
+        box.set_margin_bottom(30)
+        box.set_margin_start(40)
+        box.set_margin_end(40)
+        lbl = Gtk.Label()
+        lbl.set_markup("<span size='x-large' weight='bold'>Language, Keyboard and Time Zone</span>")
+        lbl.set_alignment(0, 0.5)
+        box.pack_start(lbl, False, False, 0)
+        grid = Gtk.Grid()
+        grid.set_column_spacing(16)
+        grid.set_row_spacing(12)
+        labels = {"locale": ("Language (locale):", "e.g. pt_PT.UTF-8"),
+                  "keymap": ("Console keyboard:", "e.g. pt"),
+                  "timezone": ("Time zone:", "e.g. Europe/Lisbon")}
+        row = 0
+        for key in ("locale", "keymap", "timezone"):
+            if key not in offered:
+                continue
+            combo = Gtk.ComboBoxText.new_with_entry()
+            for value in offered[key]:
+                combo.append_text(value)
+            combo.get_child().set_placeholder_text(f"{labels[key][1]} --- empty: keep the live system's")
+            combo.set_hexpand(True)
+            grid.attach(Gtk.Label(label=labels[key][0], xalign=0), 0, row, 1, 1)
+            grid.attach(combo, 1, row, 1, 1)
+            self.setting_combos[key] = combo
+            row += 1
+        note = Gtk.Label(xalign=0)
+        note.set_line_wrap(True)
+        note.set_markup("<small>Leave a field empty to keep the live system's setting. The plan checks that "
+                        "the value exists on the installed system.</small>")
+        grid.attach(note, 0, row, 2, 1)
+        box.pack_start(grid, False, False, 0)
+        return box
+
+    def _setting(self, key: str) -> Optional[str]:
+        combo = self.setting_combos.get(key)
+        return (combo.get_child().get_text().strip() or None) if combo is not None else None
 
     def _create_services_page(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -725,6 +797,12 @@ class MocinhaGTKApp(Gtk.Window):
             root_password=root_password,
             hostname=hostname,
             selected_services=selected_srvs,
+            full_name=self.entry_fullname.get_text().strip() or None,
+            autologin=self.autologin_check.get_active() if self.autologin_check is not None else None,
+            partition_table=self.table_combo.get_active_id() if self.table_combo is not None else None,
+            locale=self._setting("locale"),
+            keymap=self._setting("keymap"),
+            timezone=self._setting("timezone"),
         )
         if self._page_online is not None:
             choices.online = None if self.online_check.get_active() or not self.manifest.online else False
@@ -830,6 +908,8 @@ class MocinhaGTKApp(Gtk.Window):
             return "Enter a password for the user."
         if self.entry_pass.get_text() != self.entry_pass2.get_text():
             return "The user passwords do not match."
+        if self.manifest.users.root_password == "required" and not self.entry_root.get_text():
+            return "Enter a root password (this system needs one)."
         if self.entry_root.get_text() != self.entry_root2.get_text():
             return "The root passwords do not match."
         return None
@@ -850,7 +930,8 @@ class MocinhaGTKApp(Gtk.Window):
 # Staging directory where the target is mounted during installation
 
 # Where a live system ships its manifest (docs/manifest-schema.md)
-MANIFEST_LOCATIONS = (Path("/etc/mocinha.toml"), Path("/usr/share/mocinha/mocinha.toml"))
+MANIFEST_LOCATIONS = (Path("/etc/mocinha.toml"), Path("/usr/local/etc/mocinha.toml"),  # /usr/local/etc: FreeBSD hier(7)
+                      Path("/usr/share/mocinha/mocinha.toml"), Path("/usr/local/share/mocinha/mocinha.toml"))
 
 
 def run_gtk_app(manifest_path: Optional[str] = None) -> int:

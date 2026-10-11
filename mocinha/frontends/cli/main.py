@@ -101,6 +101,9 @@ def prepare_plan(args: argparse.Namespace, stream: EventStream):
         aur_packages=list(args.aur or []),
         kernel=args.kernel,
         mirror=args.mirror,
+        full_name=args.full_name,
+        autologin=args.autologin,
+        partition_table=args.partition_table,
     )
     plan = resolver.resolve(choices)
     wire_plan_providers(plan, registry, manifest)
@@ -252,6 +255,12 @@ def add_online_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--aur", action="append", metavar="PKG", help="Extra package built from the AUR (repeatable)")
     p.add_argument("--mirror", help="Package mirror from the remaster's mirror list (mocinha mirrors); default: the distribution's")
     p.add_argument("--kernel", help="Bootstrap profiles: kernel package among [bootstrap].kernels (default: the first)")
+    p.add_argument("--full-name", help="Full name of the primary user (passwd GECOS field)")
+    auto = p.add_mutually_exclusive_group()
+    auto.add_argument("--autologin", dest="autologin", action="store_true", default=None,
+                      help="Log the primary user in automatically (when [users].autologin offers it)")
+    auto.add_argument("--no-autologin", dest="autologin", action="store_false", help="No automatic login")
+    p.add_argument("--partition-table", help="On BIOS, one of [install].bios_partition_tables (default: the first)")
 
 
 def main() -> None:

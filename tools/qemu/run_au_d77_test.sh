@@ -2,6 +2,12 @@
 # run_au_d77_test.sh --- Install au-d77 with Mocinha from the real au-d77 live image, then boot it.
 #
 #   tools/qemu/run_au_d77_test.sh [--firmware bios|uefi] [--image PATH.img.xz] [--script adversarial-freebsd.sh]
+#                                 [--packaged] [--layout gpt|mbr]
+#
+# --packaged: run the Mocinha installed on the live image (/usr/local/bin/mocinha) with
+#             the live's /usr/local/etc/mocinha.toml, instead of this repository's tree
+# --layout:   BIOS partition table among the manifest's bios_partition_tables (default:
+#             the manifest's first, MBR); expectations in expect/au-d77[-mbr].json
 #
 # 1. live:   boots a throwaway qcow2 overlay of the au-d77 live image, installs to
 #            a fresh disk (see freebsd_serial.py for how the serial shell is obtained)
@@ -20,11 +26,15 @@ HTTP_PORT="${HTTP_PORT:-8001}"
 FIRMWARE="bios"
 IMAGE=""
 SCRIPT="startup-freebsd.sh"   # adversarial-freebsd.sh: disk-safety scenarios instead of a normal install
+PACKAGED=0
+LAYOUT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --firmware) FIRMWARE="$2"; shift 2 ;;
         --image) IMAGE="$2"; shift 2 ;;
         --script) SCRIPT="$2"; shift 2 ;;
+        --packaged) PACKAGED=1; shift ;;
+        --layout) LAYOUT="$2"; shift 2 ;;
         -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -32,7 +42,12 @@ done
 [ -n "$IMAGE" ] || IMAGE="$(ls -t "$AU_OUT"/au-d77-*.img.xz 2>/dev/null | head -n1 || true)"
 [ -f "$IMAGE" ] || { echo "au-d77 image not found (looked in $AU_OUT)" >&2; exit 1; }
 
-RUN="au-$FIRMWARE"
+case "$LAYOUT" in ""|gpt|mbr) ;; *) echo "--layout must be gpt or mbr" >&2; exit 2 ;; esac
+[ "$FIRMWARE" = bios ] || [ -z "$LAYOUT" ] || { echo "--layout is a BIOS choice" >&2; exit 2; }
+# The table actually used: on BIOS the manifest's first offer (MBR) unless --layout says otherwise
+EFFECTIVE_LAYOUT="$([ "$FIRMWARE" = bios ] && echo "${LAYOUT:-mbr}" || echo gpt)"
+RUN="au-$FIRMWARE-$EFFECTIVE_LAYOUT"
+[ "$PACKAGED" = 1 ] && RUN="${RUN}-packaged"
 [ "$SCRIPT" = "startup-freebsd.sh" ] || RUN="${RUN}-${SCRIPT%.sh}"
 SKIP_INSTALL="${SKIP_INSTALL:-0}"   # 1: reuse the installed disk, run only the boot checks
 WORK="$DIR/work"
@@ -50,10 +65,16 @@ if [ ! -f "$RAW" ]; then
 fi
 LIVE="$WORK/au-live-$RUN.qcow2"
 DISK="$WORK/target-$RUN.qcow2"
+KEEP_DISK="${KEEP_DISK:-0}"   # 1: install over the previous run's disk (an earlier install on it)
 if [ "$SKIP_INSTALL" != 1 ]; then
-    rm -f "$LIVE" "$DISK"
+    rm -f "$LIVE"
     qemu-img create -q -f qcow2 -F raw -b "$RAW" "$LIVE"
-    qemu-img create -q -f qcow2 "$DISK" 20G
+    if [ "$KEEP_DISK" = 1 ] && [ -f "$DISK" ]; then
+        echo ">> Installing over the existing disk $DISK"
+    else
+        rm -f "$DISK"
+        qemu-img create -q -f qcow2 "$DISK" 20G
+    fi
 fi
 
 # Mocinha working tree for the guest
@@ -101,7 +122,7 @@ vm "$WORK/serial-$RUN.sock" "$WORK/mon-$RUN.sock" \
     -drive "file=$LIVE,if=virtio,format=qcow2" -drive "file=$DISK,if=virtio,format=qcow2"
 QEMU_PID=$!
 timeout 3600 python3 "$DIR/freebsd_serial.py" live "$WORK/serial-$RUN.sock" "$LOGS/serial-live.log" \
-    "fetch -q -o /tmp/run.sh http://10.0.2.2:$HTTP_PORT/$SCRIPT && sh /tmp/run.sh $HTTP_PORT" \
+    "fetch -q -o /tmp/run.sh http://10.0.2.2:$HTTP_PORT/$SCRIPT && sh /tmp/run.sh $HTTP_PORT $PACKAGED $LAYOUT" \
     || { echo ">> live driver exited with $?"; kill "$QEMU_PID" 2>/dev/null || true; }
 wait "$QEMU_PID" || true
 if [ "$(cat "$LOGS/result.status" 2>/dev/null)" != "SUCCESS" ]; then
@@ -133,10 +154,16 @@ echo "### groups"; id dani
 echo "### root_hash"; awk -F: "\$1==\"root\" {print substr(\$2,1,3)}" /etc/master.passwd
 echo "### sudoers.d"; ls /usr/local/etc/sudoers.d
 echo "### home"; ls /home
+echo "### gettytab"; grep -A1 "^al\\." /etc/gettytab
+echo "### gecos"; awk -F: "\$1==\"dani\" {print \$5}" /etc/passwd
+echo "### localtime"; cmp -s /etc/localtime /usr/share/zoneinfo/Europe/Lisbon && echo localtime-is-lisbon; cat /var/db/zoneinfo
+echo "### skel"; ls -a /home/dani /home/dani/.config
+echo "### mocinha_files"; ls -d /usr/local/bin/mocinha /usr/local/share/mocinha /usr/local/etc/mocinha.toml 2>&1
+echo "### gpart"; gpart show
 echo ===DIAG""_END==='
 vm "$WORK/serial-diag-$RUN.sock" "$WORK/mon-diag-$RUN.sock" -drive "file=$DISK,if=virtio,format=qcow2" -snapshot
 QEMU_PID=$!
 timeout 400 python3 "$DIR/freebsd_serial.py" single "$WORK/serial-diag-$RUN.sock" "$LOGS/serial-diag.log" mocinha-root "$DIAG" \
     || echo ">> diag driver exited with $?"
 kill "$QEMU_PID" 2>/dev/null || true; wait "$QEMU_PID" 2>/dev/null || true
-python3 "$DIR/check_freebsd_diag.py" "$LOGS/serial-diag.log" "$DIR/expect/au-d77.json"
+python3 "$DIR/check_freebsd_diag.py" "$LOGS/serial-diag.log" "$DIR/expect/au-d77$([ "$EFFECTIVE_LAYOUT" = mbr ] && echo -mbr).json"

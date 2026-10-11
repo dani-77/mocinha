@@ -6,12 +6,13 @@ and its installer does not set a locale either; the live's setting is kept.
 """
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 import re
 
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
+from mocinha.providers.sysconfig import keymap_names, zone_names
 
 KEYMAP_DIR = "usr/share/keymaps"
 
@@ -23,6 +24,11 @@ class ChimeraSysconfigProvider(ProviderContract):
 
     def capabilities(self) -> List[str]:
         return ["sysconfig"]
+
+    def setting_choices(self) -> Dict[str, List[str]]:
+        """Values the frontends can offer (no locale: musl has no locale compilation)."""
+        live = Path("/")
+        return {"keymap": keymap_names(live, KEYMAP_DIR), "timezone": zone_names(live)}
 
     def _problems(self, root: Path, context: ExecutionContext) -> List[str]:
         problems = []

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+import re
 from typing import List, Optional
 
 from mocinha.core.errors import ExecutionError, VerificationError
@@ -134,16 +135,22 @@ class FreeBSDPlatformProvider(ProviderContract):
             if len(cols) >= 4 and cols[2].isdigit():
                 gpt_labels[f"/dev/{disk_name}p{cols[2]}"] = cols[3]
         # A label also present elsewhere (e.g. on the live medium) would be ambiguous at boot
-        elsewhere = {}
+        elsewhere, glabels = {}, {}
+        on_target = re.compile(rf"{re.escape(disk_name)}(p\d+|s\d+[a-h]?)$")
         for line in self.runner.run(["glabel", "status", "-s"], phase=EventPhase.VERIFY, check=True).stdout.splitlines():
             cols = line.split()
-            if len(cols) >= 3 and not cols[2].startswith(disk_name + "p"):
+            if len(cols) >= 3 and on_target.match(cols[2]):
+                glabels[f"/dev/{cols[0]}"] = f"/dev/{cols[2]}"
+            elif len(cols) >= 3:
                 elsewhere[f"/dev/{cols[0]}"] = f"/dev/{cols[2]}"
         wrong = {}
         for _, node, partition in self._fstab_entries(context):
             if node.startswith("/dev/gpt/"):
                 actual = gpt_labels.get(partition)
                 ok = actual == node[len("/dev/gpt/"):]
+            elif node.startswith("/dev/label/"):  # glabel (the swap of the MBR layout)
+                actual = glabels.get(node)
+                ok = actual == partition
             elif node.startswith("/dev/ufs/"):
                 out = self.runner.run(["fstyp", "-l", partition], phase=EventPhase.VERIFY, check=False).stdout.split()
                 actual = out[1] if len(out) >= 2 else None

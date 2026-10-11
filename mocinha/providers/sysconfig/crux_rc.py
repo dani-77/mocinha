@@ -18,6 +18,7 @@ import re
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
+from mocinha.providers.sysconfig import glibc_source_locales, keymap_names, zone_names
 from mocinha.providers.base import CommandRunner, run_in_target
 from mocinha.providers.sysconfig.systemd import BUILTIN_LOCALES, _locale_charset, _normalized_locale
 
@@ -53,6 +54,13 @@ class CruxRcSysconfigProvider(ProviderContract):
 
     def capabilities(self) -> List[str]:
         return ["sysconfig"]
+
+    def setting_choices(self) -> Dict[str, List[str]]:
+        """Values the frontends can offer. The CRUX live carries locale sources and kbd but no zoneinfo
+        (the target's tzdata is installed from the medium): the timezone is offered without a list."""
+        live = Path("/")
+        return {"locale": glibc_source_locales(live), "keymap": keymap_names(live, "usr/share/kbd/keymaps"),
+                "timezone": zone_names(live)}
 
     # value key -> data directory that proves it exists
     DATA_DIRS = {"locale": "usr/share/i18n/locales", "timezone": "usr/share/zoneinfo", "keymap": "usr/share/kbd/keymaps"}

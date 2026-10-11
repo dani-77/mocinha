@@ -192,6 +192,16 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
                 possible_recovery="Remove [network].configure_wireless from the manifest or implement it in the provider.",
             )
         bindings["configure_wireless"] = (sys_prov, sys_prov.configure_wireless, sys_prov.verify_wireless)
+    if any(step.step_id == "configure_autologin" for step in plan.steps):
+        if not hasattr(sys_prov, "configure_autologin"):
+            raise ResolutionError(
+                message=f"The sysconfig provider '{sys_prov.name}' cannot configure automatic login.",
+                cause="Automatic login was chosen ([users].autologin offers it).",
+                failed_operation="Wire the automatic login step",
+                current_state="No disk has been modified.",
+                possible_recovery="Turn automatic login off, or implement it in the provider.",
+            )
+        bindings["configure_autologin"] = (sys_prov, sys_prov.configure_autologin, sys_prov.verify_autologin)
     if init_prov is not None:
         bindings["configure_initramfs"] = (init_prov, init_prov.apply, init_prov.verify)
 

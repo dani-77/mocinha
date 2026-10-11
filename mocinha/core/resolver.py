@@ -44,6 +44,12 @@ class UserChoices:
     kernel: Optional[str] = None
     # Package mirror chosen from [online].mirror_list; None = the distribution's default
     mirror: Optional[str] = None
+    # Primary user's full name (passwd GECOS field); None = none
+    full_name: Optional[str] = None
+    # Automatic login of the primary user, when [users].autologin offers it; None = its default
+    autologin: Optional[bool] = None
+    # Partition table among [install].bios_partition_tables on BIOS; None = the first one
+    partition_table: Optional[str] = None
 
 
 # Firmware each bootloader can boot from (a fact about the bootloader, not a policy);
@@ -123,11 +129,8 @@ class InstallationResolver:
                 possible_recovery=(f"Choose a bootloader for {firmware} among the remaster's: {', '.join(compatible)}"
                                    if compatible else f"This remaster declares no bootloader for {firmware}."),
             )
-        partition_table = "gpt" if firmware == "UEFI" else "dos"
-        # Remaster policy overrides the firmware-derived default; the storage
-        # provider rejects layouts it cannot make bootable on this firmware.
-        if self.manifest.install.partition_table:
-            partition_table = self.manifest.install.partition_table
+        partition_table = self._partition_table(firmware, choices.partition_table)
+        swap_size = self._swap_size(disk.size_bytes)
 
         # 3. Resolve Service Graph
         service_graph = self._build_service_graph()
@@ -166,6 +169,23 @@ class InstallationResolver:
                     current_state=f"{label}={value!r}",
                     possible_recovery=f"Use a {label} such as 'pt_PT.UTF-8', 'pt-latin1' or 'Europe/Lisbon'.",
                 )
+        if self.manifest.users.root_password == "required" and not choices.root_password:
+            raise ResolutionError(
+                message="This system needs a root password.",
+                cause="[users].root_password = \"required\" in the manifest (e.g. single-user mode asks for it).",
+                failed_operation="Validate the root account",
+                current_state="No root password was given.",
+                possible_recovery="Choose a root password.",
+            )
+        if choices.full_name is not None and (":" in choices.full_name or "\n" in choices.full_name):
+            raise ResolutionError(
+                message="The full name cannot contain ':' or line breaks.",
+                cause="It is stored in a ':'-separated field of the password database.",
+                failed_operation="Validate the full name",
+                current_state=f"full_name={choices.full_name!r}",
+                possible_recovery="Remove the ':' from the full name.",
+            )
+        autologin = self._autologin(choices.autologin)
         root_account = "password set" if choices.root_password else "locked"
 
         live_only = self.manifest.live_only
@@ -344,6 +364,15 @@ class InstallationResolver:
             ),
         ])
 
+        if autologin:
+            at = next(i for i, step in enumerate(steps) if step.step_id == "configure_locale") + 1
+            steps.insert(at, PlanStep(
+                step_id="configure_autologin",
+                title=f"Log '{choices.username}' in automatically",
+                description="Configure automatic login of the primary user on the console that starts the desktop",
+                is_destructive=False,
+                provider_name="sysconfig",
+            ))
         wireless, wireless_note = self._wireless_interface()
         if wireless:
             at = next(i for i, step in enumerate(steps) if step.step_id == "configure_locale") + 1
@@ -372,6 +401,8 @@ class InstallationResolver:
             keymap=choices.keymap,
             timezone=choices.timezone,
             wireless=wireless_note,
+            swap=swap_size,
+            autologin=autologin if self.manifest.users.autologin else None,
         )
 
         # Everything providers need at execution time, except secrets
@@ -401,6 +432,8 @@ class InstallationResolver:
             "keymap": choices.keymap,
             "timezone": choices.timezone,
             "wireless_interface": wireless,
+            "full_name": choices.full_name,
+            "autologin": autologin,
             "user_groups": list(self.manifest.users.groups),
             "user_shell": self.manifest.users.shell,
             "user_primary_group": self.manifest.users.primary_group,
@@ -416,7 +449,7 @@ class InstallationResolver:
             "default_target": self.manifest.services.default_target,
             "partition_table": partition_table,
             "root_label": self.manifest.install.root_label,
-            "swap_size": self.manifest.install.swap_size,
+            "swap_size": swap_size,
             "install_exclude": list(self.manifest.install.exclude),
             "fstab_extra": list(self.manifest.install.fstab_extra),
         }
@@ -507,6 +540,48 @@ class InstallationResolver:
                 possible_recovery="Select a disk with sufficient capacity.",
             )
         return disk
+
+    def _partition_table(self, firmware: str, chosen: Optional[str]) -> str:
+        """The partition table: a choice among [install].bios_partition_tables on BIOS, else the manifest's."""
+        offered = self.manifest.install.bios_partition_tables if firmware == "BIOS" else []
+        if chosen is not None and chosen not in offered:
+            raise ResolutionError(
+                message=f"Partition table {chosen!r} is not offered on {firmware}.",
+                cause=f"[install].bios_partition_tables = {self.manifest.install.bios_partition_tables} (BIOS only).",
+                failed_operation="Validate the partition table",
+                current_state=f"firmware={firmware}",
+                possible_recovery=f"Choose one of {offered}" if offered else "Leave the partition table to the manifest.",
+            )
+        if chosen:
+            return chosen
+        if offered:
+            return offered[0]
+        # Remaster policy overrides the firmware-derived default; the storage
+        # provider rejects layouts it cannot make bootable on this firmware.
+        return self.manifest.install.partition_table or ("gpt" if firmware == "UEFI" else "dos")
+
+    def _swap_size(self, disk_bytes: int) -> Optional[str]:
+        """[install].swap_size, or the swap_by_disk_size entry for this disk."""
+        rules = self.manifest.install.swap_by_disk_size
+        if not rules:
+            return self.manifest.install.swap_size
+        units = {"m": 2**20, "g": 2**30}
+        for rule in rules:
+            below = rule.get("below")
+            if below is None or disk_bytes < int(below[:-1]) * units[below[-1].lower()]:
+                return rule["size"]
+        return rules[-1]["size"]
+
+    def _autologin(self, chosen: Optional[bool]) -> bool:
+        offered = self.manifest.users.autologin
+        if chosen and offered is None:
+            raise ResolutionError(
+                message="Automatic login is not offered by this remaster.",
+                cause="[users].autologin is not set in the manifest.",
+                failed_operation="Validate automatic login",
+                possible_recovery="Leave automatic login off.",
+            )
+        return (offered == "on") if chosen is None else bool(chosen)
 
     def _wireless_interface(self) -> Tuple[Optional[str], Optional[str]]:
         """(interface to configure, plan note) for [network].configure_wireless.

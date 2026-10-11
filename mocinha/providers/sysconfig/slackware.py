@@ -18,7 +18,7 @@ before confirmation and against the target before writing.
 """
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 import re
 import shutil
 import subprocess
@@ -26,6 +26,7 @@ import subprocess
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
+from mocinha.providers.sysconfig import keymap_names, zone_names
 from mocinha.providers.sysconfig.systemd import _normalized_locale
 
 KEYMAP_DIR = "usr/share/kbd/keymaps"
@@ -58,6 +59,11 @@ class SlackwareSysconfigProvider(ProviderContract):
 
     def capabilities(self) -> List[str]:
         return ["sysconfig"]
+
+    def setting_choices(self) -> Dict[str, List[str]]:
+        """Values the frontends can offer, read from the live (the target is a copy of it)."""
+        return {"locale": available_locales(self.live_root), "keymap": keymap_names(self.live_root, KEYMAP_DIR),
+                "timezone": zone_names(self.live_root)}
 
     def _problems(self, root: Path, context: ExecutionContext) -> List[str]:
         problems = []

@@ -181,7 +181,9 @@ class ShadowUsersProvider(ProviderContract):
                 possible_recovery="Fix [users].groups in the manifest or the live image's /etc/group.",
             )
         shell = context.metadata.get("user_shell")
+        full_name = context.metadata.get("full_name")
         self._run(target_root, ["useradd", "-m"]
+                  + (["-c", full_name] if full_name else [])
                   + (["-g", primary] if primary else [])
                   + (["-s", shell] if shell else [])
                   + (["-G", ",".join(groups)] if groups else [])
@@ -221,6 +223,10 @@ class ShadowUsersProvider(ProviderContract):
 
         etc = target_root / "etc"
         problems = []
+        full_name = context.metadata.get("full_name")
+        entry = next((line.split(":") for line in content.splitlines() if line.startswith(f"{username}:")), [])
+        if full_name and (len(entry) < 5 or entry[4] != full_name):
+            problems.append(f"full name of '{username}' is {entry[4:5]}, expected {full_name!r}")
         live_users = context.metadata.get("live_only_users", [])
         for db in ("passwd", "shadow", "group", "gshadow"):
             leftovers = [u for u in live_users if u in _db_entries(etc / db)]

@@ -33,7 +33,13 @@ class InstallConfig:
     esp_size: str                    # size of the EFI system partition, e.g. "512m"
     esp_mountpoint: str              # where the ESP is mounted, e.g. "/boot" or "/boot/efi"
     esp_mount_options: str
-    partition_table: Optional[str] = None  # "gpt" | "dos"; None: GPT on UEFI, DOS on BIOS
+    partition_table: Optional[str] = None  # "gpt" | "dos" | "mbr"; None: GPT on UEFI, DOS on BIOS
+    # Partition tables offered on BIOS, the first one the default (au-d77: MBR, or GPT);
+    # empty: partition_table (or the firmware default) without a choice
+    bios_partition_tables: List[str] = field(default_factory=list)
+    # Swap size by disk size: [{below = "16000m", size = "1g"}, ..., {size = "4g"}]; the
+    # first entry whose "below" the disk is smaller than wins. Replaces swap_size.
+    swap_by_disk_size: List[Dict[str, str]] = field(default_factory=list)
     root_label: Optional[str] = None
     esp_label: Optional[str] = None
     swap_size: Optional[str] = None        # None: no swap partition
@@ -106,6 +112,11 @@ class UsersConfig:
     # crypt method passed to chpasswd -c (e.g. "SHA512"); None: the target's default.
     # Chimera's chpasswd without -c goes through PAM and writes nothing in a chroot.
     password_hash: Optional[str] = None
+    # "on"/"off": offer automatic login of the primary user, with that default; None: not offered
+    autologin: Optional[str] = None
+    # "required": the root account must get a password (e.g. a console marked insecure,
+    # where single-user mode asks for it); "optional": no root password locks the account
+    root_password: str = "optional"
 
 
 @dataclass
@@ -408,6 +419,11 @@ class _Table:
             )
         for key, value in data.items():
             want = {**required, **optional}[key]
+            if want == "rules":  # list of tables, checked by the section's own validation
+                if not isinstance(value, list):
+                    raise ManifestError(message=f"Invalid value for {where}.{key}: {value!r}",
+                                        cause="Expected an array of tables.", failed_operation=f"Validate {where}.{key}")
+                continue
             ok = all(isinstance(v, str) for v in value) if want is list and isinstance(value, list) else (
                 isinstance(value, want) and not (want is int and isinstance(value, bool))
             )
@@ -425,8 +441,24 @@ class _Table:
 
 def _validate_install(install: "InstallConfig") -> None:
     problems = []
-    if install.partition_table not in (None, "gpt", "dos"):
-        problems.append(f"partition_table must be 'gpt' or 'dos', not {install.partition_table!r}")
+    tables = ("gpt", "dos", "mbr")
+    if install.partition_table not in (None,) + tables:
+        problems.append(f"partition_table must be one of {list(tables)}, not {install.partition_table!r}")
+    if any(t not in tables for t in install.bios_partition_tables) or \
+            len(set(install.bios_partition_tables)) != len(install.bios_partition_tables):
+        problems.append(f"bios_partition_tables must list distinct values among {list(tables)}")
+    size_re = r"[1-9][0-9]*[mMgG]"
+    if install.swap_by_disk_size:
+        if install.swap_size:
+            problems.append("swap_size and swap_by_disk_size exclude each other")
+        rules = install.swap_by_disk_size
+        if not all(isinstance(r, dict) and set(r) <= {"below", "size"} and "size" in r for r in rules):
+            problems.append("swap_by_disk_size entries are tables with 'size' and optionally 'below'")
+        elif not all(re.fullmatch(size_re, str(r["size"])) and re.fullmatch(size_re, str(r.get("below", "1m")))
+                     for r in rules):
+            problems.append("swap_by_disk_size sizes must look like '512m' or '2g'")
+        elif "below" in rules[-1] or any("below" not in r for r in rules[:-1]):
+            problems.append("every swap_by_disk_size entry but the last needs 'below'; the last has none")
     for key in ("root_label", "esp_label"):
         value = getattr(install, key)
         if value is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,16}", value):
@@ -596,13 +628,16 @@ class Manifest:
             {"method": str, "source": str, "min_disk_size_bytes": int, "root_filesystem": str,
              "root_mount_options": str, "esp_size": str, "esp_mountpoint": str, "esp_mount_options": str},
             {"partition_table": str, "root_label": str, "esp_label": str, "swap_size": str,
-             "exclude": list, "fstab_extra": list, "target_mount": str},
+             "exclude": list, "fstab_extra": list, "target_mount": str, "bios_partition_tables": list,
+             "swap_by_disk_size": "rules"},
         )
         install = InstallConfig(**{k: t.get(k) for k in (
             "method", "source", "min_disk_size_bytes", "root_filesystem", "root_mount_options",
             "esp_size", "esp_mountpoint", "esp_mount_options", "partition_table", "root_label",
             "esp_label", "swap_size")}, exclude=t.get("exclude", []), fstab_extra=t.get("fstab_extra", []),
-            target_mount=t.get("target_mount", "/mnt"))
+            target_mount=t.get("target_mount", "/mnt"),
+            bios_partition_tables=t.get("bios_partition_tables", []),
+            swap_by_disk_size=t.get("swap_by_disk_size", []))
         install.esp_mountpoint = install.esp_mountpoint.rstrip("/") or "/"
         _validate_install(install)
 
@@ -655,7 +690,8 @@ class Manifest:
         )
 
         t = _Table(data.get("users", {}), "[users]", {}, {"groups": list, "shell": str, "password_hash": str,
-                                                           "primary_group": str})
+                                                           "primary_group": str, "autologin": str,
+                                                           "root_password": str})
         groups = t.get("groups", [])
         if not all(re.fullmatch(r"[a-z_][a-z0-9_-]*", g) for g in groups + [t.get("primary_group") or "users"]):
             raise ManifestError(
@@ -668,8 +704,14 @@ class Manifest:
             raise ManifestError(message="Invalid [users].password_hash",
                                 cause="Known chpasswd -c methods: DES, MD5, SHA256, SHA512, BCRYPT, YESCRYPT.",
                                 failed_operation="Validate [users]")
+        if t.get("autologin") not in (None, "on", "off") or t.get("root_password", "optional") not in ("required", "optional"):
+            raise ManifestError(message="Invalid [users] section",
+                                cause='autologin is "on" or "off"; root_password is "required" or "optional".',
+                                failed_operation="Validate [users]",
+                                current_state=f"autologin={t.get('autologin')!r}, root_password={t.get('root_password')!r}")
         users = UsersConfig(groups=groups, shell=t.get("shell"), password_hash=t.get("password_hash"),
-                            primary_group=t.get("primary_group"))
+                            primary_group=t.get("primary_group"), autologin=t.get("autologin"),
+                            root_password=t.get("root_password", "optional"))
 
         t = _Table(data.get("network", {}), "[network]", {}, {"configure_wireless": bool})
         network = NetworkConfig(configure_wireless=t.get("configure_wireless", False))

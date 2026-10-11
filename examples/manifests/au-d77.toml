@@ -17,16 +17,22 @@ platform = "freebsd"
 method = "tree-copy"
 source = "/"
 min_disk_size_bytes = 10737418240
-# au-d77-install: GPT (BIOS bootcode + ESP) for both firmwares, UFS2 SU+J root
+# au-d77-install: GPT (BIOS bootcode + ESP) on UEFI; on BIOS it offers MBR
+# (FreeBSD slice + BSD disklabel, "recommended for BIOS") or GPT. UFS2 SU+J root.
 partition_table = "gpt"
+bios_partition_tables = ["mbr", "gpt"]
 root_filesystem = "ufs"
 root_label = "AU_D77_ROOT"
 root_mount_options = "rw,noatime"
 esp_size = "200m"
 esp_mountpoint = "/boot/efi"
 esp_mount_options = "rw"
-# au-d77-install scales swap with disk size (1g <16 GB, 2g <35 GB, else 4g)
-swap_size = "2g"
+# au-d77-install scales swap with disk size: 1g below 16000 MiB, 2g below 35000 MiB, else 4g
+swap_by_disk_size = [
+    { below = "16000m", size = "1g" },
+    { below = "35000m", size = "2g" },
+    { size = "4g" },
+]
 exclude = ["./var/cache/pkg/*"]
 fstab_extra = [
     "tmpfs                    /tmp            tmpfs   rw,mode=1777    0       0",
@@ -55,6 +61,10 @@ required = ['devd', 'devmatch', 'powerd', 'seatd', 'dbus', 'wpa_supplicant', 'cl
 # au-d77-install: pw useradd -s /bin/sh -G wheel,operator,video
 groups = ["wheel", "operator", "video"]
 shell = "/bin/sh"
+# au-d77-install asks, default yes: getty autologin on ttyv0, whose .profile starts Wasp
+autologin = "on"
+# au-d77-install requires one: the console is marked insecure, so single-user mode asks for it
+root_password = "required"
 
 [live_only]
 # Live session account (autologin on ttyv0 into Wasp)
@@ -62,6 +72,14 @@ users = ["d77"]
 files = [
     # passwordless sudo for the live user
     "/usr/local/etc/sudoers.d/10-live",
+    # the Mocinha installer itself (au-d77's scripts/install-mocinha.sh installs it in /usr/local)
+    "/usr/local/share/mocinha",
+    "/usr/local/bin/mocinha",
+    "/usr/local/lib/mocinha",
+    "/usr/local/share/applications/mocinha.desktop",
+    "/usr/local/share/icons/hicolor/256x256/apps/mocinha.png",
+    "/usr/local/share/polkit-1/actions/org.mocinha.installer.policy",
+    "/usr/local/etc/mocinha.toml",
 ]
 
 # Root filesystem by the installed label instead of the live one

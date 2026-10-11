@@ -3,7 +3,9 @@
 The hybrid GPT layout from the gpart provider already carries the BIOS boot
 code (pmbr + gptboot). This provider installs loader.efi on the ESP (mounted
 at the manifest's esp_mountpoint) at the UEFI removable-media path and under
-EFI/freebsd, and verifies both boot paths.
+EFI/freebsd, and verifies both boot paths. With the BIOS MBR layout there
+is no ESP: the gpart provider wrote /boot/mbr and /boot/boot, and this provider
+only verifies them.
 """
 
 from pathlib import Path
@@ -37,7 +39,14 @@ class FreeBSDBootProvider(ProviderContract):
                 possible_recovery="Check the live image's /boot directory.",
             )
 
+    @staticmethod
+    def _mbr_layout(context: ExecutionContext) -> bool:
+        return (context.metadata.get("partition_table") or "gpt") == "mbr"
+
     def apply(self, context: ExecutionContext) -> None:
+        if self._mbr_layout(context):
+            self.events.info(EventPhase.BOOTLOADER, "MBR layout: boot code written by the partition step (/boot/mbr, /boot/boot)")
+            return
         target_root = Path(context.target_mount)
         if "esp" not in context.target_partitions:
             raise ExecutionError(
@@ -67,7 +76,31 @@ class FreeBSDBootProvider(ProviderContract):
             self.events.action(EventPhase.BOOTLOADER, f"Installing {src} -> {dest}")
             shutil.copyfile(src, dest)
 
+    def _verify_mbr(self, context: ExecutionContext) -> None:
+        disk_name = Path(context.target_disk).name
+        with open(context.target_disk, "rb") as disk:
+            mbr = disk.read(512)
+        with open(f"/dev/{disk_name}s1", "rb") as part:
+            slice_boot = part.read(512)
+        problems = []
+        if mbr[:446] != Path("/boot/mbr").read_bytes()[:446] or mbr[510:512] != b"\x55\xaa":
+            problems.append("the MBR does not carry /boot/mbr")
+        if mbr[446] != 0x80 or mbr[450] != 0xA5:
+            problems.append("slice 1 is not an active FreeBSD slice (type 0xa5)")
+        if slice_boot != Path("/boot/boot").read_bytes()[:512]:
+            problems.append(f"/dev/{disk_name}s1 does not start with boot1 (/boot/boot)")
+        if problems:
+            raise VerificationError(
+                message="FreeBSD BIOS boot code is not installed.",
+                cause="; ".join(problems),
+                failed_operation="Verify FreeBSD MBR boot path",
+                possible_recovery="Re-run the partition step (gpart bootcode).",
+            )
+        self.events.info(EventPhase.VERIFY, "FreeBSD BIOS boot path verified (MBR: /boot/mbr, slice: /boot/boot).")
+
     def verify(self, context: ExecutionContext) -> None:
+        if self._mbr_layout(context):
+            return self._verify_mbr(context)
         esp = Path(context.target_mount) / context.metadata["esp_mountpoint"].lstrip("/")
         for rel in EFI_TARGETS:
             require_pe_binary(esp / rel, f"FreeBSD EFI loader ({rel})")
