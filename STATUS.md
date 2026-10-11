@@ -23,7 +23,7 @@ something is not listed as validated here, assume it is not.
 | Arch bootstrap (level B) | **CLI install + boot validated in QEMU** with the `arch-bootstrap` profile, from the **official archiso 2026.10.01** (sha256 checked against archive.archlinux.org) and from the btw-d77 live (its content is not copied): BIOS/GRUB (kernel `linux-lts`) and UEFI/GRUB (kernel `linux` + AUR `yay-bin`) from each. Never run on real hardware. |
 | hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror; and **with the Mocinha package on the live** (ISO 20261008 built from the local hybrid-d77 branch `mocinha`): BIOS and UEFI install + boot + self-removal, and the launcher from the Sway session (pkexec + mate-polkit) opens the wizard as root. **Real hardware:** the niri ISO 20261008 with the Mocinha package booted on a ThinkPad T480s and the wizard opened in the niri session (maintainer's photo, 2026-10-08). On a desktop PC, a GTK install with an online package failed at "Install online components" with `[Errno 17] File exists: '/mnt/etc/resolv.conf'` (no disk data lost; the step runs after deployment): `run_in_target(network=True)` called mkdir on the resolv.conf file mount point. Never hit in QEMU because arch-chroot handles it on Arch and the Chimera runs chose only a mirror. Reproduced in QEMU (`run_chimera_test.sh --online-package htop`), fixed, re-run: install, online verify and boot pass; regression test added. |
 | Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
-| a77ien (Slackware64-current + liveslak, Spitfire) | **CLI install + boot validated in QEMU** from the real a77ien ISO `vm-20260928-104725-SRV7l5` (built 2026-09-28; repository untouched): live copy of liveslak's package modules, **BIOS/LILO** and **UEFI/ELILO**, each installed system booted and checked against what setup2hd + a77ien's hook + Slackware's configuration scripts produce. Mocinha is not on that ISO (run from this repository over 9p). **Real hardware (maintainer, 2026-10-10):** the ISO `vm-20261010-205836-W28IXs` built with the Mocinha 0.1.2 package installed on a Lenovo Legion, "100%" for the installation itself; two problems found there and fixed afterwards (see the a77ien section): the installed system had no CA certificate store (HTTPS, e.g. `slackpkg update gpg`, failed until `update-ca-certificates --fresh`), and the launcher did nothing from fuzzel (Mocinha was started from a terminal). |
+| a77ien (Slackware64-current + liveslak, Spitfire) | **CLI install + boot validated in QEMU** from the real a77ien ISO `vm-20260928-104725-SRV7l5` (built 2026-09-28; repository untouched): live copy of liveslak's package modules, **BIOS/LILO** and **UEFI/ELILO**, each installed system booted and checked against what setup2hd + a77ien's hook + Slackware's configuration scripts produce. Mocinha is not on that ISO (run from this repository over 9p). **Real hardware (maintainer, 2026-10-10):** the ISO `vm-20261010-205836-W28IXs` built with the Mocinha 0.1.2 package installed on a Lenovo Legion, "100%" for the installation itself; two problems found there and fixed afterwards (see the a77ien section): the installed system had no CA certificate store (HTTPS, e.g. `slackpkg update gpg`, failed until `update-ca-certificates --fresh`), and the launcher did nothing from fuzzel (Mocinha was started from a terminal). **Then the ISO `vm-20261011-012444-WozMcP` with Mocinha 0.1.3 on the same two-disk Legion: works "100%" (maintainer, 2026-10-11) --- install, launcher from the menu, CA certificates, boot.** The a77ien branch `mocinha` is merged into a77ien's `main`. |
 | sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
 
 **About "equivalence":** the automated equivalence checks compare the
@@ -499,9 +499,9 @@ the next commit and only the first re-validated in QEMU:
   `pkexec` then used its own text agent on tty1, behind the graphical session,
   and waited. The launcher now gives pkexec no console tty (stdin from
   `/dev/null` unless it is a pseudo-terminal), so it exits 127 and the
-  terminal-window fallback asks for the sudo password. Unit-tested; **not
-  re-validated in the session** (inferred from pkexec's documented fallback,
-  not reproduced in QEMU).
+  terminal-window fallback asks for the sudo password. Unit-tested; confirmed
+  on the Legion with Mocinha 0.1.3 (maintainer, 2026-10-11; not reproduced in
+  QEMU).
 
 - **LILO on a machine with two disks** (found with setup2hd on the same Legion,
   which then stopped with "Timestamp mismatch" / "Keytable read/checksum
@@ -509,7 +509,7 @@ the next commit and only the first re-validated in QEMU:
   numbers). Mocinha always wrote `boot = <chosen disk>`; it now also writes
   `disk = <chosen disk> bios=0x80` for every disk (the disk the BIOS boots is
   drive 0x80), not only for virtio as liloconfig does. QEMU BIOS run passes;
-  two-disk hardware not re-tested.
+  the 0.1.3 install on the two-disk Legion boots (maintainer, 2026-10-11).
 
 Problems found and fixed: **the target mounted at `/mnt` hid the live's own
 filesystems** (`/mnt/live`, `/mnt/liveslakfs`): the copy failed with "Cannot
@@ -589,7 +589,7 @@ until decided.
 - Bootloader/firmware compatibility (LILO/syslinux BIOS-only, ELILO/systemd-boot
   UEFI-only) is one table in the resolver, not provider capabilities; Limine on
   BIOS is refused at provider validation (after confirmation, before any disk write).
-- a77ien: the Mocinha package (local a77ien branch `mocinha`) and the
+- a77ien: the Mocinha package (a77ien `packages/mocinha`, merged into `main`) and the
   `pkgtools` provider (removepkg) are new and validated only as recorded in the
   a77ien section; the GUI never ran on the live; the
   zzzconf module path in the manifest carries liveslak's DISTRO/SL_VERSION/
