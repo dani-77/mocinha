@@ -78,8 +78,8 @@ the GTK3 wizard (Mocinha 0.1.4 and the 0.1.5 candidates); au-d77 (FreeBSD)
 installed and booted through the GTK3 wizard (0.1.6 candidate). Packaged for Arch
 (PKGBUILD, also in the AUR), Chimera (cports), Slackware (SlackBuild, in a77ien)
 CRUX (the d77crux port, in sysv-d77) and FreeBSD (installed from the pinned
-release by au-d77's build); btw-d77, sysv-d77, a77ien and hybrid-d77 ship it
-on their main branches, au-d77 on its development branch. `STATUS.md` records
+release by au-d77's build); every reference remaster ships it on its main
+branch. `STATUS.md` records
 exactly what was validated, how, and what differs from each remaster's own
 installer.
 
