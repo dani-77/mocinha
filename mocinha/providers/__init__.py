@@ -182,6 +182,16 @@ def wire_plan_providers(plan, registry: ProviderRegistry, manifest) -> None:
     if any(step.step_id == "install_online_components" for step in plan.steps):
         online_prov = require("online", manifest.providers.online)
         bindings["install_online_components"] = (online_prov, online_prov.apply, online_prov.verify)
+    if any(step.step_id == "configure_wireless" for step in plan.steps):
+        if not hasattr(sys_prov, "configure_wireless"):
+            raise ResolutionError(
+                message=f"The sysconfig provider '{sys_prov.name}' cannot configure a wireless interface.",
+                cause="[network].configure_wireless = true, and a wireless interface was found on this machine.",
+                failed_operation="Wire the wireless configuration step",
+                current_state="No disk has been modified.",
+                possible_recovery="Remove [network].configure_wireless from the manifest or implement it in the provider.",
+            )
+        bindings["configure_wireless"] = (sys_prov, sys_prov.configure_wireless, sys_prov.verify_wireless)
     if init_prov is not None:
         bindings["configure_initramfs"] = (init_prov, init_prov.apply, init_prov.verify)
 

@@ -10,7 +10,8 @@ import unittest
 from mocinha.core.errors import ExecutionError, ManifestError, VerificationError
 from mocinha.core.events import EventStream
 from mocinha.core.manifest import LiveFile, Manifest, PackagesConfig
-from mocinha.core.probe import DiskDevice, FirmwareType, SystemFacts
+from mocinha.core.errors import ResolutionError
+from mocinha.core.probe import DiskDevice, FirmwareType, SystemFacts, SystemProbe
 from mocinha.core.provider import ExecutionContext
 from mocinha.core.resolver import InstallationResolver, UserChoices
 from mocinha.providers import base, create_default_registry, wire_plan_providers
@@ -138,6 +139,23 @@ class TestSysvd77(unittest.TestCase):
         self.assertEqual(m.packages.install_uefi, ["grub2-efi"])
         self.assertEqual(m.initramfs.args, ["--no-hostonly", "--no-hostonly-cmdline", "--fstab", "--gzip"])
         self.assertEqual((m.install.partition_table, m.install.swap_size, m.install.esp_mountpoint), ("gpt", "8g", "/boot"))
+        # setup's three collections, all of them (sysv-d77 hardware test, 2026-10-11)
+        self.assertEqual(m.packages.collections, ["crux/core", "crux/opt", "crux/xorg"])
+        self.assertEqual(m.services.default_enabled, ["crond", "dbus", "wlan"])
+        self.assertIn("net", m.services.optional)
+        self.assertTrue(m.network.configure_wireless)
+        # crux-configure option 7: five CRUX ports collections and d77crux enabled, with d77crux's key
+        files = {t.path: t.content for t in m.target_files}
+        self.assertEqual([l for l in files["/etc/prt-get.conf"].splitlines() if l.startswith("prtdir")],
+                         [f"prtdir /usr/ports/{r}" for r in ("core", "opt", "xorg", "compat-32", "contrib", "d77crux")])
+        self.assertIn("destination=/usr/ports/contrib", files["/etc/ports/contrib.rsync"])
+        self.assertIn("destination=/usr/ports/compat-32", files["/etc/ports/compat-32.rsync"])
+        for home in ("/etc/skel", "/root"):  # the installed Openbox menu has no live-only installer entries
+            menu = files[f"{home}/.config/openbox/menu.xml"]
+            self.assertNotRegex(menu, "mocinha|crux-installer|INSTALL.txt")
+            self.assertIn('label="CRUX 3.8"', menu)
+        self.assertLessEqual({"/etc/ports/d77crux.httpup", "/etc/ports/d77crux.pub"},
+                             {f.source for f in m.live_files if not f.optional})
 
     def test_manifest_rejects_bad_package_paths_and_live_files(self) -> None:
         import tomllib
@@ -320,25 +338,79 @@ class TestSysvd77(unittest.TestCase):
         with self.assertRaises(ExecutionError):
             provider._set_password(str(self.target), "dani", "secret")
 
+    # --- wireless interface ------------------------------------------------
+    def test_probe_finds_wireless_interfaces(self) -> None:
+        net = self.root / "sys" / "class" / "net"
+        for name, entry in (("lo", None), ("enp11s0", None), ("wlp3s0", "wireless"), ("wlan1", "phy80211")):
+            (net / name).mkdir(parents=True)
+            if entry:
+                (net / name / entry).mkdir()
+        self.assertEqual(SystemProbe(self.stream, root=str(self.root))._detect_wireless("linux"), ["wlan1", "wlp3s0"])
+        self.assertEqual(SystemProbe(self.stream, root=str(self.root))._detect_wireless("freebsd"), [])
+
+    def test_crux_rc_writes_wireless_interface(self) -> None:
+        script = self.target / "etc" / "rc.d" / "wpa_supplicant"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/sh\n\nDEV=wlp3s0\n\nOPTS=\"-i $DEV\"\n")
+        self.context.metadata["wireless_interface"] = "wlp0s20f3"
+        provider = CruxRcSysconfigProvider(event_stream=self.stream)
+        provider.configure_wireless(self.context)
+        provider.verify_wireless(self.context)
+        self.assertEqual(script.read_text(), "#!/bin/sh\n\nDEV=wlp0s20f3\n\nOPTS=\"-i $DEV\"\n")
+        script.write_text("#!/bin/sh\nDEV=wlp3s0\n")
+        with self.assertRaises(VerificationError):
+            provider.verify_wireless(self.context)
+        script.unlink()
+        with self.assertRaises(ExecutionError):  # no wpa_supplicant package on the target
+            provider.configure_wireless(self.context)
+
     # --- end to end plan ---------------------------------------------------
-    def test_plan_from_real_manifest_wires_every_step(self) -> None:
-        manifest = Manifest.load_from_file(MANIFEST)
+    def _plan(self, wireless, services=frozenset({"crond", "dbus", "wlan"}), manifest=None, bootloader="grub"):
+        manifest = manifest or Manifest.load_from_file(MANIFEST)
         facts = SystemFacts(platform_name="linux", arch="x86_64", firmware=FirmwareType.BIOS,
                             disks=[DiskDevice(path="/dev/vda", size_bytes=20 * 2**30, model="QEMU")],
-                            running_services=[])
+                            running_services=[], wireless_interfaces=list(wireless))
         registry = create_default_registry(self.stream)
         plan = InstallationResolver(facts, manifest, registry, self.stream).resolve(UserChoices(
-            target_disk="/dev/vda", bootloader="grub", username="dani", password="pw", hostname="cruxbox",
-            selected_services={"net", "crond"}))
+            target_disk="/dev/vda", bootloader=bootloader, username="dani", password="pw", hostname="cruxbox",
+            selected_services=set(services)))
         wire_plan_providers(plan, registry, manifest)
+        return plan
+
+    def test_plan_sets_the_only_wireless_interface(self) -> None:
+        plan = self._plan(["wlp3s0"])
+        steps = [s.step_id for s in plan.steps]
+        self.assertEqual(steps.index("configure_wireless"), steps.index("configure_locale") + 1)
+        self.assertEqual(plan.metadata["wireless_interface"], "wlp3s0")
+        self.assertIn("Wireless:         wlp3s0", plan.to_human_readable())
+        for found, note in (([], "no wireless interface"), (["wlan0", "wlan1"], "several wireless interfaces")):
+            plan = self._plan(found)
+            self.assertNotIn("configure_wireless", [s.step_id for s in plan.steps])
+            self.assertIsNone(plan.metadata["wireless_interface"])
+            self.assertIn(note, plan.summary.wireless)
+
+    def test_wireless_step_needs_a_sysconfig_provider_that_supports_it(self) -> None:
+        manifest = Manifest.load_from_file(MANIFEST)
+        manifest.providers.sysconfig = "systemd"
+        with self.assertRaises(ResolutionError):
+            self._plan(["wlp3s0"], manifest=manifest)
+
+    def test_net_and_wlan_exclude_each_other(self) -> None:
+        with self.assertRaises(ResolutionError):  # both start dhcpcd
+            self._plan([], services={"crond", "dbus", "wlan", "net"})
+        plan = self._plan([], services={"crond", "net"})
+        self.assertEqual(sorted(plan.summary.services), ["crond", "lo", "net"])
+
+    def test_plan_from_real_manifest_wires_every_step(self) -> None:
+        plan = self._plan(["wlp3s0"])
         steps = [s.step_id for s in plan.steps]
         self.assertIn("copy_live_files", steps)
         self.assertLess(steps.index("copy_live_files"), steps.index("write_target_files"))
         self.assertEqual(plan.metadata["efi_id"], "d77crux")
-        self.assertEqual(sorted(plan.summary.services), ["crond", "lo", "net"])
-        with self.assertRaises(Exception):  # limine is not in [boot].available
-            InstallationResolver(facts, manifest, registry, self.stream).resolve(UserChoices(
-                target_disk="/dev/vda", bootloader="limine", username="dani", password="pw", hostname="cruxbox"))
+        self.assertEqual(sorted(plan.summary.services), ["crond", "dbus", "lo", "wlan"])
+        self.assertIn("net", plan.metadata["deselected_services"])
+        with self.assertRaises(ResolutionError):  # limine is not in [boot].available
+            self._plan([], bootloader="limine")
 
 
 if __name__ == "__main__":

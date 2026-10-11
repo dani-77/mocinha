@@ -5,7 +5,7 @@ Produces a validated, staged, non-destructive InstallationPlan.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import re
 
 from mocinha.core.errors import ResolutionError
@@ -344,6 +344,17 @@ class InstallationResolver:
             ),
         ])
 
+        wireless, wireless_note = self._wireless_interface()
+        if wireless:
+            at = next(i for i, step in enumerate(steps) if step.step_id == "configure_locale") + 1
+            steps.insert(at, PlanStep(
+                step_id="configure_wireless",
+                title=f"Set wireless interface {wireless}",
+                description="Write this machine's wireless interface into the target's wireless network configuration",
+                is_destructive=False,
+                provider_name="sysconfig",
+            ))
+
         summary = TargetSummary(
             disk=choices.target_disk,
             firmware=self.facts.firmware.value,
@@ -360,6 +371,7 @@ class InstallationResolver:
             locale=choices.locale,
             keymap=choices.keymap,
             timezone=choices.timezone,
+            wireless=wireless_note,
         )
 
         # Everything providers need at execution time, except secrets
@@ -388,6 +400,7 @@ class InstallationResolver:
             "locale": choices.locale,
             "keymap": choices.keymap,
             "timezone": choices.timezone,
+            "wireless_interface": wireless,
             "user_groups": list(self.manifest.users.groups),
             "user_shell": self.manifest.users.shell,
             "user_primary_group": self.manifest.users.primary_group,
@@ -494,6 +507,23 @@ class InstallationResolver:
                 possible_recovery="Select a disk with sufficient capacity.",
             )
         return disk
+
+    def _wireless_interface(self) -> Tuple[Optional[str], Optional[str]]:
+        """(interface to configure, plan note) for [network].configure_wireless.
+
+        Only an unambiguous fact is written: with no wireless interface, or
+        with several, the target's wireless configuration stays as installed
+        and the plan says why.
+        """
+        if not self.manifest.network.configure_wireless:
+            return None, None
+        found = self.facts.wireless_interfaces
+        if len(found) == 1:
+            return found[0], found[0]
+        note = (f"not set: several wireless interfaces ({', '.join(found)})" if found
+                else "not set: no wireless interface found on this machine")
+        self.events.warning(EventPhase.PLAN, f"Wireless interface {note}; the target keeps its installed configuration")
+        return None, note
 
     def _resolve_bootstrap(self, choices: UserChoices, enabled_services: List[str]) -> Optional[Dict[str, Any]]:
         """Package set of a bootstrap install (level B), or None for live/medium deployments."""

@@ -4,6 +4,11 @@ These are the fields CRUX's rc package defines and its /etc/rc applies at
 boot (hostname, loadkeys, the /etc/localtime link). A locale other than the
 built-in ones is compiled with the target's own localedef, as sysv-d77's
 crux-configure does. Nothing else in rc.conf is changed.
+
+The wireless interface ([network].configure_wireless) goes into DEV= of
+/etc/rc.d/wpa_supplicant, the script of CRUX's wpa_supplicant package that the
+wlan service starts; the package ships it with an example device (wlp3s0) and
+CRUX expects it to be edited.
 """
 
 from pathlib import Path
@@ -17,6 +22,8 @@ from mocinha.providers.base import CommandRunner, run_in_target
 from mocinha.providers.sysconfig.systemd import BUILTIN_LOCALES, _locale_charset, _normalized_locale
 
 ASSIGN = re.compile(r"^([A-Z_]+)=(.*)$")
+WPA_SCRIPT = "etc/rc.d/wpa_supplicant"
+WPA_DEV = re.compile(r"^DEV=.*$", re.M)
 
 
 def read_rc_conf(text: str) -> Dict[str, str]:
@@ -169,6 +176,34 @@ class CruxRcSysconfigProvider(ProviderContract):
                 possible_recovery="Inspect the localedef output in the event log.",
             )
         self.events.info(EventPhase.VERIFY, "Target locale/keymap/timezone verified in /etc/rc.conf.")
+
+    def _wpa_script(self, context: ExecutionContext) -> Path:
+        script = Path(context.target_mount) / WPA_SCRIPT
+        if not script.is_file() or not WPA_DEV.search(script.read_text()):
+            raise ExecutionError(
+                message=f"/{WPA_SCRIPT} with a DEV= line not found on the target.",
+                cause="The wireless interface is set in the script of CRUX's wpa_supplicant package.",
+                failed_operation="Configure the wireless interface",
+                possible_recovery="Install wpa_supplicant ([packages].install) or remove [network].configure_wireless.",
+            )
+        return script
+
+    def configure_wireless(self, context: ExecutionContext) -> None:
+        dev = context.metadata["wireless_interface"]
+        script = self._wpa_script(context)
+        self.events.action(EventPhase.CONFIGURE, f"Setting DEV={dev} in /{WPA_SCRIPT}")
+        script.write_text(WPA_DEV.sub(f"DEV={dev}", script.read_text(), count=1))
+
+    def verify_wireless(self, context: ExecutionContext) -> None:
+        dev = context.metadata["wireless_interface"]
+        actual = WPA_DEV.search(self._wpa_script(context).read_text()).group(0)
+        if actual != f"DEV={dev}":
+            raise VerificationError(
+                message=f"/{WPA_SCRIPT} has {actual}, expected DEV={dev}.",
+                cause="The wireless interface was not written.",
+                failed_operation="Verify the wireless interface",
+            )
+        self.events.info(EventPhase.VERIFY, f"Wireless interface verified: DEV={dev} in /{WPA_SCRIPT}")
 
     def apply(self, context: ExecutionContext) -> None:
         self.configure_hostname(context)

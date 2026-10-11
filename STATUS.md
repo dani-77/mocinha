@@ -1,6 +1,6 @@
 # Mocinha Installer --- Current Status
 
-**Date:** 2026-10-10 (a77ien added; its runs use the code of the commit that adds it). Earlier VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
+**Date:** 2026-10-11 (sysv-d77 with the Mocinha 0.1.5 code: QEMU runs and real hardware). 2026-10-10: a77ien added; its runs use the code of the commit that adds it. Earlier VM results were obtained with the code of the level-B commit that follows `64d1990`, unless a run says otherwise (the sysv-d77 and au-d77 runs were last made with the level-A code, `64d1990`); the disk-safety adversarial runs and the au-d77 UEFI boot of the installed disk were last run with `54917c4`.
 
 **Contract change (2026-10-08):** Mocinha is no longer 100% offline. It is
 offline-first, with online components where they are declared or chosen
@@ -24,7 +24,7 @@ something is not listed as validated here, assume it is not.
 | hybrid-d77 (Chimera, dinit) | **CLI install + boot validated in QEMU** from the real hybrid-d77 sway ISO (20261005), live copy: BIOS/GRUB and UEFI/GRUB (`--removable`) with a chosen apk mirror; and **with the Mocinha package on the live** (ISO 20261008 built from the local hybrid-d77 branch `mocinha`): BIOS and UEFI install + boot + self-removal, and the launcher from the Sway session (pkexec + mate-polkit) opens the wizard as root. **Real hardware:** the niri ISO 20261008 with the Mocinha package booted on a ThinkPad T480s and the wizard opened in the niri session (maintainer's photo, 2026-10-08). On a desktop PC, a GTK install with an online package failed at "Install online components" with `[Errno 17] File exists: '/mnt/etc/resolv.conf'` (no disk data lost; the step runs after deployment): `run_in_target(network=True)` called mkdir on the resolv.conf file mount point. Never hit in QEMU because arch-chroot handles it on Arch and the Chimera runs chose only a mirror. Reproduced in QEMU (`run_chimera_test.sh --online-package htop`), fixed, re-run: install, online verify and boot pass; regression test added. |
 | Chimera Linux, official GNOME live 20251220 | **CLI install + boot validated in QEMU** (sha256 checked): live copy, BIOS/GRUB; level B bootstrap (`chimera-bootstrap`, 513 packages, mirror chosen), UEFI/GRUB. |
 | a77ien (Slackware64-current + liveslak, Spitfire) | **CLI install + boot validated in QEMU** from the real a77ien ISO `vm-20260928-104725-SRV7l5` (built 2026-09-28; repository untouched): live copy of liveslak's package modules, **BIOS/LILO** and **UEFI/ELILO**, each installed system booted and checked against what setup2hd + a77ien's hook + Slackware's configuration scripts produce. Mocinha is not on that ISO (run from this repository over 9p). **Real hardware (maintainer, 2026-10-10):** the ISO `vm-20261010-205836-W28IXs` built with the Mocinha 0.1.2 package installed on a Lenovo Legion, "100%" for the installation itself; two problems found there and fixed afterwards (see the a77ien section): the installed system had no CA certificate store (HTTPS, e.g. `slackpkg update gpg`, failed until `update-ca-certificates --fresh`), and the launcher did nothing from fuzzel (Mocinha was started from a terminal). **Then the ISO `vm-20261011-012444-WozMcP` with Mocinha 0.1.3 on the same two-disk Legion: works "100%" (maintainer, 2026-10-11) --- install, launcher from the menu, CA certificates, boot.** The a77ien branch `mocinha` is merged into a77ien's `main`. |
-| sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB. Installed from the packages on the medium, not by copying the live (see below). Never run on real hardware. GUI never run on CRUX. |
+| sysvd77 (CRUX 3.8 + sysvinit) | **CLI install + boot validated in QEMU** from the real sysv-d77 ISO (built 2026-09-28), BIOS/GRUB and UEFI/GRUB; installed from the packages on the medium, not by copying the live (see below). **Real hardware (maintainer, 2026-10-11):** sysv-d77 ISOs built from its local branch `mocinha` with the Mocinha package (GTK3 on the live), installed through the **GTK3 wizard** and booted, "100%". The first one (0.1.4) installed only setup's default `core` collection, left Wi-Fi and dbus off, and its tint2 launcher showed an empty square (no `hicolor-icon-theme` on the live); fixed in the manifest and the remaster, then the 0.1.5 release candidates passed on the same machine, including the wireless interface written to `/etc/rc.d/wpa_supplicant`, the ports collections, and Mocinha starting with the live desktop. BIOS QEMU runs repeated with that code (see the sysv-d77 section). |
 
 **About "equivalence":** the automated equivalence checks compare the
 installed system with an expected state that was **derived by reading** each
@@ -79,7 +79,7 @@ GUI: the GTK3 frontend has never driven an installation.
 | `linux-sfdisk` | yes (btw-d77; sysv-d77) | DOS on BIOS; GPT + ESP on UEFI; GPT on BIOS with a 1 MiB BIOS boot partition; optional swap partition. Refuses DOS on UEFI. |
 | `linux-mkfs` | yes (btw-d77; sysv-d77) | ext4 + FAT32 ESP + swap only. |
 | `squashfs-extract` | yes (btw-d77) | |
-| `crux-pkgadd` | yes (sysv-d77) | `pkgadd -r` from the medium: collections, extra packages with their `setup.dependencies` closure, firmware-specific packages, local archives (`-u` when already installed). The resolved set matches sysv-d77's installer exactly (241 BIOS / 245 UEFI packages + 11 local; checked by script against the ISO). |
+| `crux-pkgadd` | yes (sysv-d77) | `pkgadd -r` from the medium: collections, extra packages with their `setup.dependencies` closure, firmware-specific packages, local archives (`-u` when already installed). sysv-d77 installs setup's three collections, `core`, `opt` and `xorg` (334 BIOS / 335 UEFI packages + 13 local, 347 / 348 registered; checked by script against the ISO). |
 | `mkinitcpio` | yes (btw-d77) | Kernels/images discovered from presets. |
 | `dracut` | yes (sysv-d77) | Kernels discovered from `/lib/modules` + `/boot/vmlinuz-<v>`; `depmod` + `dracut` with `[initramfs].args`. |
 | `arch-systemd` | yes (btw-d77) | Initializes `/etc/machine-id`. |
@@ -87,7 +87,7 @@ GUI: the GTK3 frontend has never driven an installation.
 | `shadow` | yes (btw-d77; sysv-d77) | Target's own tools in a chroot. Without `chpasswd` (CRUX) the password is hashed with the target's `openssl passwd -6` when the target's PAM uses `sha512`, and written to `/etc/shadow`; other PAM methods are refused. |
 | `linux` platform | yes (btw-d77; sysv-d77) | Mounts, fstab, live-only/live/target files, unmount. |
 | `systemd` sysconfig | yes (btw-d77) | `/etc/hostname`, `/etc/hosts`, `locale.conf` + `locale-gen`, `vconsole.conf`, `/etc/localtime`. |
-| `crux-rc` sysconfig | yes (sysv-d77) | `rc.conf` `HOSTNAME`, `LANG`, `KEYMAP`, `TIMEZONE`; `localedef`. The timezone cannot be checked before confirmation (the live has no zoneinfo); it is checked on the target after deployment. |
+| `crux-rc` sysconfig | yes (sysv-d77) | `rc.conf` `HOSTNAME`, `LANG`, `KEYMAP`, `TIMEZONE`; `localedef`; with `[network].configure_wireless`, the probed wireless interface as `DEV=` in `/etc/rc.d/wpa_supplicant` (only when the machine has exactly one; the plan says why otherwise; QEMU has none, so this was checked on real hardware and by unit tests). The timezone cannot be checked before confirmation (the live has no zoneinfo); it is checked on the target after deployment. |
 | `freebsd-rc` sysconfig | yes (au-d77) | `rc.conf` hostname; locale/keymap/timezone changes refused. |
 | `grub` | yes (btw-d77, sysv-d77; BIOS and UEFI) | Target's `grub-install` + `grub-mkconfig`; EFI directory from `[boot].efi_id`. `/etc/default/grub` created only when a timeout or kernel arguments are requested and the package ships none (CRUX). |
 | `freebsd-gpart`, `freebsd-newfs`, `tree-copy`, `pw`, `freebsd-rc`, `freebsd-loader`, `freebsd` platform | yes (au-d77; `tree-copy` also hybrid-d77, Chimera and a77ien) | Hybrid GPT only (no MBR). |
@@ -136,7 +136,7 @@ confirmation. No placeholder binaries are written anywhere.
   the au-d77 tests run `python3.12 bin/mocinha`.
 
 ### Tests
-- 158 unit tests (`python3 -m unittest discover -s tests`), including regression
+- 182 unit tests (`python3 -m unittest discover -s tests`), including regression
   tests for the failures found in the VM runs. The executor lifecycle test
   (`test_provider_full_lifecycle_sequence`) only checks the call order with a
   mock provider; disk safety is covered by `tests/test_disk_safety.py` (fake
@@ -159,8 +159,12 @@ confirmation. No placeholder binaries are written anywhere.
   repository); the d77-iso branch `mocinha` with the package stays local, and
   `~/d77-iso` is back on `main`: building the btw-d77 branch needs
   `git -C ~/d77-iso checkout mocinha` first.
-- No FreeBSD or CRUX package. With `crux-pkgadd` Mocinha never reaches the
-  target unless listed.
+- **CRUX package**: the `mocinha` port in the d77crux collection (signed),
+  built by sysv-d77's `build-ports.sh` and shipped in the medium's `ports/`;
+  `crux-pkgadd` never installs `[live_only].packages`, so it does not reach the
+  target. The sysv-d77 live starts the wizard with its Openbox session and keeps
+  `crux-installer` as the text installer (branch `mocinha`).
+- No FreeBSD package.
 
 ---
 
@@ -361,6 +365,7 @@ and sends the diagnostics to the serial port.
 | BIOS + GRUB (GPT, BIOS boot partition) | pass (16 steps verified) | pass | pass |
 | UEFI + GRUB | pass | pass (NVRAM from the install) | pass |
 | BIOS + GRUB, re-run with the online code (step order changed) | pass | pass | pass |
+| BIOS + GRUB, 0.1.5 code, ISO with the Mocinha package (2026-10-11): `core`+`opt`+`xorg`, `crond dbus wlan`, ports collections | pass | pass | pass |
 
 One UEFI boot-proof attempt failed before QEMU's monitor socket accepted a
 connection while another VM was running; the cause was not identified and the
@@ -368,11 +373,16 @@ repeated run passed.
 
 Checked on the installed system: running hostname and `rc.conf`
 (`HOSTNAME`, `KEYMAP=pt-latin1`, `TIMEZONE=Europe/Lisbon`, `LANG=pt_PT.UTF-8`,
-`SERVICES=(lo net crond)`); runlevel 2; `crond` running; swap active; fstab by
+`SERVICES=(lo net crond)`, since 0.1.5 `(lo crond dbus wlan)`); runlevel 2; `crond` running
+(since 0.1.5 also `dbus` and `dhcpcd`: wlan's dhcpcd brings up the wired
+interface when there is no wireless one); swap active; fstab by
 UUID (root, ESP at `/boot` with `umask=0077` on UEFI, swap, devpts, shm);
 `pt_PT.utf8` compiled; `/etc/localtime`; only user `dani` (uid 1000,
 `/bin/bash`, own group only); root password set; 252 (BIOS) / 256 (UEFI)
-packages registered; kernel 6.12.109 with its dracut initramfs; desktop
+packages registered (since 0.1.5: 347 / 348, with the five CRUX ports
+collections and d77crux enabled in `prt-get.conf`, `contrib`/`compat-32`
+`.rsync` active, `d77crux.httpup` and `d77crux.pub` in `/etc/ports`, and an
+Openbox menu without installer entries); kernel 6.12.109 with its dracut initramfs; desktop
 configuration in `/etc/skel` and `/root`; tint2 launchers without the
 installer entry and with Firefox; `.bash_profile` starting X on tty1;
 `EFI/d77crux` on UEFI.
@@ -384,12 +394,13 @@ Mocinha installs the medium's packages offline (`plano.md` §7).
 
 Differences from what sysv-d77's installer produces:
 1. Interactive steps of `crux-configure` are not reproduced: editing
-   fstab/`rc.conf`/network files in vim and enabling the ports collections
-   (option 7, optional there too).
+   fstab/`rc.conf`/network files in vim. Option 7 (enabling the five ports
+   collections and d77crux) is applied by default since 0.1.5, plus
+   d77crux's public key, which `crux-configure` does not install.
 2. The `d77crux-kernel` archive is not checked against the sha256 in
    `/sysv-d77/kernel.release` (pkgadd validates the archive only).
 3. The installer's own tools and state (`crux-install-boot`,
-   `crux-configure`, `d77crux.httpup`, `/var/lib/sysv-d77/*`, fstab and
+   `crux-configure`, `/var/lib/sysv-d77/*`, fstab and
    network-file backups) are not written to the target.
 4. Network files: the fixed paths are copied when present; the
    `/etc/wpa_supplicant-*.conf` and `/etc/wpa_supplicant/*.conf` globs are not.

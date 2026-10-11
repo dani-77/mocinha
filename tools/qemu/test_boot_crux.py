@@ -132,6 +132,13 @@ def check(sections: dict, expect: dict) -> list:
     for line in expect.get("tint2_launchers_absent", []):
         if line in get("tint2_launchers"):
             problems.append(f"tint2rc still has {line!r}")
+    if expect.get("prtdirs") and get("prtdirs") != expect["prtdirs"]:
+        problems.append(f"prt-get.conf prtdirs {get('prtdirs')}, expected {expect['prtdirs']}")
+    for name in expect.get("ports_files", []):
+        if name not in get("ports_files"):
+            problems.append(f"/etc/ports/{name} missing")
+    if "menu_installer_entries" in expect and get("menu_installer_entries") != expect["menu_installer_entries"]:
+        problems.append(f"Openbox menu installer entries {get('menu_installer_entries')}")
     if expect["bash_profile_tail"] not in get("bash_profile"):
         problems.append(f".bash_profile tail {get('bash_profile')}")
     if expect["_firmware"] == "uefi" and not any(expect["efi_id"] in l for l in get("efi")):

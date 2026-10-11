@@ -54,8 +54,9 @@ packages = ["mocinha"]
 [packages]
 repositories = ["crux/core", "crux/opt", "crux/xorg"]
 dependencies = "crux/setup.dependencies"
-# setup's default selection: the core collection, bootloaders pruned
-collections = ["crux/core"]
+# setup's three collections, all selected (setup preselects only core; the
+# usual sysv-d77 install ticks opt and xorg too), bootloaders pruned
+collections = ["crux/core", "crux/opt", "crux/xorg"]
 exclude = ["lilo", "grub2", "grub2-efi", "syslinux"]
 # crux-install-boot: boot tools + the live's graphical base (with dependencies)
 install = [
@@ -97,10 +98,20 @@ default = "grub"
 efi_id = "d77crux"                   # grub-install --bootloader-id=d77crux
 
 [services]
-# The rc package's SERVICES=(lo net crond), which sysv-d77 leaves as installed
+# The rc package ships SERVICES=(lo net crond). sysv-d77 installs with
+# networking ready: dbus, and wlan (wpa_supplicant, then dhcpcd on every
+# interface, wired ones included) instead of net, as crux-configure advises
+# for Wi-Fi. net also starts dhcpcd, so the two exclude each other.
 required = ["lo"]
-default_enabled = ["net", "crond"]
-optional = ["sshd"]
+default_enabled = ["crond", "dbus", "wlan"]
+optional = ["net", "sshd"]
+
+[services.metadata.net]
+conflicts = ["wlan"]
+
+[network]
+# DEV= in /etc/rc.d/wpa_supplicant: this machine's wireless interface
+configure_wireless = true
 
 [users]
 shell = "/bin/bash"                  # crux-configure: useradd -m -s /bin/bash, no extra groups
@@ -210,6 +221,126 @@ mode = "0644"
 source = "/root/.Xresources"
 path = "/root/.Xresources"
 mode = "0644"
+
+# crux-configure's "Enable the five CRUX ports collections and d77crux": the
+# prt-get package's prt-get.conf with compat-32, contrib and d77crux enabled,
+# the ports package's contrib/compat-32 definitions made active (.rsync; the
+# .rsync.inactive copies stay), and the live's d77crux httpup definition and
+# public key (pkgmk verifies d77crux's .signature files against
+# /etc/ports/d77crux.pub). Synchronize with ports -u after the first boot.
+[[target_files]]
+path = "/etc/prt-get.conf"
+content = '''
+###
+### /etc/prt-get.conf: prt-get(8) configuration
+###
+
+## configure directories prt-get will source ports from
+## note: the order matters: the package found first is used
+prtdir /usr/ports/core
+prtdir /usr/ports/opt
+prtdir /usr/ports/xorg
+
+## the following line enables the multilib compat-32 collection
+prtdir /usr/ports/compat-32
+
+## the following line enables the user maintained contrib collection
+prtdir /usr/ports/contrib
+
+## d77crux, Daniel Azevedo's port collection (last: CRUX's ports come first)
+prtdir /usr/ports/d77crux
+
+## use mypackage from local directory
+#prtdir /home/packages/build:mypackage
+
+## log options
+## logfile variables:     %p=path to port dir,
+##                        %n=port name, %v=version, %r=release
+#writelog enabled         # (enabled|disabled)
+#logmode  overwrite       # (append|overwrite)
+#rmlog_on_success yes     # (no|yes)
+logfile  /var/log/pkgbuild/%n.log
+
+## use alternate cache file (default: /var/lib/pkg/prt-get.cache)
+#cachefile /mnt/nfs/cache
+
+## print README information
+#readme verbose           # (verbose|compact|disabled)
+
+## prefer higher versions in sysup / diff
+#preferhigher no          # (yes|no)
+
+## use regexp search
+#useregex no              # (yes|no)
+
+## run pre- and post-installs scripts; yes is equivalent to the
+## --install-scripts option
+runscripts yes             # (no|yes)
+
+### EXPERT SECTION ###
+
+## alternative commands
+#makecommand      pkgmk
+#addcommand       pkgadd
+#removecommand    pkgrm
+#runscriptcommand sh
+
+# End of file
+'''
+
+[[target_files]]
+path = "/etc/ports/contrib.rsync"
+content = '''
+host=crux.nu
+collection=ports/crux-3.8/contrib/
+destination=/usr/ports/contrib
+'''
+
+[[target_files]]
+path = "/etc/ports/compat-32.rsync"
+content = '''
+host=crux.nu
+collection=ports/crux-3.8/compat-32/
+destination=/usr/ports/compat-32
+'''
+
+[[live_files]]
+source = "/etc/ports/d77crux.httpup"
+mode = "0644"
+
+[[live_files]]
+source = "/etc/ports/d77crux.pub"
+mode = "0644"
+
+[[target_files]]
+# The live Openbox menu without its installer entries (Mocinha, crux-installer
+# and its guide run live-only tools); crux-install-boot makes the same edit.
+path = "/etc/skel/.config/openbox/menu.xml"
+content = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="CRUX 3.8">
+    <item label="Terminal"><action name="Execute"><command>xterm</command></action></item>
+    <separator/>
+    <item label="Exit to console"><action name="Exit"><prompt>yes</prompt></action></item>
+  </menu>
+</openbox_menu>
+'''
+
+[[target_files]]
+# The live Openbox menu without its installer entries (Mocinha, crux-installer
+# and its guide run live-only tools); crux-install-boot makes the same edit.
+path = "/root/.config/openbox/menu.xml"
+content = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="CRUX 3.8">
+    <item label="Terminal"><action name="Execute"><command>xterm</command></action></item>
+    <separator/>
+    <item label="Exit to console"><action name="Exit"><prompt>yes</prompt></action></item>
+  </menu>
+</openbox_menu>
+'''
 
 [[target_files]]
 # The live tint2rc without the live-only installer launcher, plus Firefox

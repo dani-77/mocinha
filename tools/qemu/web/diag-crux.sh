@@ -15,11 +15,14 @@ echo '### root_status'; passwd -S root
 echo '### locales'; locale -a
 echo '### localtime'; readlink /etc/localtime
 echo '### keymap_loaded'; dumpkeys 2>/dev/null | grep -m1 -E '^keymaps' ; echo "slash-key: $(dumpkeys 2>/dev/null | grep -E '^keycode +53 ' | head -1)"
-echo '### packages'; pkginfo -i | wc -l; pkginfo -i | awk '{print $1}' | grep -xE 'rc|shadow|sysvinit|grub2|grub2-efi|dracut|d77crux-kernel|openbox|tint2|xorg-server|linux-firmware'
+echo '### packages'; pkginfo -i | wc -l; pkginfo -i | awk '{print $1}' | grep -xE 'rc|shadow|sysvinit|grub2|grub2-efi|dracut|d77crux-kernel|openbox|tint2|xorg-server|linux-firmware|dbus|wpa_supplicant|hicolor-icon-theme'
 echo '### kernel'; uname -r; ls /boot
-echo '### services'; for s in lo net crond sshd; do [ -e /var/run/$s.pid ] && echo "pid $s"; done; pidof crond >/dev/null && echo "running crond"
+echo '### services'; for s in lo net crond sshd; do [ -e /var/run/$s.pid ] && echo "pid $s"; done; for p in crond dbus-daemon dhcpcd wpa_supplicant; do pidof $p >/dev/null && echo "running ${p%-daemon}"; done
+echo '### prtdirs'; grep -E '^prtdir' /etc/prt-get.conf
+echo '### ports_files'; ls -1 /etc/ports
 echo '### skel'; ls -A /etc/skel /etc/skel/.config
 echo '### tint2_launchers'; grep launcher_item_app /root/.config/tint2/tint2rc
+echo '### menu_installer_entries'; grep -c 'crux-installer\|mocinha\|INSTALL.txt' /root/.config/openbox/menu.xml /etc/skel/.config/openbox/menu.xml
 echo '### bash_profile'; tail -n 3 /root/.bash_profile
 echo '### efi'; [ -d /sys/firmware/efi ] && (efibootmgr 2>&1 | head -n 5; ls /boot/EFI) || echo BIOS
 echo '### rc_errors'; grep -iE 'error|fail' /var/log/messages 2>/dev/null | tail -n 10

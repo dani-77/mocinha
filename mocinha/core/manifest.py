@@ -109,6 +109,13 @@ class UsersConfig:
 
 
 @dataclass
+class NetworkConfig:
+    # True: write the machine's wireless interface (probed) into the target's
+    # native wireless configuration, through the sysconfig provider
+    configure_wireless: bool = False
+
+
+@dataclass
 class LiveOnlyConfig:
     """Live-session artifacts that must not persist on the target.
 
@@ -516,7 +523,7 @@ class BootstrapConfig:
     service_packages: Dict[str, List[str]] = field(default_factory=dict)  # service -> packages it needs
 
 
-SECTIONS = {"system", "install", "providers", "boot", "services", "users", "live_only", "target_files",
+SECTIONS = {"system", "install", "providers", "boot", "services", "users", "network", "live_only", "target_files",
             "live_files", "packages", "initramfs", "online", "bootstrap"}
 
 
@@ -528,6 +535,7 @@ class Manifest:
     boot: BootConfig
     services: ServicesConfig
     users: UsersConfig = field(default_factory=UsersConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
     live_only: LiveOnlyConfig = field(default_factory=LiveOnlyConfig)
     target_files: List[TargetFile] = field(default_factory=list)
     live_files: List[LiveFile] = field(default_factory=list)
@@ -663,6 +671,9 @@ class Manifest:
         users = UsersConfig(groups=groups, shell=t.get("shell"), password_hash=t.get("password_hash"),
                             primary_group=t.get("primary_group"))
 
+        t = _Table(data.get("network", {}), "[network]", {}, {"configure_wireless": bool})
+        network = NetworkConfig(configure_wireless=t.get("configure_wireless", False))
+
         live_only = _parse_live_only(data.get("live_only", {}))
         if live_only.packages and not providers.packages:
             raise ManifestError(
@@ -677,6 +688,7 @@ class Manifest:
             boot=boot,
             services=services,
             users=users,
+            network=network,
             live_only=live_only,
             target_files=_parse_target_files(data.get("target_files", [])),
             live_files=_parse_live_files(data.get("live_files", [])),

@@ -73,6 +73,8 @@ class SystemFacts:
     live_source: Optional[LiveSource] = None
     total_memory_bytes: int = 0
     available_tools: Dict[str, bool] = field(default_factory=dict)
+    # Wireless network interfaces of this machine (e.g. wlp3s0)
+    wireless_interfaces: List[str] = field(default_factory=list)
 
     def find_disk(self, path: str) -> Optional[DiskDevice]:
         for d in self.disks:
@@ -119,6 +121,7 @@ class SystemProbe:
             running_services=[],
             total_memory_bytes=mem_bytes,
             available_tools=tools_map,
+            wireless_interfaces=self._detect_wireless(sys_platform),
         )
 
         self.events.info(
@@ -163,6 +166,17 @@ class SystemProbe:
             return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         except Exception:
             return 0
+
+    def _detect_wireless(self, sys_platform: str) -> List[str]:
+        """Linux: interfaces under /sys/class/net with a wireless or phy80211 entry.
+
+        FreeBSD (wlanN cloned from a parent device in rc.conf) is not probed yet.
+        """
+        if sys_platform != "linux":
+            return []
+        net = self.root / "sys" / "class" / "net"
+        return sorted(i.name for i in (net.iterdir() if net.is_dir() else [])
+                      if (i / "wireless").exists() or (i / "phy80211").exists())
 
     def _detect_disks(self, sys_platform: str) -> List[DiskDevice]:
         devices: List[DiskDevice] = []

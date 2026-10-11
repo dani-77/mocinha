@@ -48,6 +48,7 @@ class TargetSummary:
     live_only_users: List[str] = field(default_factory=list)
     online: Optional[str] = None           # what will be fetched, or None when nothing is online
     online_skipped: Optional[str] = None   # declared online components the user declined
+    wireless: Optional[str] = None         # [network].configure_wireless: the interface, or why none is set
 
 
 @dataclass
@@ -91,6 +92,8 @@ class InstallationPlan:
         if self.summary.live_only_removed:
             lines.append(f"Live-only Clean:  {', '.join(self.summary.live_only_removed)}")
 
+        if self.summary.wireless:
+            lines.append(f"Wireless:         {self.summary.wireless}")
         if self.summary.online:
             lines.append(f"Online (network): {self.summary.online}")
         if self.summary.online_skipped:
