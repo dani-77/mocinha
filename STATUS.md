@@ -553,8 +553,23 @@ the next commit and only the first re-validated in QEMU:
   replace the target's entries (target links are removed, never written
   through); the wizard shows a short excerpt and keeps the whole log in
   `/var/log/mocinha.log` (or `/tmp/mocinha.log`). QEMU, BIOS, from this
-  repository: install passed and the installed system booted. Not yet
-  confirmed on real hardware.
+  repository: install passed and the installed system booted. Confirmed on
+  real hardware (Legion, ISO `vm-20261018-185325-XIgcd2`, Mocinha 0.1.8): the
+  launcher starts from fuzzel (foot opens briefly for the password), and a
+  full install with all of Slackware completed and boots.
+- **Locale and keymap chosen in the wizard did not reach the installed system
+  (0.1.8, Legion, 2026-10-18).** No `/etc/rc.d/rc.keymap` was written; the
+  system kept US and the Factory time zone. Not reproduced: from this
+  repository the wizard passes the chosen values into the plan, and the
+  command-line install in QEMU writes and verifies them. Spitfire also takes
+  its keyboard layout from its own `config.lua`, which no choice changed.
+  Maintainer decision: like Slackware's setup and setup2hd, a77ien leaves
+  locale and keymap to the installed system, so the `slackware` sysconfig
+  provider now offers only the time zone (timeconfig's behaviour); the
+  command line still takes `--locale` and `--keymap`. The time zone from the
+  wizard is still to be confirmed on real hardware.
+- The finish page was selected by a fixed index (7), which with a locale page
+  is the progress page; it is now looked up by name.
 
 - **LILO on a machine with two disks** (found with setup2hd on the same Legion,
   which then stopped with "Timestamp mismatch" / "Keytable read/checksum

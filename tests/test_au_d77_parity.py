@@ -185,6 +185,9 @@ class TestAuD77Parity(unittest.TestCase):
             module = __import__(f"mocinha.providers.sysconfig.{name}", fromlist=["x"])
             provider = next(v for k, v in vars(module).items() if k.endswith("SysconfigProvider"))()
             offered = provider.setting_choices()
+            if name == "slackware":  # a77ien: the time zone only, as Slackware's setup
+                self.assertEqual(set(offered), {"timezone"})
+                continue
             self.assertTrue({"keymap", "timezone"} <= set(offered), name)
             self.assertEqual("locale" in offered, name not in ("freebsd_rc", "chimera"), name)
 

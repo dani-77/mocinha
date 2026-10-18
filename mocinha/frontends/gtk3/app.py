@@ -885,7 +885,7 @@ class MocinhaGTKApp(Gtk.Window):
         return False
 
     def _on_execution_success(self) -> bool:
-        self.current_step_index = 7  # Finish page
+        self.current_step_index = [name for name, _ in self.pages].index("finish")
         self.stack.set_visible_child_name("finish")
         self._update_nav_buttons()
         return False

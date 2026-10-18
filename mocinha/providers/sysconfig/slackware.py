@@ -26,7 +26,7 @@ import subprocess
 from mocinha.core.errors import ExecutionError, VerificationError
 from mocinha.core.events import EventPhase, EventStream
 from mocinha.core.provider import ExecutionContext, ProviderContract
-from mocinha.providers.sysconfig import keymap_names, zone_names
+from mocinha.providers.sysconfig import zone_names
 from mocinha.providers.sysconfig.systemd import _normalized_locale
 
 KEYMAP_DIR = "usr/share/kbd/keymaps"
@@ -61,9 +61,13 @@ class SlackwareSysconfigProvider(ProviderContract):
         return ["sysconfig"]
 
     def setting_choices(self) -> Dict[str, List[str]]:
-        """Values the frontends can offer, read from the live (the target is a copy of it)."""
-        return {"locale": available_locales(self.live_root), "keymap": keymap_names(self.live_root, KEYMAP_DIR),
-                "timezone": zone_names(self.live_root)}
+        """Only the time zone is offered, as Slackware's setup and setup2hd do (timeconfig).
+
+        Locale and keymap are left to the installed system: on real hardware (Lenovo Legion, 0.1.8)
+        values chosen for them did not reach it, and Spitfire takes its keyboard layout from its own
+        config.lua, not rc.keymap. The command line still takes --locale and --keymap (tested in QEMU).
+        """
+        return {"timezone": zone_names(self.live_root)}
 
     def _problems(self, root: Path, context: ExecutionContext) -> List[str]:
         problems = []

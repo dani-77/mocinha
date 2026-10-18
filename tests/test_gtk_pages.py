@@ -79,6 +79,17 @@ class TestGtkPages(unittest.TestCase):
         self.assertIsNone(win._setting("timezone"))  # empty: keep the live's
         win.destroy()
 
+    def test_a77ien_offers_only_the_time_zone_and_finish_follows_the_pages(self) -> None:
+        win = self.window("a77ien.toml", "linux")
+        self.assertEqual(set(win.setting_combos), {"timezone"})  # as Slackware's setup (timeconfig)
+        win._on_execution_success()
+        self.assertEqual(win.pages[win.current_step_index][0], "finish")
+        win.destroy()
+        win = self.window("sysvd77.toml", "linux")  # with the locale page, "finish" is not at index 7
+        win._on_execution_success()
+        self.assertEqual(win.pages[win.current_step_index][0], "finish")
+        win.destroy()
+
     def test_long_installation_error_keeps_the_window_drawable(self) -> None:
         """a77ien on the Legion: past 40 % the wizard crashed with "Unable to create Cairo image surface"
         (GDK on Wayland) and a segmentation fault; the failure message went whole into an unwrapped label."""
