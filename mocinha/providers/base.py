@@ -211,6 +211,30 @@ def _live_tree(live_root: str, source: str) -> Path:
     return Path(live_root) / source.lstrip("/")
 
 
+def _copy_tree_over(src: Path, dst: Path) -> None:
+    """Like copytree(symlinks=True, dirs_exist_ok=True), but the live's entries replace what the target
+    already has. copytree cannot create a symlink where one exists (a77ien: the deployed packages already
+    hold /etc/ssl/certs/*.pem links when the generated store is copied over them). A target symlink is
+    removed, never written through: absolute links point into the live system, not the target."""
+    dst.mkdir(parents=True, exist_ok=True)
+    shutil.copystat(src, dst)
+    for entry in src.iterdir():
+        out = dst / entry.name
+        if entry.is_dir() and not entry.is_symlink():
+            if out.is_symlink() or (out.exists() and not out.is_dir()):
+                out.unlink()
+            _copy_tree_over(entry, out)
+            continue
+        if out.is_symlink() or out.is_file():
+            out.unlink()
+        elif out.is_dir():
+            shutil.rmtree(out)
+        if entry.is_symlink():
+            os.symlink(os.readlink(entry), out)
+        else:
+            shutil.copy2(entry, out)
+
+
 def copy_live_files(target_root: str, files: list, events: EventStream, live_root: str = "/") -> None:
     """Copies manifest-declared live files/directories to the target (symlinks inside trees are kept)."""
     for lf in files:
@@ -231,7 +255,7 @@ def copy_live_files(target_root: str, files: list, events: EventStream, live_roo
         if dst.is_symlink():
             dst.unlink()
         if src.is_dir():
-            shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=True)
+            _copy_tree_over(src, dst)
         else:
             shutil.copy2(src, dst)
             if lf.mode is not None:

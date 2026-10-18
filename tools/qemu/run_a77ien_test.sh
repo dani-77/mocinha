@@ -48,7 +48,8 @@ APPEND="$BOOTLINE 3 console=tty0 console=ttyS0,115200 mocinha.manifest=$MANIFEST
 echo "=== MOCINHA INSTALL TEST --- $ISO ($FIRMWARE, manifest $MANIFEST) -> $DISK"
 echo ">> append: $APPEND"
 
-rm -f "$DISK"; qemu-img create -q -f qcow2 "$DISK" 20G
+# a77ien ships all of Slackware but its desktops: the manifest requires 32 GiB.
+rm -f "$DISK"; qemu-img create -q -f qcow2 "$DISK" 40G
 FW=()
 if [ "$FIRMWARE" = uefi ]; then
     cp "$OVMF_VARS_TEMPLATE" "$WORK/ovmf-vars-$RUN.fd"

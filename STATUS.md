@@ -541,6 +541,20 @@ the next commit and only the first re-validated in QEMU:
   printed "No authentication agent found", exited 127, and the fallback opened
   foot ("Mocinha Installer") where pkexec asks for the password. Not yet
   confirmed on real hardware.
+- **The wizard crashed past 40 % (0.1.6, Legion, 2026-10-18).** GDK on Wayland:
+  "Unable to create Cairo image surface: invalid value (typically too big)",
+  then a segmentation fault, with no message. Reproduced in QEMU with the same
+  ISO (`run_a77ien_test.sh --packaged`): "Copy live files to the target" failed
+  with `[Errno 17] File exists` on every `/etc/ssl/certs/*.pem` link, because
+  with all of Slackware the deployed packages already have those links when the
+  generated store from zzzconf is copied (copytree cannot replace a symlink).
+  The failure message (hundreds of entries on one line) went whole into the
+  error label and dialog, which grew past what GDK can draw. Fixed: live trees
+  replace the target's entries (target links are removed, never written
+  through); the wizard shows a short excerpt and keeps the whole log in
+  `/var/log/mocinha.log` (or `/tmp/mocinha.log`). QEMU, BIOS, from this
+  repository: install passed and the installed system booted. Not yet
+  confirmed on real hardware.
 
 - **LILO on a machine with two disks** (found with setup2hd on the same Legion,
   which then stopped with "Timestamp mismatch" / "Keytable read/checksum

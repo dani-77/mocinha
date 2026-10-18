@@ -79,6 +79,24 @@ class TestGtkPages(unittest.TestCase):
         self.assertIsNone(win._setting("timezone"))  # empty: keep the live's
         win.destroy()
 
+    def test_long_installation_error_keeps_the_window_drawable(self) -> None:
+        """a77ien on the Legion: past 40 % the wizard crashed with "Unable to create Cairo image surface"
+        (GDK on Wayland) and a segmentation fault; the failure message went whole into an unwrapped label."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "mocinha.log"
+            with mock.patch("mocinha.frontends.gtk3.app.LOG_LOCATIONS", (log,)):
+                win = self.window("a77ien.toml", "linux")
+            message = "cp: cannot create " + "/very/long/path" * 4000 + "\n" + "more output\n" * 3000
+            with mock.patch.object(win, "_show_error_dialog") as dialog:
+                win._on_execution_error(message)
+            self.assertLess(win.progress_title.get_preferred_width()[1], 2000)
+            shown = dialog.call_args[0][1]
+            self.assertLess(len(shown), 1500)
+            self.assertIn(str(log), shown)
+            self.assertIn(message.strip(), log.read_text() + win.log_text_view.get_buffer().get_property("text"))
+            win.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

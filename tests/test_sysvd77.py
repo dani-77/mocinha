@@ -3,6 +3,7 @@ settings, dracut, live files, GPT-on-BIOS/swap layouts and the target chroot."""
 
 from pathlib import Path
 from unittest import mock
+import os
 import subprocess
 import tempfile
 import unittest
@@ -245,6 +246,31 @@ class TestSysvd77(unittest.TestCase):
         with self.assertRaises(ExecutionError):  # not optional and absent
             base.copy_live_files(str(self.target), [LiveFile("/etc/absent", "/etc/absent")], self.stream,
                                  live_root=str(live))
+
+    def test_live_tree_replaces_existing_target_links(self) -> None:
+        """a77ien with all of Slackware: the deployed packages already have /etc/ssl/certs/*.pem links when
+        the live's generated store is copied, and copytree failed with "File exists" on each one."""
+        live = self.root / "live"
+        certs = live / "zzzconf/etc/ssl/certs"
+        certs.mkdir(parents=True)
+        (certs / "ca-certificates.crt").write_text("bundle")
+        (certs / "A.pem").symlink_to("/usr/share/ca-certificates/mozilla/A.crt")
+        (certs / "5ad8a5d6.0").symlink_to("A.pem")
+        old = self.target / "etc/ssl/certs"
+        old.mkdir(parents=True)
+        (old / "A.pem").symlink_to("/usr/share/ca-certificates/mozilla/old-A.crt")
+        outside = self.root / "outside.crt"
+        outside.write_text("live file")
+        (old / "ca-certificates.crt").symlink_to(outside)   # must be replaced, not written through
+        (old / "5ad8a5d6.0").write_text("stale")
+        files = [LiveFile("/zzzconf/etc/ssl/certs", "/etc/ssl/certs")]
+        base.copy_live_files(str(self.target), files, self.stream, live_root=str(live))
+        base.verify_live_files(str(self.target), files, self.stream, live_root=str(live))
+        self.assertEqual(os.readlink(old / "A.pem"), "/usr/share/ca-certificates/mozilla/A.crt")
+        self.assertEqual(os.readlink(old / "5ad8a5d6.0"), "A.pem")
+        self.assertFalse((old / "ca-certificates.crt").is_symlink())
+        self.assertEqual((old / "ca-certificates.crt").read_text(), "bundle")
+        self.assertEqual(outside.read_text(), "live file")
 
     # --- partitioning ------------------------------------------------------
     def _layout(self, firmware: str, table, swap) -> tuple:

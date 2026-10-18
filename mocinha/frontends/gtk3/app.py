@@ -5,6 +5,7 @@ Consumes mocinha.core via public API only.
 GTK objects and widgets NEVER cross into the engine.
 """
 
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 import sys
@@ -13,7 +14,8 @@ import threading
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import GdkPixbuf, GLib, Gtk
+gi.require_version("Pango", "1.0")
+from gi.repository import GdkPixbuf, GLib, Gtk, Pango
 
 from mocinha.core.errors import ExecutionError, MocinhaError, ResolutionError
 from mocinha.core.events import Event, EventPhase, EventStream
@@ -37,6 +39,9 @@ class MocinhaGTKApp(Gtk.Window):
 
         self.manifest = manifest
         self.events = EventStream()
+        # The window's log is lost if the window goes; keep a copy on disk from the first event.
+        self.log_path = open_log_file()
+        self.events.subscribe(self._write_log_file)
         self.registry = create_default_registry(self.events)
         self.facts = SystemProbe(self.events).probe_facts()
         self.resolver = InstallationResolver(self.facts, self.manifest, self.registry, self.events)
@@ -886,13 +891,28 @@ class MocinhaGTKApp(Gtk.Window):
         return False
 
     def _on_execution_error(self, err_msg: str) -> bool:
-        self.progress_title.set_markup(f"<span color='#d9534f' weight='bold'>Installation failed:</span> {err_msg}")
-        self._show_error_dialog("Execution Error", err_msg)
+        # The full message (it may hold a command's whole output) goes to the log; labels get a short
+        # excerpt: an unwrapped label as wide as a long output makes the window larger than GDK can draw
+        # on Wayland ("Unable to create Cairo image surface"), and GTK then crashes.
+        self._append_log(f"Installation failed:\n{err_msg}\n")
+        self.progress_title.set_markup("<span color='#d9534f' weight='bold'>Installation failed:</span> "
+                                       + GLib.markup_escape_text(short_message(err_msg, lines=1, chars=120)))
+        log_note = f"\n\nFull message and log: {self.log_path}" if self.log_path else ""
+        self._show_error_dialog("Execution Error", short_message(err_msg) + log_note)
         return False
 
     def _on_event(self, event: Event) -> None:
         log_line = event.format_log_line() + "\n"
         GLib.idle_add(self._append_log, log_line)
+
+    def _write_log_file(self, event: Event) -> None:
+        if self.log_path is None:
+            return
+        try:
+            with open(self.log_path, "a") as f:
+                f.write(event.format_log_line() + "\n")
+        except OSError:
+            self.log_path = None
 
     def _append_log(self, text: str) -> bool:
         buf = self.log_text_view.get_buffer()
@@ -923,8 +943,40 @@ class MocinhaGTKApp(Gtk.Window):
             text=title,
         )
         dialog.format_secondary_text(message)
+        # MessageDialog labels wrap at spaces only; a long word must not widen the dialog.
+        for label in dialog.get_message_area().get_children():
+            if isinstance(label, Gtk.Label):
+                label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                label.set_max_width_chars(80)
         dialog.run()
         dialog.destroy()
+
+
+# Where the wizard keeps its log: the live's /var/log (it runs as root), else /tmp
+LOG_LOCATIONS = (Path("/var/log/mocinha.log"), Path("/tmp/mocinha.log"))
+
+
+def open_log_file() -> Optional[Path]:
+    """Start a new log at the first writable location; None when none is."""
+    for path in LOG_LOCATIONS:
+        try:
+            with open(path, "w") as f:
+                f.write(f"Mocinha log, {datetime.now().isoformat(timespec='seconds')}\n")
+            return path
+        except OSError:
+            continue
+    return None
+
+
+def short_message(text: str, lines: int = 12, chars: int = 1200) -> str:
+    """The first lines of a message, for labels; the full text is in the log."""
+    kept = text.strip().splitlines()[:lines]
+    short = "\n".join(line if len(line) <= chars else line[:chars] + "…" for line in kept)
+    if len(short) > chars:
+        short = short[:chars] + "…"
+    elif len(text.strip().splitlines()) > lines:
+        short += "\n…"
+    return short
 
 
 # Staging directory where the target is mounted during installation
