@@ -23,7 +23,7 @@ platform = "linux"
 [install]
 method = "local copy"
 source = "/mnt/liveslakfs"
-min_disk_size_bytes = 8589934592
+min_disk_size_bytes = 34359738368   # 32 GiB: a77ien ships all of Slackware but its desktops (~20 GiB installed)
 root_filesystem = "ext4"
 root_mount_options = "defaults"
 esp_size = "512m"                    # ELILO keeps a copy of the kernel and initrd on the ESP
