@@ -27,7 +27,7 @@ A77IEN = Path(__file__).parent.parent / "examples" / "manifests" / "a77ien.toml"
 def resolve(firmware: FirmwareType, bootloader: str):
     manifest = Manifest.load_from_file(A77IEN)
     facts = SystemFacts(platform_name="linux", arch="x86_64", firmware=firmware,
-                        disks=[DiskDevice(path="/dev/vda", size_bytes=20 * 2**30, model="QEMU")], running_services=[])
+                        disks=[DiskDevice(path="/dev/vda", size_bytes=40 * 2**30, model="QEMU")], running_services=[])
     registry = create_default_registry(EventStream())
     plan = InstallationResolver(facts, manifest, registry, EventStream()).resolve(UserChoices(
         target_disk="/dev/vda", bootloader=bootloader, username="dani", password="pw", hostname="a77",
