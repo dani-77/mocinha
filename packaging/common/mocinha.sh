@@ -40,13 +40,14 @@ terminal_elevation() {
 # terminal check alone would pick sudo/doas, which then ask where nobody sees.
 if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v pkexec >/dev/null 2>&1; then
 	set -- $(display_args) -- "$@"
-	# With no agent, pkexec falls back to its own text agent on stdin when it is a
-	# terminal. A console tty inherited from the session's start (a77ien: Spitfire
-	# from tty1's .bash_profile) would make it ask there, unseen, and wait forever;
-	# without a terminal it exits 127 instead and the fallbacks below take over.
+	# With no agent, pkexec falls back to its own text agent on the controlling
+	# terminal (/dev/tty, whatever stdin is). A console tty inherited from the
+	# session's start (a77ien: Spitfire from tty1's .bash_profile) would make it
+	# ask there, unseen, and wait forever; --disable-internal-agent makes it exit
+	# 127 instead, and the fallbacks below take over.
 	case "$(tty 2>/dev/null)" in
 		/dev/pts/*) pkexec "$PREFIX/lib/mocinha/mocinha-root" "$@" ;;
-		*) pkexec "$PREFIX/lib/mocinha/mocinha-root" "$@" </dev/null ;;
+		*) pkexec --disable-internal-agent "$PREFIX/lib/mocinha/mocinha-root" "$@" </dev/null ;;
 	esac
 	status=$?
 	# 127: no authorization could be obtained (e.g. no polkit agent in the session)

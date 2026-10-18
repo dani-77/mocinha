@@ -48,7 +48,7 @@ class TestLauncher(unittest.TestCase):
     def test_graphical_session_uses_polkit_with_display_arguments(self) -> None:
         proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1", "XDG_RUNTIME_DIR": "/run/user/1000"})
         self.assertEqual(proc.returncode, 0)
-        self.assertEqual(calls.strip(), "pkexec /usr/lib/mocinha/mocinha-root WAYLAND_DISPLAY=wayland-1 "
+        self.assertEqual(calls.strip(), "pkexec --disable-internal-agent /usr/lib/mocinha/mocinha-root WAYLAND_DISPLAY=wayland-1 "
                                         "XDG_RUNTIME_DIR=/run/user/1000 -- install --confirm")
 
     def test_prefix_follows_the_install_location(self) -> None:
@@ -58,7 +58,7 @@ class TestLauncher(unittest.TestCase):
             installed.parent.mkdir(parents=True)
             installed.write_text(WRAPPER.read_text())
             proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1"}, wrapper=installed)
-            self.assertEqual(calls.split()[:2], ["pkexec", f"{tmp}/usr/local/lib/mocinha/mocinha-root"])
+            self.assertEqual(calls.split()[:3], ["pkexec", "--disable-internal-agent", f"{tmp}/usr/local/lib/mocinha/mocinha-root"])
             proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1"}, pkexec_status=127, terminals=["foot"],
                                            wrapper=installed)
             self.assertIn(f"foot --title Mocinha Installer {tmp}/usr/local/bin/mocinha install --confirm", calls)
@@ -96,9 +96,11 @@ class TestLauncher(unittest.TestCase):
 
     def test_inherited_console_tty_never_reaches_pkexec_stdin(self) -> None:
         """a77ien on bare metal: launched from fuzzel nothing happened. Spitfire is started from tty1,
-        apps inherit it, and pkexec without an agent asked on tty1 with its text agent, unseen."""
+        apps inherit it, and pkexec without an agent asked on tty1 with its text agent, unseen.
+        Its text agent opens the controlling terminal (/dev/tty), so redirecting stdin is not
+        enough (0.1.3 to 0.1.6 still hung); only --disable-internal-agent stops it."""
         script = WRAPPER.read_text()
-        self.assertIn('pkexec "$PREFIX/lib/mocinha/mocinha-root" "$@" </dev/null', script)
+        self.assertIn('pkexec --disable-internal-agent "$PREFIX/lib/mocinha/mocinha-root" "$@" </dev/null', script)
         proc, calls = self.run_wrapper({"WAYLAND_DISPLAY": "wayland-1"}, pkexec_status=127, terminals=["foot"],
                                        tty="/dev/tty1")
         self.assertIn("foot --title Mocinha Installer /usr/bin/mocinha install --confirm", calls)
