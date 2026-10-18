@@ -567,6 +567,19 @@ the next commit and only the first re-validated in QEMU:
   locale and keymap to the installed system, so the `slackware` sysconfig
   provider now offers only the time zone (timeconfig's behaviour); the
   command line still takes `--locale` and `--keymap`.
+  - Reference for bringing them back: Salix (Slackware-based) sets both on
+    an installed system with its `salixtools` (github.com/gapan/salixtools,
+    read 2026-10-18). `keyboardsetup` writes `/etc/rc.d/rc.keymap` (created
+    when missing) with `loadkeys -u <map>`, and the X11 layout in
+    `/etc/X11/xorg.conf.d/10-keymap.conf` (`XkbLayout`, `XkbVariant`,
+    `XkbOptions`). `localesetup` replaces `export LANG=` in
+    `/etc/profile.d/lang.sh` and sets `LANG=` in `/etc/environment`. These
+    are the files this provider already writes (rc.keymap without `-u`, no
+    `/etc/environment`), so the real-hardware failure is a Mocinha bug still
+    to reproduce (with the GTK wizard in QEMU), not a Slackware limit. The X11
+    file does not reach Spitfire (Wayland): a77ien would need the layout in
+    Spitfire's `config.lua` (`spitfire.keyboard`), in the skeleton or the
+    new user's home.
 - The finish page was selected by a fixed index (7), which with a locale page
   is the progress page; it is now looked up by name.
 
